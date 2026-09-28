@@ -4,10 +4,26 @@ import { BacklogClient, type BacklogTask } from "../integrations/backlog.ts";
 import { JiraClient, type JiraIssue } from "../integrations/jira.ts";
 import { FrontmatterStore } from "../state/store.ts";
 import { promptForConflictResolution } from "../ui/conflict-resolver.ts";
+import {
+	type FieldMapping,
+	type MappedValue,
+	loadFieldMappings,
+	readTaskFrontmatter,
+} from "../utils/field-mapping.ts";
 import { getTaskFilePath, updateJiraMetadata } from "../utils/frontmatter.ts";
 import { getJiraClientOptions } from "../utils/jira-config.ts";
 import { logger } from "../utils/logger.ts";
 import {
+	MappedFieldPushError,
+	type MappedFieldState,
+	applyMappedFieldMerge,
+	detectMappedFieldConflicts,
+	getOverriddenCoreFields,
+	parseManualMappedValue,
+	planMappedFieldMerge,
+} from "../utils/mapped-field-sync.ts";
+import {
+	type NormalizedPayload,
 	computeHash,
 	normalizeBacklogTask,
 	normalizeJiraIssue,
@@ -51,6 +67,8 @@ export interface Conflict {
 	jiraIssue: JiraIssue;
 	baseBacklog: unknown;
 	baseJira: unknown;
+	/** State of mapped fields when the conflict was detected */
+	mappedState?: MappedFieldState;
 }
 
 export interface FieldConflict {
@@ -58,6 +76,8 @@ export interface FieldConflict {
 	backlogValue: unknown;
 	jiraValue: unknown;
 	baseValue: unknown;
+	/** Set when the field is a user-defined field mapping */
+	mapping?: FieldMapping;
 }
 
 /**
@@ -108,6 +128,16 @@ export async function sync(options: SyncOptions = {}): Promise<SyncResult> {
 		logger.info({ options }, "Starting sync operation");
 	}
 
+	// Validate field mappings up front so config errors are reported clearly
+	let fieldMappings: FieldMapping[];
+	try {
+		fieldMappings = loadFieldMappings();
+	} catch (error) {
+		if (restoreIo) restoreIo();
+		logger.level = originalLevel;
+		throw error;
+	}
+
 	const store = new FrontmatterStore();
 	const backlog = new BacklogClient();
 	// Build Jira client options separately (readability + allows silent mode)
@@ -146,6 +176,7 @@ export async function sync(options: SyncOptions = {}): Promise<SyncResult> {
 						backlog,
 						jira,
 						strategy,
+						fieldMappings,
 						dryRun: options.dryRun || false,
 					});
 
@@ -168,8 +199,15 @@ export async function sync(options: SyncOptions = {}): Promise<SyncResult> {
 					const m = store.getMapping(taskId);
 					const jiraKey = m?.jiraKey;
 					const minimal = `${taskId}${jiraKey ? ` (${jiraKey})` : ""} sync failed`;
-					// Push minimal message for user-friendly output
-					result.failed.push({ taskId, error: minimal });
+					// Push minimal message for user-friendly output; mapped field
+					// failures name the fields so they can be fixed
+					result.failed.push({
+						taskId,
+						error:
+							error instanceof MappedFieldPushError
+								? `${minimal}\n${error.message}`
+								: minimal,
+					});
 					// Smart proxy hint detection
 					const em = errorMsg.toLowerCase();
 					if (
@@ -246,6 +284,7 @@ async function syncTask(
 		backlog: BacklogClient;
 		jira: JiraClient;
 		strategy: ConflictStrategy;
+		fieldMappings: FieldMapping[];
 		dryRun: boolean;
 	},
 ): Promise<
@@ -253,7 +292,7 @@ async function syncTask(
 	| { type: "conflict"; resolution: string }
 	| { type: "skipped"; reason: string }
 > {
-	const { store, backlog, jira, strategy, dryRun } = context;
+	const { store, backlog, jira, strategy, fieldMappings, dryRun } = context;
 
 	// Get mapping
 	const mapping = store.getMapping(taskId);
@@ -265,8 +304,12 @@ async function syncTask(
 	const task = await backlog.getTask(taskId);
 	const issue = await jira.getIssue(mapping.jiraKey);
 
-	const backlogPayload = normalizeBacklogTask(task);
-	const jiraPayload = normalizeJiraIssue(issue);
+	const frontmatter = readTaskFrontmatter(taskId);
+	const backlogPayload = normalizeBacklogTask(task, {
+		fieldMappings,
+		frontmatter,
+	});
+	const jiraPayload = normalizeJiraIssue(issue, { fieldMappings });
 	const backlogHash = computeHash(backlogPayload);
 	const jiraHash = computeHash(jiraPayload);
 
@@ -278,6 +321,7 @@ async function syncTask(
 		snapshots.backlog,
 		snapshots.jira,
 		{ backlog: backlogPayload, jira: jiraPayload },
+		{ fieldMappings },
 	);
 
 	logger.debug({ taskId, state: state.state }, "Sync state classified");
@@ -291,34 +335,48 @@ async function syncTask(
 		case "NeedsPush":
 			// Backlog changed, push to Jira
 			if (!dryRun) {
-				await push({ taskIds: [taskId] });
+				assertSucceeded(await push({ taskIds: [taskId] }));
 			}
 			return { type: "synced", direction: "push" };
 
 		case "NeedsPull":
 			// Jira changed, pull to Backlog
 			if (!dryRun) {
-				await pull({ taskIds: [taskId] });
+				assertSucceeded(await pull({ taskIds: [taskId] }));
 			}
 			return { type: "synced", direction: "pull" };
 
-		case "Conflict":
+		case "Conflict": {
 			// Both changed - resolve conflict
+			const mappedState: MappedFieldState = {
+				current: { backlog: backlogPayload, jira: jiraPayload },
+				base: {
+					backlog: parsePayload(snapshots.backlog?.payload),
+					jira: parsePayload(snapshots.jira?.payload),
+				},
+				frontmatter,
+				issue,
+			};
 			return await resolveConflict(
 				{
 					taskId,
 					jiraKey: mapping.jiraKey,
-					fields: detectFieldConflicts(task, issue, snapshots),
+					fields: [
+						...detectFieldConflicts(task, issue, snapshots, fieldMappings),
+						...detectMappedFieldConflicts(mappedState, fieldMappings),
+					],
 					backlogTask: task,
 					jiraIssue: issue,
 					baseBacklog: snapshots.backlog
 						? JSON.parse(snapshots.backlog.payload)
 						: null,
 					baseJira: snapshots.jira ? JSON.parse(snapshots.jira.payload) : null,
+					mappedState,
 				},
 				strategy,
-				{ store, backlog, jira, dryRun },
+				{ store, backlog, jira, fieldMappings, dryRun },
 			);
+		}
 
 		case "Unknown":
 			// No baseline - treat as first sync
@@ -361,18 +419,47 @@ async function syncTask(
 }
 
 /**
- * Detect field-level conflicts
+ * Surface a failed inner push/pull so the task is reported as failed rather
+ * than synced. Mapped field failures keep their per-field detail.
+ */
+function assertSucceeded(result: {
+	failed: Array<{ error: string; mappedFieldError?: MappedFieldPushError }>;
+}): void {
+	const failure = result.failed[0];
+	if (failure) {
+		throw failure.mappedFieldError ?? new Error(failure.error);
+	}
+}
+
+function parsePayload(
+	payload: string | undefined,
+): Partial<NormalizedPayload> | null {
+	if (!payload) return null;
+	try {
+		return JSON.parse(payload) as Partial<NormalizedPayload>;
+	} catch {
+		return null;
+	}
+}
+
+/**
+ * Detect field-level conflicts on the built-in fields.
+ * Priority and labels are skipped when a field mapping carries them; mapped
+ * fields are checked by detectMappedFieldConflicts.
  */
 function detectFieldConflicts(
 	task: BacklogTask,
 	issue: JiraIssue,
 	snapshots: ReturnType<typeof FrontmatterStore.prototype.getSnapshots>,
+	fieldMappings: FieldMapping[] = [],
 ): FieldConflict[] {
 	const conflicts: FieldConflict[] = [];
 
 	if (!snapshots.backlog || !snapshots.jira) {
 		return conflicts;
 	}
+
+	const overridden = getOverriddenCoreFields(fieldMappings);
 
 	const baseBacklog = JSON.parse(snapshots.backlog.payload);
 	const baseJira = JSON.parse(snapshots.jira.payload);
@@ -425,6 +512,7 @@ function detectFieldConflicts(
 
 	// Check priority
 	if (
+		!overridden.has("priority") &&
 		task.priority !== baseBacklog.priority &&
 		issue.priority !== baseJira.priority
 	) {
@@ -442,7 +530,11 @@ function detectFieldConflicts(
 	const issueLabelsStr = JSON.stringify(issue.labels || []);
 	const baseJiraLabelsStr = JSON.stringify(baseJira.labels);
 
-	if (taskLabelsStr !== baseLabelsStr && issueLabelsStr !== baseJiraLabelsStr) {
+	if (
+		!overridden.has("labels") &&
+		taskLabelsStr !== baseLabelsStr &&
+		issueLabelsStr !== baseJiraLabelsStr
+	) {
 		conflicts.push({
 			field: "labels",
 			backlogValue: task.labels,
@@ -464,10 +556,11 @@ async function resolveConflict(
 		store: FrontmatterStore;
 		backlog: BacklogClient;
 		jira: JiraClient;
+		fieldMappings: FieldMapping[];
 		dryRun: boolean;
 	},
 ): Promise<{ type: "conflict"; resolution: string }> {
-	const { store, backlog, jira, dryRun } = context;
+	const { store, backlog, jira, fieldMappings, dryRun } = context;
 
 	logger.info(
 		{ taskId: conflict.taskId, strategy, fieldCount: conflict.fields.length },
@@ -476,16 +569,22 @@ async function resolveConflict(
 
 	switch (strategy) {
 		case "prefer-backlog":
-			// Push Backlog changes to Jira
+			// Push Backlog changes to Jira (push honours mapping direction:
+			// pull-only mapped fields are left as they are)
 			if (!dryRun) {
-				await push({ taskIds: [conflict.taskId], force: true });
+				assertSucceeded(
+					await push({ taskIds: [conflict.taskId], force: true }),
+				);
 			}
 			return { type: "conflict", resolution: "preferred-backlog" };
 
 		case "prefer-jira":
-			// Pull Jira changes to Backlog
+			// Pull Jira changes to Backlog (pull honours mapping direction:
+			// push-only mapped fields are left as they are)
 			if (!dryRun) {
-				await pull({ taskIds: [conflict.taskId], force: true });
+				assertSucceeded(
+					await pull({ taskIds: [conflict.taskId], force: true }),
+				);
 			}
 			return { type: "conflict", resolution: "preferred-jira" };
 
@@ -500,7 +599,13 @@ async function resolveConflict(
 						conflict.taskId,
 						conflict.jiraKey,
 						resolution.resolutions,
-						{ backlog, jira, store },
+						{
+							backlog,
+							jira,
+							store,
+							fieldMappings,
+							mappedState: conflict.mappedState,
+						},
 					);
 
 					// Save preference if requested
@@ -516,6 +621,9 @@ async function resolveConflict(
 
 				return { type: "conflict", resolution: "user-resolved" };
 			} catch (error) {
+				if (error instanceof MappedFieldPushError) {
+					throw error;
+				}
 				logger.error(
 					{ taskId: conflict.taskId, error },
 					"Interactive resolution failed",
@@ -571,15 +679,32 @@ async function applyFieldResolutions(
 		backlog: BacklogClient;
 		jira: JiraClient;
 		store: FrontmatterStore;
+		fieldMappings?: FieldMapping[];
+		mappedState?: MappedFieldState;
 	},
 ): Promise<void> {
-	const { backlog, jira, store } = context;
+	const { backlog, jira, store, fieldMappings = [], mappedState } = context;
 
 	// Group resolutions by source
 	const backlogUpdates: Record<string, unknown> = {};
 	const jiraUpdates: Record<string, unknown> = {};
 
+	// Mapped fields are resolved individually after the built-in fields
+	const mappingsByTarget = new Map(fieldMappings.map((m) => [m.backlog, m]));
+	const mappedResolutions = new Map<string, MappedValue>();
+
 	for (const resolution of resolutions) {
+		const fieldMapping = mappingsByTarget.get(resolution.field);
+		if (fieldMapping && fieldMapping.direction === "both") {
+			mappedResolutions.set(
+				resolution.field,
+				resolution.source === "manual"
+					? parseManualMappedValue(resolution.value, fieldMapping)
+					: (resolution.value as MappedValue),
+			);
+			continue;
+		}
+
 		const fieldKey = resolution.field.replace("/", "_"); // Normalize field names
 
 		if (resolution.source === "backlog" || resolution.source === "manual") {
@@ -597,7 +722,7 @@ async function applyFieldResolutions(
 			{ taskId, fields: Object.keys(backlogUpdates) },
 			"Updating Backlog from Jira",
 		);
-		await pull({ taskIds: [taskId], force: true });
+		assertSucceeded(await pull({ taskIds: [taskId], force: true }));
 	}
 
 	// Update Jira if needed
@@ -606,7 +731,31 @@ async function applyFieldResolutions(
 			{ jiraKey, fields: Object.keys(jiraUpdates) },
 			"Updating Jira from Backlog",
 		);
-		await push({ taskIds: [taskId], force: true });
+		assertSucceeded(await push({ taskIds: [taskId], force: true }));
+	}
+
+	// Merge mapped fields: one-sided changes propagate, conflicting ones take
+	// the chosen value, and each mapping's direction is honoured. Applied last
+	// so the built-in pull/push above cannot overwrite the choices.
+	if (mappedState && fieldMappings.length > 0) {
+		const plan = planMappedFieldMerge(
+			mappedState,
+			fieldMappings,
+			mappedResolutions,
+		);
+		if (plan.length > 0) {
+			const failures = await applyMappedFieldMerge(plan, {
+				taskId,
+				issueKey: jiraKey,
+				backlog,
+				jira,
+				frontmatter: readTaskFrontmatter(taskId),
+				issue: await jira.getIssue(jiraKey),
+			});
+			if (failures.length > 0) {
+				throw new MappedFieldPushError(jiraKey, failures);
+			}
+		}
 	}
 
 	// Update snapshots after resolution

@@ -15,7 +15,6 @@ import {
 	type FieldMapping,
 	type MappedCliUpdates,
 	buildMappedFieldUpdates,
-	getPullMappings,
 	hasMappedFieldUpdates,
 	isCoreOverrideTarget,
 	loadFieldMappings,
@@ -28,6 +27,7 @@ import {
 } from "../utils/frontmatter.ts";
 import { getJiraClientOptions } from "../utils/jira-config.ts";
 import { logger } from "../utils/logger.ts";
+import { recordSyncedSnapshots } from "../utils/mapped-field-sync.ts";
 import {
 	computeHash,
 	normalizeBacklogTask,
@@ -186,7 +186,6 @@ export async function pull(options: PullOptions = {}): Promise<PullResult> {
 	}
 
 	logger.info({ result }, "Pull operation completed");
-	process.exit(0);
 	return result;
 }
 
@@ -465,14 +464,16 @@ async function pullTask(
 
 		// Update snapshots with freshly updated data
 		const updatedTask = await backlog.getTask(taskId);
-		const syncedHash = computeHash(normalizeJiraIssue(issue));
-		store.setSnapshot(
+		recordSyncedSnapshots(
+			store,
 			taskId,
-			"backlog",
-			syncedHash,
-			normalizeBacklogTask(updatedTask),
+			{
+				backlog: normalizeBacklogTask(updatedTask),
+				jira: normalizeJiraIssue(issue),
+			},
+			"jira",
+			fieldMappings,
 		);
-		store.setSnapshot(taskId, "jira", syncedHash, normalizeJiraIssue(issue));
 
 		store.updateSyncState(taskId, {
 			lastSyncAt: new Date().toISOString(),
@@ -533,11 +534,10 @@ export function buildBacklogUpdates(
 } {
 	const updates: Record<string, unknown> = {};
 
-	// Core fields replaced by a field mapping are handled by the mapping
+	// Core fields replaced by a field mapping (in any direction) are handled
+	// by the mapping; the built-in Jira field is then not synced
 	const overridden = new Set(
-		getPullMappings(fieldMappings)
-			.map((m) => m.backlog)
-			.filter(isCoreOverrideTarget),
+		fieldMappings.map((m) => m.backlog).filter(isCoreOverrideTarget),
 	);
 
 	// Summary -> Title (sanitized for YAML safety)
@@ -828,14 +828,19 @@ async function importJiraIssue(
 		}
 	}
 
+	// Built-in priority/labels are not synced when a mapping replaces them
+	const overridden = new Set(
+		fieldMappings.map((m) => m.backlog).filter(isCoreOverrideTarget),
+	);
+
 	// Create Backlog task with sanitized title
 	const taskId = await backlog.createTask({
 		title: sanitizeTitle(issue.summary),
 		description: cleanDescription,
 		status: mapJiraStatusToBacklog(issue.status, projectKey),
 		assignee: mappedAssignee || issue.assignee,
-		labels: issue.labels,
-		priority: issue.priority,
+		labels: overridden.has("labels") ? undefined : issue.labels,
+		priority: overridden.has("priority") ? undefined : issue.priority,
 		// Add acceptance criteria during creation
 		ac: acceptanceCriteria.map((ac) => ac.text),
 	});

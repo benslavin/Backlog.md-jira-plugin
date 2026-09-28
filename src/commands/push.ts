@@ -4,9 +4,23 @@ import { BacklogClient, type BacklogTask } from "../integrations/backlog.ts";
 import { JiraClient, type JiraIssue } from "../integrations/jira.ts";
 import { FrontmatterStore } from "../state/store.ts";
 import { mapBacklogAssigneeToJira } from "../utils/assignee-mapping.ts";
+import {
+	type FieldMapping,
+	buildMappedJiraFields,
+	loadFieldMappings,
+	readTaskFrontmatter,
+} from "../utils/field-mapping.ts";
 import { getTaskFilePath, updateJiraMetadata } from "../utils/frontmatter.ts";
 import { getJiraClientOptions } from "../utils/jira-config.ts";
 import { logger } from "../utils/logger.ts";
+import {
+	MappedFieldPushError,
+	createIssueWithMappedFields,
+	getOverriddenCoreFields,
+	recordPartialPush,
+	recordSyncedSnapshots,
+	updateIssueWithMappedFields,
+} from "../utils/mapped-field-sync.ts";
 import {
 	computeHash,
 	mergeDescriptionWithAc,
@@ -29,7 +43,12 @@ export interface PushOptions {
 export interface PushResult {
 	success: boolean;
 	pushed: string[];
-	failed: Array<{ taskId: string; error: string }>;
+	failed: Array<{
+		taskId: string;
+		error: string;
+		/** Set when only mapped fields failed; names each field */
+		mappedFieldError?: MappedFieldPushError;
+	}>;
 	skipped: string[];
 }
 
@@ -45,6 +64,15 @@ export async function push(options: PushOptions = {}): Promise<PushResult> {
 	}
 
 	logger.info({ options }, "Starting push operation");
+
+	// Validate field mappings up front so config errors are reported clearly
+	let fieldMappings: FieldMapping[];
+	try {
+		fieldMappings = loadFieldMappings();
+	} catch (error) {
+		logger.level = originalLevel;
+		throw error;
+	}
 
 	const store = new FrontmatterStore();
 	const backlog = new BacklogClient();
@@ -86,6 +114,7 @@ export async function push(options: PushOptions = {}): Promise<PushResult> {
 						jira,
 						projectKey,
 						issueType,
+						fieldMappings,
 						force: options.force || false,
 						dryRun: options.dryRun || false,
 					});
@@ -95,7 +124,13 @@ export async function push(options: PushOptions = {}): Promise<PushResult> {
 				} catch (error) {
 					const errorMsg =
 						error instanceof Error ? error.message : String(error);
-					result.failed.push({ taskId, error: errorMsg });
+					result.failed.push({
+						taskId,
+						error: errorMsg,
+						...(error instanceof MappedFieldPushError
+							? { mappedFieldError: error }
+							: {}),
+					});
 					logger.error({ taskId, error: errorMsg }, "Failed to push task");
 					result.success = false;
 				}
@@ -190,12 +225,22 @@ async function pushTask(
 		jira: JiraClient;
 		projectKey: string;
 		issueType: string;
+		fieldMappings: FieldMapping[];
 		force: boolean;
 		dryRun: boolean;
 	},
 ): Promise<void> {
-	const { store, backlog, jira, projectKey, issueType, force, dryRun } =
-		context;
+	const {
+		store,
+		backlog,
+		jira,
+		projectKey,
+		issueType,
+		fieldMappings,
+		force,
+		dryRun,
+	} = context;
+	const overridden = getOverriddenCoreFields(fieldMappings);
 
 	// Get current task
 	const task = await backlog.getTask(taskId);
@@ -230,18 +275,38 @@ async function pushTask(
 		}
 
 		// Build updates
-		const updates = await buildJiraUpdates(task, issue, jira, projectKey);
+		const updates = await buildJiraUpdates(
+			task,
+			issue,
+			jira,
+			projectKey,
+			overridden,
+		);
+		const mappedUpdates = buildMappedJiraFields(
+			readTaskFrontmatter(taskId),
+			issue,
+			fieldMappings,
+		);
 
 		if (dryRun) {
 			logger.info(
-				{ taskId, jiraKey: mapping.jiraKey, updates },
+				{
+					taskId,
+					jiraKey: mapping.jiraKey,
+					updates,
+					mappedFields: mappedUpdates.fields,
+				},
 				"DRY RUN: Would update Jira issue",
 			);
 		} else {
-			// Update issue fields
-			if (Object.keys(updates.fields).length > 0) {
-				await jira.updateIssue(mapping.jiraKey, updates.fields);
-			}
+			// Update issue fields; mapped fields that Jira rejects are reported
+			// individually after the rest of the push completes
+			const failures = await updateIssueWithMappedFields(
+				jira,
+				mapping.jiraKey,
+				updates.fields,
+				mappedUpdates,
+			);
 
 			// Handle status transitions
 			if (updates.transition) {
@@ -252,18 +317,26 @@ async function pushTask(
 
 			// Update snapshots with re-fetched data
 			const updatedIssue = await jira.getIssue(mapping.jiraKey);
-			const syncedHash = computeHash(normalizeBacklogTask(task));
-			store.setSnapshot(
+			if (failures.length > 0) {
+				recordPartialPush(
+					store,
+					taskId,
+					task,
+					updatedIssue,
+					failures,
+					fieldMappings,
+				);
+				throw new MappedFieldPushError(mapping.jiraKey, failures);
+			}
+			recordSyncedSnapshots(
+				store,
 				taskId,
+				{
+					backlog: normalizeBacklogTask(task),
+					jira: normalizeJiraIssue(updatedIssue),
+				},
 				"backlog",
-				syncedHash,
-				normalizeBacklogTask(task),
-			);
-			store.setSnapshot(
-				taskId,
-				"jira",
-				syncedHash,
-				normalizeJiraIssue(updatedIssue),
+				fieldMappings,
 			);
 
 			store.updateSyncState(taskId, {
@@ -297,9 +370,15 @@ async function pushTask(
 		}
 	} else {
 		// Create new issue
+		const mappedUpdates = buildMappedJiraFields(
+			readTaskFrontmatter(taskId),
+			null,
+			fieldMappings,
+		);
+
 		if (dryRun) {
 			logger.info(
-				{ taskId, projectKey, issueType },
+				{ taskId, projectKey, issueType, mappedFields: mappedUpdates.fields },
 				"DRY RUN: Would create new Jira issue",
 			);
 		} else {
@@ -325,26 +404,51 @@ async function pushTask(
 				);
 			}
 
-			const issue = await jira.createIssue(projectKey, issueType, task.title, {
-				description: descriptionWithAc,
-				assignee: mappedAssignee || undefined,
-				priority: task.priority
-					? mapBacklogPriorityToJira(task.priority)
-					: undefined,
-				labels: task.labels,
-			});
+			const { issue, failures } = await createIssueWithMappedFields(
+				jira,
+				projectKey,
+				issueType,
+				task.title,
+				{
+					description: descriptionWithAc,
+					assignee: mappedAssignee || undefined,
+					priority:
+						task.priority && !overridden.has("priority")
+							? mapBacklogPriorityToJira(task.priority)
+							: undefined,
+					labels: overridden.has("labels") ? undefined : task.labels,
+				},
+				mappedUpdates,
+			);
 
 			// Create mapping
 			store.addMapping(taskId, issue.key);
 
 			// Store initial snapshots
-			store.setSnapshot(
-				taskId,
-				"backlog",
-				backlogHash,
-				normalizeBacklogTask(task),
-			);
-			store.setSnapshot(taskId, "jira", backlogHash, normalizeJiraIssue(issue));
+			if (failures.length > 0) {
+				const createdIssue = await jira.getIssue(issue.key);
+				recordPartialPush(
+					store,
+					taskId,
+					task,
+					createdIssue,
+					failures,
+					fieldMappings,
+				);
+			} else {
+				store.setSnapshot(
+					taskId,
+					"backlog",
+					backlogHash,
+					normalizeBacklogTask(task),
+				);
+				store.setSnapshot(
+					taskId,
+					"jira",
+					backlogHash,
+					normalizeJiraIssue(issue),
+				);
+			}
 
 			store.updateSyncState(taskId, {
 				lastSyncAt: new Date().toISOString(),
@@ -361,7 +465,7 @@ async function pushTask(
 					jiraKey: issue.key,
 					jiraUrl,
 					jiraLastSync: new Date().toISOString(),
-					jiraSyncState: "InSync",
+					jiraSyncState: failures.length > 0 ? "NeedsPush" : "InSync",
 				});
 
 				logger.debug(
@@ -373,6 +477,10 @@ async function pushTask(
 					{ taskId, error },
 					"Failed to update frontmatter, but push was successful",
 				);
+			}
+
+			if (failures.length > 0) {
+				throw new MappedFieldPushError(issue.key, failures);
 			}
 
 			logger.info({ taskId, jiraKey: issue.key }, "Created new Jira issue");
@@ -388,6 +496,7 @@ async function buildJiraUpdates(
 	currentIssue: JiraIssue,
 	jiraClient: JiraClient,
 	projectKey: string,
+	overridden: Set<string> = new Set(),
 ): Promise<{
 	fields: {
 		summary?: string;
@@ -459,8 +568,9 @@ async function buildJiraUpdates(
 		}
 	}
 
-	// Priority (needs mapping from Backlog priority to Jira priority)
-	if (task.priority) {
+	// Priority (needs mapping from Backlog priority to Jira priority).
+	// Skipped when a field mapping carries priority instead.
+	if (task.priority && !overridden.has("priority")) {
 		const mappedPriority = mapBacklogPriorityToJira(task.priority);
 		if (mappedPriority && mappedPriority !== currentIssue.priority) {
 			fields.priority = mappedPriority;
@@ -475,8 +585,9 @@ async function buildJiraUpdates(
 		}
 	}
 
-	// Labels
+	// Labels (skipped when a field mapping carries labels instead)
 	if (
+		!overridden.has("labels") &&
 		task.labels &&
 		JSON.stringify(task.labels) !== JSON.stringify(currentIssue.labels)
 	) {

@@ -524,12 +524,12 @@ describe("getIssueFieldsParam", () => {
 		expect(fields.filter((f) => f === "labels")).toHaveLength(1);
 	});
 
-	it("does not request fields for push-only mappings", () => {
+	it("requests fields for push-only mappings so they can be compared", () => {
 		expect(
 			getIssueFieldsParam([
 				mapping({ jira: "customfield_10016", direction: "push" }),
 			]),
-		).toBeUndefined();
+		).toContain("customfield_10016");
 	});
 });
 

@@ -2,8 +2,15 @@ import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
+import { JiraClient } from "../integrations/jira.ts";
 import { FrontmatterStore } from "../state/store.ts";
+import { loadFieldMappings } from "../utils/field-mapping.ts";
+import { getJiraClientOptions } from "../utils/jira-config.ts";
 import { logger } from "../utils/logger.ts";
+import {
+	type FieldMappingCheck,
+	verifyFieldMappings,
+} from "../utils/mapped-field-sync.ts";
 
 async function exec(command: string, args: string[] = []): Promise<string> {
 	return new Promise((resolve, reject) => {
@@ -169,6 +176,104 @@ async function checkConfigFile(): Promise<void> {
 	}
 }
 
+/**
+ * Verify each mapped Jira field exists, and that fields written to Jira
+ * (push/both mappings) are editable for the configured project and issue
+ * type. Editability is checked against the issue type's create screen, the
+ * screen metadata MCP Atlassian exposes.
+ */
+export async function checkFieldMappings(
+	jira: Pick<
+		JiraClient,
+		"searchFields" | "getProjectIssueTypes" | "getCreateFieldIds"
+	>,
+	cwd = process.cwd(),
+): Promise<FieldMappingCheck[]> {
+	// Throws FieldMappingConfigError for invalid entries
+	const mappings = loadFieldMappings(cwd);
+	if (mappings.length === 0) {
+		logger.info("  ✓ No field mappings configured");
+		return [];
+	}
+
+	const config = JSON.parse(
+		await readFile(join(cwd, ".backlog-jira", "config.json"), "utf8"),
+	) as { jira?: { projectKey?: string; issueType?: string } };
+	const projectKey = config.jira?.projectKey || process.env.JIRA_PROJECT || "";
+	const issueType = config.jira?.issueType || "Task";
+
+	let knownFields: Array<{ id: string; name?: string }>;
+	try {
+		knownFields = await jira.searchFields("", 1000);
+	} catch (error) {
+		throw new Error(
+			`Could not list Jira fields to verify field mappings: ${error instanceof Error ? error.message : String(error)}`,
+		);
+	}
+
+	// Screen metadata is only needed for mappings that write to Jira
+	let screenFieldIds: Set<string> | null = null;
+	const writesToJira = mappings.some((m) => m.direction !== "pull");
+	if (writesToJira) {
+		if (!projectKey) {
+			logger.warn(
+				"  ⚠ jira.projectKey is not configured; cannot check mapped fields are editable",
+			);
+		} else {
+			try {
+				const types = await jira.getProjectIssueTypes(projectKey);
+				const type = types.find(
+					(t) => t.name.toLowerCase() === issueType.toLowerCase(),
+				);
+				if (!type) {
+					throw new Error(
+						`issue type "${issueType}" not found in project ${projectKey}`,
+					);
+				}
+				screenFieldIds = new Set(
+					await jira.getCreateFieldIds(projectKey, type.id),
+				);
+			} catch (error) {
+				logger.warn(
+					`  ⚠ Could not read screen fields for ${projectKey} / ${issueType}, skipping editability check: ${error instanceof Error ? error.message : String(error)}`,
+				);
+			}
+		}
+	}
+
+	const results = verifyFieldMappings(mappings, knownFields, screenFieldIds, {
+		projectKey,
+		issueType,
+	});
+	for (const { mapping, problems } of results) {
+		const label = `${mapping.backlog} ↔ ${mapping.jira} (${mapping.direction})`;
+		if (problems.length === 0) {
+			logger.info(`  ✓ Field mapping ${label}`);
+		} else {
+			for (const problem of problems) {
+				logger.error(`  ✗ Field mapping ${label}: ${problem}`);
+			}
+		}
+	}
+
+	const failed = results.filter((r) => r.problems.length > 0);
+	if (failed.length > 0) {
+		throw new Error(
+			`${failed.length} field mapping${failed.length === 1 ? "" : "s"} failed verification (${failed.map((r) => r.mapping.jira).join(", ")})`,
+		);
+	}
+	return results;
+}
+
+async function checkFieldMappingsWithJira(): Promise<void> {
+	const jira = new JiraClient({ ...getJiraClientOptions(), silentMode: true });
+	try {
+		await checkFieldMappings(jira);
+	} finally {
+		await jira.close().catch(() => {});
+	}
+}
+
 export async function doctorCommand(): Promise<void> {
 	logger.info("Running environment checks...\n");
 
@@ -179,6 +284,7 @@ export async function doctorCommand(): Promise<void> {
 		{ name: "Configuration", fn: checkConfigFile, critical: true },
 		{ name: "Database", fn: checkDatabasePerms, critical: true },
 		{ name: "MCP Connectivity", fn: checkMCPConnectivity, critical: true },
+		{ name: "Field mappings", fn: checkFieldMappingsWithJira, critical: true },
 		{ name: "Backlog.md project", fn: checkMCPServer, critical: false },
 		{ name: "Git status", fn: checkGitStatus, critical: false },
 		{ name: "Disk space", fn: checkDiskSpace, critical: false },

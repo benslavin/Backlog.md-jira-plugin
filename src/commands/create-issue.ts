@@ -3,9 +3,21 @@ import { join } from "node:path";
 import { BacklogClient, type BacklogTask } from "../integrations/backlog.ts";
 import { JiraClient, type JiraIssue } from "../integrations/jira.ts";
 import { FrontmatterStore } from "../state/store.ts";
+import {
+	FieldMappingConfigError,
+	buildMappedJiraFields,
+	readTaskFrontmatter,
+	validateFieldMappings,
+} from "../utils/field-mapping.ts";
 import { getTaskFilePath, updateJiraMetadata } from "../utils/frontmatter.ts";
 import { getJiraClientOptions } from "../utils/jira-config.ts";
 import { logger } from "../utils/logger.ts";
+import {
+	createIssueWithMappedFields,
+	formatMappedFieldFailures,
+	getOverriddenCoreFields,
+	recordPartialPush,
+} from "../utils/mapped-field-sync.ts";
 import {
 	computeHash,
 	mergeDescriptionWithAc,
@@ -26,6 +38,8 @@ export interface CreateIssueResult {
 	taskId: string;
 	jiraKey?: string;
 	error?: string;
+	/** Problems that did not prevent creation, e.g. mapped fields Jira rejected */
+	warnings?: string[];
 }
 
 /**
@@ -83,9 +97,25 @@ export async function createIssue(
 			);
 		}
 
+		const { mappings: fieldMappings, errors: mappingErrors } =
+			validateFieldMappings(config.fieldMappings);
+		if (mappingErrors.length > 0) {
+			throw new FieldMappingConfigError(mappingErrors);
+		}
+		const overridden = getOverriddenCoreFields(fieldMappings);
+
 		// Build Jira issue from Backlog task
 		logger.debug({ taskId }, "Building Jira issue from Backlog task");
 		const issueData = buildJiraIssueFromBacklogTask(task, projectKey);
+		if (overridden.has("priority")) issueData.priority = undefined;
+		if (overridden.has("labels")) issueData.labels = undefined;
+
+		// Mapped fields (push/both) with a value in Backlog
+		const mappedUpdates = buildMappedJiraFields(
+			readTaskFrontmatter(taskId),
+			null,
+			fieldMappings,
+		);
 
 		if (dryRun) {
 			logger.info(
@@ -108,6 +138,15 @@ export async function createIssue(
 			console.log(`  Assignee: ${issueData.assignee || "Unassigned"}`);
 			console.log(`  Priority: ${issueData.priority || "Default"}`);
 			console.log(`  Labels: ${issueData.labels?.join(", ") || "None"}`);
+			for (const change of mappedUpdates.changes) {
+				const value = change.backlogValue;
+				console.log(
+					`  ${change.mapping.jira} (${change.mapping.backlog}): ${Array.isArray(value) ? value.join(", ") : value}`,
+				);
+			}
+			for (const { mapping, error } of mappedUpdates.errors) {
+				console.log(`  ${mapping.jira} (${mapping.backlog}): ⚠ ${error}`);
+			}
 
 			return {
 				success: true,
@@ -120,7 +159,8 @@ export async function createIssue(
 			{ taskId, projectKey, issueType: finalIssueType },
 			"Creating Jira issue",
 		);
-		const createdIssue = await jira.createIssue(
+		const { issue: createdIssue, failures } = await createIssueWithMappedFields(
+			jira,
 			projectKey,
 			finalIssueType,
 			issueData.summary,
@@ -130,6 +170,7 @@ export async function createIssue(
 				priority: issueData.priority,
 				labels: issueData.labels,
 			},
+			mappedUpdates,
 		);
 
 		logger.info(
@@ -144,26 +185,37 @@ export async function createIssue(
 			"Created task-Jira mapping",
 		);
 
-		// Create initial snapshots
-		const backlogHash = computeHash(normalizeBacklogTask(task));
-		store.setSnapshot(
-			taskId,
-			"backlog",
-			backlogHash,
-			normalizeBacklogTask(task),
-		);
-		store.setSnapshot(
-			taskId,
-			"jira",
-			backlogHash,
-			normalizeJiraIssue(createdIssue),
-		);
-		logger.debug({ taskId }, "Created initial snapshots");
+		// Create initial snapshots. Mapped fields Jira rejected stay pending
+		// so the next push retries them.
+		if (failures.length > 0) {
+			recordPartialPush(
+				store,
+				taskId,
+				task,
+				await jira.getIssue(createdIssue.key),
+				failures,
+			);
+		} else {
+			const backlogHash = computeHash(normalizeBacklogTask(task));
+			store.setSnapshot(
+				taskId,
+				"backlog",
+				backlogHash,
+				normalizeBacklogTask(task),
+			);
+			store.setSnapshot(
+				taskId,
+				"jira",
+				backlogHash,
+				normalizeJiraIssue(createdIssue),
+			);
 
-		// Update sync state
-		store.updateSyncState(taskId, {
-			lastSyncAt: new Date().toISOString(),
-		});
+			// Update sync state
+			store.updateSyncState(taskId, {
+				lastSyncAt: new Date().toISOString(),
+			});
+		}
+		logger.debug({ taskId }, "Created initial snapshots");
 
 		// Update task frontmatter with Jira metadata
 		try {
@@ -176,7 +228,7 @@ export async function createIssue(
 				jiraKey: createdIssue.key,
 				jiraUrl,
 				jiraLastSync: new Date().toISOString(),
-				jiraSyncState: "InSync",
+				jiraSyncState: failures.length > 0 ? "NeedsPush" : "InSync",
 			});
 
 			logger.debug(
@@ -203,6 +255,11 @@ export async function createIssue(
 			success: true,
 			taskId,
 			jiraKey: createdIssue.key,
+			...(failures.length > 0
+				? {
+						warnings: [formatMappedFieldFailures(createdIssue.key, failures)],
+					}
+				: {}),
 		};
 	} catch (error) {
 		const errorMsg = error instanceof Error ? error.message : String(error);
@@ -282,6 +339,7 @@ function loadConfig(configDir?: string): {
 		projectKey?: string;
 		issueType?: string;
 	};
+	fieldMappings?: unknown;
 } {
 	try {
 		const baseDir = configDir || join(process.cwd(), ".backlog-jira");

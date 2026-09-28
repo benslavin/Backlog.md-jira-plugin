@@ -410,6 +410,18 @@ export class JiraClient {
 			if (resultContent && resultContent.length > 0) {
 				const content = resultContent[0];
 				if (content.type === "text" && content.text) {
+					// Structured JSON results are judged by their error keys, not by
+					// words such as "error" or "failed" appearing in field values
+					const json = parseJsonObject(content.text);
+					if (json !== undefined) {
+						const jsonError = getJsonErrorText(json);
+						if (jsonError) {
+							throw new Error(`MCP tool ${toolName} failed: ${jsonError}`);
+						}
+						logger.debug({ toolName }, "MCP tool call succeeded");
+						return json;
+					}
+
 					// Check if the text content is an error message or proxy redirect
 					if (this.isErrorResponse(content.text)) {
 						const errorMsg = this.formatErrorMessage(content.text, toolName);
@@ -691,6 +703,46 @@ export class JiraClient {
 	}
 
 	/**
+	 * Issue types available in a project
+	 */
+	async getProjectIssueTypes(
+		projectKey: string,
+	): Promise<Array<{ id: string; name: string }>> {
+		const result = await this.callMcpTool("jira_get_project_issue_types", {
+			project_key: projectKey,
+		});
+		const types = Array.isArray(result)
+			? result
+			: ((result as { issue_types?: unknown[] })?.issue_types ?? []);
+		return (types as Array<{ id: string | number; name: string }>).map((t) => ({
+			id: String(t.id),
+			name: t.name,
+		}));
+	}
+
+	/**
+	 * IDs of the fields on the create screen of a project's issue type.
+	 * Used to check that mapped fields can be written.
+	 */
+	async getCreateFieldIds(
+		projectKey: string,
+		issueTypeId: string,
+	): Promise<string[]> {
+		const result = await this.callMcpTool("jira_get_create_fields", {
+			project_key: projectKey,
+			issue_type_id: issueTypeId,
+		});
+		const fields = Array.isArray(result)
+			? result
+			: ((result as { fields?: unknown[] })?.fields ?? []);
+		return (
+			fields as Array<{ field_id?: string; fieldId?: string; key?: string }>
+		)
+			.map((f) => f.field_id ?? f.fieldId ?? f.key)
+			.filter((id): id is string => typeof id === "string");
+	}
+
+	/**
 	 * Search for Jira issues using JQL
 	 */
 	async searchIssues(
@@ -930,10 +982,20 @@ export class JiraClient {
 				Object.assign(fields, updates.fields);
 			}
 
-			await this.callMcpTool("jira_update_issue", {
+			const result = await this.callMcpTool("jira_update_issue", {
 				issue_key: issueKey,
 				fields,
 			});
+
+			// Newer MCP Atlassian versions report field update errors in the
+			// result instead of failing the tool call
+			const failed = (result as { operations_failed?: unknown } | null)
+				?.operations_failed;
+			if (Array.isArray(failed) && failed.length > 0) {
+				throw new Error(
+					`MCP tool jira_update_issue failed: ${failed.map(String).join("; ")}`,
+				);
+			}
 
 			logger.info({ issueKey, updates }, "Updated Jira issue");
 		} catch (error) {
@@ -1314,4 +1376,42 @@ export class JiraClient {
 			throw error;
 		}
 	}
+}
+
+/**
+ * Parse text as a JSON object or array; undefined when it is not one
+ */
+function parseJsonObject(text: string): unknown {
+	const trimmed = text.trim();
+	if (!trimmed.startsWith("{") && !trimmed.startsWith("[")) return undefined;
+	try {
+		const parsed = JSON.parse(trimmed);
+		return parsed !== null && typeof parsed === "object" ? parsed : undefined;
+	} catch {
+		return undefined;
+	}
+}
+
+/**
+ * Error text of a JSON error payload ({ error }, { errorMessages, errors }),
+ * or null when the payload is a regular result
+ */
+export function getJsonErrorText(json: unknown): string | null {
+	if (!json || typeof json !== "object" || Array.isArray(json)) return null;
+	const obj = json as Record<string, unknown>;
+	if (typeof obj.error === "string" && obj.error) return obj.error;
+	const messages: string[] = [];
+	if (Array.isArray(obj.errorMessages)) {
+		messages.push(...obj.errorMessages.map(String));
+	}
+	if (
+		obj.errors &&
+		typeof obj.errors === "object" &&
+		!Array.isArray(obj.errors)
+	) {
+		for (const [field, message] of Object.entries(obj.errors)) {
+			messages.push(`${field}: ${String(message)}`);
+		}
+	}
+	return messages.length > 0 ? messages.join("; ") : null;
 }

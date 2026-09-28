@@ -118,11 +118,11 @@ describe("hash stability", () => {
 		);
 	});
 
-	it("ignores push-only mappings in phase 1", () => {
+	it("includes push-only mappings so both sides hash alike when in sync", () => {
 		const payload = normalizeJiraIssue(makeIssue({ customfield_10016: 3 }), {
 			fieldMappings: [{ ...storyPoints, direction: "push" }],
 		});
-		expect(payload.mappedFields).toBeUndefined();
+		expect(payload.mappedFields).toEqual({ "frontmatter:story_points": "3" });
 	});
 
 	it("normalizes both sides to the same mapped representation", () => {

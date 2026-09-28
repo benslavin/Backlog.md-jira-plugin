@@ -6,7 +6,6 @@ import {
 	canonicalMappedValue,
 	getBacklogTargetValue,
 	getMappedJiraValue,
-	getPullMappings,
 	isCoreOverrideTarget,
 	loadFieldMappings,
 	readTaskFrontmatter,
@@ -39,12 +38,13 @@ export interface NormalizeOptions {
 }
 
 /**
- * Pull mappings stored in the mappedFields section (priority/labels
- * mappings replace the core field instead)
+ * Field mappings that contribute to the payload, in any direction.
+ * Priority/labels mappings replace the core field instead of adding to
+ * mappedFields. Direction is applied when classifying changes, so both sides
+ * carry every mapped value and hash identically when in sync.
  */
 function getMappedFieldMappings(options?: NormalizeOptions): FieldMapping[] {
-	const mappings = options?.fieldMappings ?? loadFieldMappings();
-	return getPullMappings(mappings);
+	return options?.fieldMappings ?? loadFieldMappings();
 }
 
 /**

@@ -23825,6 +23825,9 @@ function loadFieldMappings(cwd = process.cwd()) {
 function getPullMappings(mappings) {
   return mappings.filter((m) => m.direction !== "push");
 }
+function getPushMappings(mappings) {
+  return mappings.filter((m) => m.direction !== "pull");
+}
 function isCoreOverrideTarget(target) {
   return CORE_OVERRIDE_TARGETS.has(target);
 }
@@ -24001,48 +24004,54 @@ function readTaskFrontmatter(taskId) {
   }
 }
 function buildMappedFieldUpdates(issue, currentFrontmatter, mappings) {
+  return buildBacklogValueUpdates(getPullMappings(mappings).map((mapping) => ({
+    mapping,
+    value: getMappedJiraValue(issue, mapping)
+  })), currentFrontmatter);
+}
+function buildBacklogValueUpdates(values, currentFrontmatter) {
   const updates = { cli: {}, frontmatter: {} };
-  for (const mapping of getPullMappings(mappings)) {
+  for (const { mapping, value } of values) {
     const target = mapping.backlog;
-    const jiraValue = getMappedJiraValue(issue, mapping);
+    const newValue = coerceForTarget(value, target);
     const currentValue = getBacklogTargetValue(currentFrontmatter, target);
-    if (canonicalMappedValue(jiraValue, target) === canonicalMappedValue(currentValue, target)) {
+    if (canonicalMappedValue(newValue, target) === canonicalMappedValue(currentValue, target)) {
       continue;
     }
     if (target.startsWith(FRONTMATTER_PREFIX)) {
-      updates.frontmatter[frontmatterKeyForTarget(target)] = jiraValue;
+      updates.frontmatter[frontmatterKeyForTarget(target)] = newValue;
       continue;
     }
     switch (target) {
       case "milestone":
-        if (jiraValue === null)
+        if (newValue === null)
           updates.cli.clearMilestone = true;
         else
-          updates.cli.milestone = jiraValue;
+          updates.cli.milestone = newValue;
         break;
       case "dependencies":
-        if (jiraValue === null)
+        if (newValue === null)
           updates.cli.clearDependencies = true;
         else
-          updates.cli.dependencies = jiraValue;
+          updates.cli.dependencies = newValue;
         break;
       case "references":
-        if (jiraValue === null)
+        if (newValue === null)
           updates.cli.clearReferences = true;
         else
-          updates.cli.references = jiraValue;
+          updates.cli.references = newValue;
         break;
       case "labels":
-        if (jiraValue === null)
+        if (newValue === null)
           updates.cli.clearLabels = true;
         else
-          updates.cli.labels = jiraValue;
+          updates.cli.labels = newValue;
         break;
       case "priority":
-        if (jiraValue === null) {
-          logger.warn({ jiraField: mapping.jira }, "Mapped priority is empty in Jira; Backlog priority cannot be cleared via CLI, leaving it unchanged");
+        if (newValue === null) {
+          logger.warn({ jiraField: mapping.jira }, "Mapped priority is empty; Backlog priority cannot be cleared via CLI, leaving it unchanged");
         } else {
-          updates.cli.priority = jiraValue.toLowerCase();
+          updates.cli.priority = newValue.toLowerCase();
         }
         break;
     }
@@ -24053,7 +24062,7 @@ function hasMappedFieldUpdates(updates) {
   return Object.keys(updates.cli).length > 0 || Object.keys(updates.frontmatter).length > 0;
 }
 function getMappedJiraFieldIds(mappings) {
-  return [...new Set(getPullMappings(mappings).map((m) => m.jira))];
+  return [...new Set(mappings.map((m) => m.jira))];
 }
 var DEFAULT_ISSUE_FIELDS = [
   "summary",
@@ -24103,6 +24112,127 @@ function suggestTypeForSchema(schema) {
     default:
       return;
   }
+}
+
+class FieldValueError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "FieldValueError";
+  }
+}
+var JIRA_LIST_FIELDS = new Set([
+  "fixVersions",
+  "versions",
+  "components",
+  "labels"
+]);
+var ACCOUNT_ID_PATTERN = /^([0-9a-f]{24}|[0-9]{5,}:[a-f0-9-]+)$/;
+function reverseValueMap(value, valueMap) {
+  if (!valueMap)
+    return value;
+  for (const [from, to] of Object.entries(valueMap)) {
+    if (to === value)
+      return from;
+  }
+  const lower = value.toLowerCase();
+  for (const [from, to] of Object.entries(valueMap)) {
+    if (to.toLowerCase() === lower)
+      return from;
+  }
+  return value;
+}
+function toList(value) {
+  if (value === null)
+    return [];
+  const items = Array.isArray(value) ? value : value.split(",");
+  return items.map((v) => v.trim()).filter(Boolean);
+}
+function toScalar(value) {
+  if (value === null)
+    return null;
+  const text = Array.isArray(value) ? value.join(", ") : value;
+  return text.trim() || null;
+}
+function toJiraUser(user) {
+  const mapped = mapBacklogAssigneeToJira(user) ?? user.replace(/^@/, "");
+  return ACCOUNT_ID_PATTERN.test(mapped) ? { accountId: mapped } : { name: mapped };
+}
+function convertBacklogValue(value, mapping) {
+  const { valueMap } = mapping;
+  const mapped = value === null ? null : Array.isArray(value) ? value.map((v) => reverseValueMap(v, valueMap)) : reverseValueMap(value, valueMap);
+  switch (mapping.type) {
+    case "string":
+      return toScalar(mapped);
+    case "number": {
+      const text = toScalar(mapped);
+      if (text === null)
+        return null;
+      const num = Number(text);
+      if (!Number.isFinite(num)) {
+        throw new FieldValueError(`"${text}" is not a number`);
+      }
+      return num;
+    }
+    case "date": {
+      const text = toScalar(mapped);
+      if (text === null)
+        return null;
+      const match = text.match(/^(\d{4}-\d{2}-\d{2})/);
+      if (!match || Number.isNaN(Date.parse(match[1]))) {
+        throw new FieldValueError(`"${text}" is not a YYYY-MM-DD date`);
+      }
+      return match[1];
+    }
+    case "option": {
+      const text = toScalar(mapped);
+      return text === null ? null : { value: text };
+    }
+    case "multi-option":
+      return toList(mapped).map((v) => ({ value: v }));
+    case "user": {
+      const text = toScalar(mapped);
+      return text === null ? null : toJiraUser(text);
+    }
+    case "version":
+      if (Array.isArray(mapped) || JIRA_LIST_FIELDS.has(mapping.jira)) {
+        return toList(mapped).map((name) => ({ name }));
+      }
+      return toScalar(mapped) === null ? null : { name: toScalar(mapped) };
+    case "array":
+      return mapping.jira === "components" ? toList(mapped).map((name) => ({ name })) : toList(mapped);
+  }
+}
+function buildMappedJiraFields(frontmatter, issue, mappings) {
+  return buildJiraValueUpdates(getPushMappings(mappings).map((mapping) => ({
+    mapping,
+    value: getBacklogTargetValue(frontmatter, mapping.backlog)
+  })), issue);
+}
+function buildJiraValueUpdates(values, issue) {
+  const result = {
+    fields: {},
+    changes: [],
+    errors: []
+  };
+  for (const { mapping, value } of values) {
+    const backlogValue = coerceForTarget(value, mapping.backlog);
+    const jiraValue = issue ? getMappedJiraValue(issue, mapping) : null;
+    if (issue === null && backlogValue === null)
+      continue;
+    if (issue !== null && canonicalMappedValue(backlogValue, mapping.backlog) === canonicalMappedValue(jiraValue, mapping.backlog)) {
+      continue;
+    }
+    try {
+      result.fields[mapping.jira] = convertBacklogValue(backlogValue, mapping);
+      result.changes.push({ mapping, backlogValue, jiraValue });
+    } catch (error) {
+      result.errors.push({
+        mapping,
+        error: error instanceof Error ? error.message : String(error)
+      });
+    }
+  }
+  return result;
 }
 
 // src/integrations/jira.ts
@@ -24348,6 +24478,15 @@ Original error: ${errorText}`);
       if (resultContent && resultContent.length > 0) {
         const content = resultContent[0];
         if (content.type === "text" && content.text) {
+          const json = parseJsonObject(content.text);
+          if (json !== undefined) {
+            const jsonError = getJsonErrorText(json);
+            if (jsonError) {
+              throw new Error(`MCP tool ${toolName} failed: ${jsonError}`);
+            }
+            logger.debug({ toolName }, "MCP tool call succeeded");
+            return json;
+          }
           if (this.isErrorResponse(content.text)) {
             const errorMsg = this.formatErrorMessage(content.text, toolName);
             logger.error({ toolName, response: content.text }, "MCP tool returned error string");
@@ -24493,6 +24632,24 @@ Current tool: ${toolName}`;
       throw error;
     }
   }
+  async getProjectIssueTypes(projectKey) {
+    const result = await this.callMcpTool("jira_get_project_issue_types", {
+      project_key: projectKey
+    });
+    const types = Array.isArray(result) ? result : result?.issue_types ?? [];
+    return types.map((t) => ({
+      id: String(t.id),
+      name: t.name
+    }));
+  }
+  async getCreateFieldIds(projectKey, issueTypeId) {
+    const result = await this.callMcpTool("jira_get_create_fields", {
+      project_key: projectKey,
+      issue_type_id: issueTypeId
+    });
+    const fields = Array.isArray(result) ? result : result?.fields ?? [];
+    return fields.map((f) => f.field_id ?? f.fieldId ?? f.key).filter((id) => typeof id === "string");
+  }
   async searchIssues(jql, options) {
     try {
       const input = {
@@ -24623,10 +24780,14 @@ Current tool: ${toolName}`;
       if (updates.fields) {
         Object.assign(fields, updates.fields);
       }
-      await this.callMcpTool("jira_update_issue", {
+      const result = await this.callMcpTool("jira_update_issue", {
         issue_key: issueKey,
         fields
       });
+      const failed = result?.operations_failed;
+      if (Array.isArray(failed) && failed.length > 0) {
+        throw new Error(`MCP tool jira_update_issue failed: ${failed.map(String).join("; ")}`);
+      }
       logger.info({ issueKey, updates }, "Updated Jira issue");
     } catch (error) {
       if (this.silentMode) {
@@ -24825,6 +24986,34 @@ Current tool: ${toolName}`;
       throw error;
     }
   }
+}
+function parseJsonObject(text) {
+  const trimmed = text.trim();
+  if (!trimmed.startsWith("{") && !trimmed.startsWith("["))
+    return;
+  try {
+    const parsed = JSON.parse(trimmed);
+    return parsed !== null && typeof parsed === "object" ? parsed : undefined;
+  } catch {
+    return;
+  }
+}
+function getJsonErrorText(json) {
+  if (!json || typeof json !== "object" || Array.isArray(json))
+    return null;
+  const obj = json;
+  if (typeof obj.error === "string" && obj.error)
+    return obj.error;
+  const messages = [];
+  if (Array.isArray(obj.errorMessages)) {
+    messages.push(...obj.errorMessages.map(String));
+  }
+  if (obj.errors && typeof obj.errors === "object" && !Array.isArray(obj.errors)) {
+    for (const [field, message] of Object.entries(obj.errors)) {
+      messages.push(`${field}: ${String(message)}`);
+    }
+  }
+  return messages.length > 0 ? messages.join("; ") : null;
 }
 
 // src/commands/configure.ts
@@ -26233,8 +26422,7 @@ class FrontmatterStore {
 // src/utils/normalizer.ts
 import crypto from "node:crypto";
 function getMappedFieldMappings(options) {
-  const mappings = options?.fieldMappings ?? loadFieldMappings();
-  return getPullMappings(mappings);
+  return options?.fieldMappings ?? loadFieldMappings();
 }
 function normalizeBacklogTask(task, options) {
   const payload = {
@@ -26412,6 +26600,267 @@ function comparePayloads(a, b) {
   return changes;
 }
 
+// src/utils/mapped-field-sync.ts
+class MappedFieldPushError extends Error {
+  issueKey;
+  failures;
+  constructor(issueKey, failures) {
+    super(formatMappedFieldFailures(issueKey, failures));
+    this.issueKey = issueKey;
+    this.failures = failures;
+    this.name = "MappedFieldPushError";
+  }
+}
+function formatMappedFieldFailures(issueKey, failures) {
+  const lines = failures.map((f) => `  - ${f.mapping.jira} (mapped to ${f.mapping.backlog}): ${firstLine(f.error)}`);
+  return `Mapped field${failures.length === 1 ? "" : "s"} could not be updated on ${issueKey}:
+${lines.join(`
+`)}
+Check the field is on the issue type's edit screen (backlog-jira doctor) or fix the mapping with backlog-jira map-fields.`;
+}
+function firstLine(text) {
+  const line = text.trim().split(`
+`)[0] ?? "";
+  return line.length > 300 ? `${line.slice(0, 297)}...` : line;
+}
+function errorMessage(error) {
+  return error instanceof Error ? error.message : String(error);
+}
+async function updateIssueWithMappedFields(jira, issueKey, coreFields, mapped) {
+  const failures = [...mapped.errors];
+  const hasCore = Object.keys(coreFields).length > 0;
+  const mappedIds = Object.keys(mapped.fields);
+  if (mappedIds.length === 0) {
+    if (hasCore)
+      await jira.updateIssue(issueKey, coreFields);
+    return failures;
+  }
+  try {
+    await jira.updateIssue(issueKey, { ...coreFields, fields: mapped.fields });
+    return failures;
+  } catch (error) {
+    logger.warn({ issueKey, error: errorMessage(error), mappedFields: mappedIds }, "Update with mapped fields failed; retrying fields individually");
+  }
+  if (hasCore) {
+    await jira.updateIssue(issueKey, coreFields);
+  }
+  for (const fieldId of mappedIds) {
+    try {
+      await jira.updateIssue(issueKey, {
+        fields: { [fieldId]: mapped.fields[fieldId] }
+      });
+    } catch (error) {
+      for (const change of mapped.changes) {
+        if (change.mapping.jira === fieldId) {
+          failures.push({
+            mapping: change.mapping,
+            error: errorMessage(error)
+          });
+        }
+      }
+    }
+  }
+  return failures;
+}
+async function createIssueWithMappedFields(jira, projectKey, issueType, summary, options, mapped) {
+  const mappedIds = Object.keys(mapped.fields);
+  try {
+    const issue = await jira.createIssue(projectKey, issueType, summary, {
+      ...options,
+      ...mappedIds.length > 0 ? { fields: mapped.fields } : {}
+    });
+    return { issue, failures: [...mapped.errors] };
+  } catch (error) {
+    const message = errorMessage(error);
+    if (!mappedIds.some((id) => message.includes(id))) {
+      throw error;
+    }
+    logger.warn({ error: message, mappedFields: mappedIds }, "Create with mapped fields failed; creating without them");
+  }
+  const issue = await jira.createIssue(projectKey, issueType, summary, options);
+  const failures = await updateIssueWithMappedFields(jira, issue.key, {}, mapped);
+  return { issue, failures };
+}
+function payloadWithValuesFrom(payload, source, targets) {
+  const result = {
+    ...payload,
+    ...payload.mappedFields ? { mappedFields: { ...payload.mappedFields } } : {}
+  };
+  for (const key of targets) {
+    if (key === "priority") {
+      result.priority = source.priority;
+    } else if (key === "labels") {
+      result.labels = source.labels;
+    } else if (result.mappedFields) {
+      result.mappedFields[key] = source.mappedFields?.[key] ?? "";
+    }
+  }
+  return result;
+}
+function payloadWithFailedFields(backlogPayload, jiraPayload, failures) {
+  return payloadWithValuesFrom(backlogPayload, jiraPayload, failures.map((f) => f.mapping.backlog));
+}
+function markOwnerValues(payload, owner, mappings, ownedDirection) {
+  const targets = mappings.filter((m) => m.direction === ownedDirection && payloadValue(payload, m.backlog) !== payloadValue(owner, m.backlog)).map((m) => m.backlog);
+  return targets.length > 0 ? payloadWithValuesFrom(payload, owner, targets) : null;
+}
+function recordSyncedSnapshots(store, taskId, payloads, source, mappings) {
+  const syncedHash = computeHash(payloads[source]);
+  const target = source === "backlog" ? "jira" : "backlog";
+  const marked = markOwnerValues(payloads[source], payloads[target], mappings, source === "backlog" ? "pull" : "push");
+  store.setSnapshot(taskId, source, marked ? computeHash(marked) : syncedHash, marked ?? payloads[source]);
+  store.setSnapshot(taskId, target, syncedHash, payloads[target]);
+}
+function recordPartialPush(store, taskId, task, issue, failures, mappings = []) {
+  const jiraPayload = normalizeJiraIssue(issue);
+  const withFailures = payloadWithFailedFields(normalizeBacklogTask(task), jiraPayload, failures);
+  const backlogPayload = markOwnerValues(withFailures, jiraPayload, mappings, "pull") ?? withFailures;
+  store.setSnapshot(taskId, "backlog", computeHash(backlogPayload), backlogPayload);
+  store.setSnapshot(taskId, "jira", computeHash(jiraPayload), jiraPayload);
+  store.updateSyncState(taskId, { lastSyncAt: new Date().toISOString() });
+}
+async function writeBacklogMappedValues(backlog, taskId, values, currentFrontmatter) {
+  const updates = buildBacklogValueUpdates(values, currentFrontmatter);
+  if (Object.keys(updates.cli).length > 0) {
+    await backlog.updateTask(taskId, updates.cli);
+  }
+  if (Object.keys(updates.frontmatter).length > 0) {
+    updateFrontmatterFields(getTaskFilePath(taskId), updates.frontmatter);
+  }
+}
+function payloadValue(payload, target) {
+  if (!payload)
+    return "";
+  if (target === "priority")
+    return payload.priority ?? "";
+  if (target === "labels")
+    return JSON.stringify(payload.labels ?? []);
+  return payload.mappedFields?.[target] ?? "";
+}
+function fromCanonical(value, target) {
+  if (!value)
+    return null;
+  if (target === "labels" || value.startsWith("[")) {
+    try {
+      const parsed = JSON.parse(value);
+      if (Array.isArray(parsed))
+        return parsed.length > 0 ? parsed : null;
+    } catch {}
+  }
+  return value;
+}
+function sideChanges(state, target) {
+  const backlogNow = payloadValue(state.current.backlog, target);
+  const jiraNow = payloadValue(state.current.jira, target);
+  return {
+    backlogChanged: backlogNow !== payloadValue(state.base.backlog, target),
+    jiraChanged: jiraNow !== payloadValue(state.base.jira, target),
+    differ: backlogNow !== jiraNow
+  };
+}
+function detectMappedFieldConflicts(state, mappings) {
+  const conflicts = [];
+  if (!state.base.backlog || !state.base.jira)
+    return conflicts;
+  for (const mapping of mappings) {
+    if (mapping.direction !== "both")
+      continue;
+    const target = mapping.backlog;
+    const { backlogChanged, jiraChanged, differ } = sideChanges(state, target);
+    if (!backlogChanged || !jiraChanged || !differ)
+      continue;
+    conflicts.push({
+      field: target,
+      backlogValue: getBacklogTargetValue(state.frontmatter, target),
+      jiraValue: getMappedJiraValue(state.issue, mapping),
+      baseValue: fromCanonical(payloadValue(state.base.backlog, target), target),
+      mapping
+    });
+  }
+  return conflicts;
+}
+function parseManualMappedValue(value, mapping) {
+  if (value === null || value === undefined)
+    return null;
+  if (Array.isArray(value)) {
+    return coerceForTarget(value.map(String), mapping.backlog);
+  }
+  const text = String(value).trim();
+  if (!text)
+    return null;
+  const isList = mapping.type === "multi-option" || mapping.type === "array" || Array.isArray(coerceForTarget(text, mapping.backlog));
+  return isList ? text.split(",").map((v) => v.trim()).filter(Boolean) : text;
+}
+function planMappedFieldMerge(state, mappings, resolutions) {
+  const plan = [];
+  for (const mapping of mappings) {
+    const target = mapping.backlog;
+    const backlogValue = getBacklogTargetValue(state.frontmatter, target);
+    const jiraValue = getMappedJiraValue(state.issue, mapping);
+    if (resolutions.has(target) && mapping.direction === "both") {
+      plan.push({ mapping, value: resolutions.get(target) ?? null });
+      continue;
+    }
+    const { backlogChanged, jiraChanged, differ } = sideChanges(state, target);
+    if (!differ)
+      continue;
+    if (mapping.direction === "pull") {
+      plan.push({ mapping, value: jiraValue });
+    } else if (mapping.direction === "push") {
+      plan.push({ mapping, value: backlogValue });
+    } else if (backlogChanged && !jiraChanged) {
+      plan.push({ mapping, value: backlogValue });
+    } else if (jiraChanged && !backlogChanged) {
+      plan.push({ mapping, value: jiraValue });
+    }
+  }
+  return plan;
+}
+async function applyMappedFieldMerge(plan, context) {
+  const { taskId, issueKey, backlog, jira, frontmatter, issue } = context;
+  await writeBacklogMappedValues(backlog, taskId, plan.filter((p) => p.mapping.direction !== "push"), frontmatter);
+  const jiraUpdates = buildJiraValueUpdates(plan.filter((p) => p.mapping.direction !== "pull"), issue);
+  return updateIssueWithMappedFields(jira, issueKey, {}, jiraUpdates);
+}
+function displayValue(value) {
+  if (value === null)
+    return "(empty)";
+  return Array.isArray(value) ? value.join(", ") : value;
+}
+function formatMappedFieldsSection(mappings, frontmatter, issue, jiraUnavailableReason) {
+  if (mappings.length === 0)
+    return [];
+  const lines = ["", "Mapped Fields:", "-".repeat(50)];
+  for (const mapping of mappings) {
+    const backlogValue = getBacklogTargetValue(frontmatter, mapping.backlog);
+    lines.push(`${mapping.backlog} ↔ ${mapping.jira} (${mapping.type}, ${mapping.direction})`);
+    lines.push(`  Backlog: ${displayValue(backlogValue)}`);
+    if (issue) {
+      const jiraValue = getMappedJiraValue(issue, mapping);
+      const inSync = canonicalMappedValue(backlogValue, mapping.backlog) === canonicalMappedValue(jiraValue, mapping.backlog);
+      lines.push(`  Jira:    ${displayValue(jiraValue)}${inSync ? "" : "  [differs]"}`);
+    } else {
+      lines.push(`  Jira:    ${jiraUnavailableReason ?? "(unavailable)"}`);
+    }
+  }
+  return lines;
+}
+function verifyFieldMappings(mappings, knownFields, screenFieldIds, scope) {
+  const known = new Set(knownFields.map((f) => f.id));
+  return mappings.map((mapping) => {
+    const problems = [];
+    if (!known.has(mapping.jira)) {
+      problems.push(`Jira field "${mapping.jira}" does not exist`);
+    } else if (mapping.direction !== "pull" && screenFieldIds && !screenFieldIds.has(mapping.jira)) {
+      problems.push(`Jira field "${mapping.jira}" is not editable for ${scope.projectKey} / ${scope.issueType} (not on the issue type's screen)`);
+    }
+    return { mapping, problems };
+  });
+}
+function getOverriddenCoreFields(mappings) {
+  return new Set(mappings.map((m) => m.backlog).filter((t) => isCoreOverrideTarget(t)));
+}
+
 // src/utils/priority-mapping.ts
 function mapJiraPriorityToBacklog(jiraPriority) {
   if (!jiraPriority) {
@@ -26496,8 +26945,18 @@ async function createIssue(options) {
     if (!projectKey) {
       throw new Error("Jira project key not configured in .backlog-jira/config.json");
     }
+    const { mappings: fieldMappings, errors: mappingErrors } = validateFieldMappings(config.fieldMappings);
+    if (mappingErrors.length > 0) {
+      throw new FieldMappingConfigError(mappingErrors);
+    }
+    const overridden = getOverriddenCoreFields(fieldMappings);
     logger.debug({ taskId }, "Building Jira issue from Backlog task");
     const issueData = buildJiraIssueFromBacklogTask(task, projectKey);
+    if (overridden.has("priority"))
+      issueData.priority = undefined;
+    if (overridden.has("labels"))
+      issueData.labels = undefined;
+    const mappedUpdates = buildMappedJiraFields(readTaskFrontmatter(taskId), null, fieldMappings);
     if (dryRun) {
       logger.info({
         taskId,
@@ -26515,28 +26974,39 @@ async function createIssue(options) {
       console.log(`  Assignee: ${issueData.assignee || "Unassigned"}`);
       console.log(`  Priority: ${issueData.priority || "Default"}`);
       console.log(`  Labels: ${issueData.labels?.join(", ") || "None"}`);
+      for (const change of mappedUpdates.changes) {
+        const value = change.backlogValue;
+        console.log(`  ${change.mapping.jira} (${change.mapping.backlog}): ${Array.isArray(value) ? value.join(", ") : value}`);
+      }
+      for (const { mapping, error } of mappedUpdates.errors) {
+        console.log(`  ${mapping.jira} (${mapping.backlog}): ⚠ ${error}`);
+      }
       return {
         success: true,
         taskId
       };
     }
     logger.info({ taskId, projectKey, issueType: finalIssueType }, "Creating Jira issue");
-    const createdIssue = await jira.createIssue(projectKey, finalIssueType, issueData.summary, {
+    const { issue: createdIssue, failures } = await createIssueWithMappedFields(jira, projectKey, finalIssueType, issueData.summary, {
       description: issueData.description,
       assignee: issueData.assignee,
       priority: issueData.priority,
       labels: issueData.labels
-    });
+    }, mappedUpdates);
     logger.info({ taskId, jiraKey: createdIssue.key }, "Successfully created Jira issue");
     store.addMapping(taskId, createdIssue.key);
     logger.debug({ taskId, jiraKey: createdIssue.key }, "Created task-Jira mapping");
-    const backlogHash = computeHash(normalizeBacklogTask(task));
-    store.setSnapshot(taskId, "backlog", backlogHash, normalizeBacklogTask(task));
-    store.setSnapshot(taskId, "jira", backlogHash, normalizeJiraIssue(createdIssue));
+    if (failures.length > 0) {
+      recordPartialPush(store, taskId, task, await jira.getIssue(createdIssue.key), failures);
+    } else {
+      const backlogHash = computeHash(normalizeBacklogTask(task));
+      store.setSnapshot(taskId, "backlog", backlogHash, normalizeBacklogTask(task));
+      store.setSnapshot(taskId, "jira", backlogHash, normalizeJiraIssue(createdIssue));
+      store.updateSyncState(taskId, {
+        lastSyncAt: new Date().toISOString()
+      });
+    }
     logger.debug({ taskId }, "Created initial snapshots");
-    store.updateSyncState(taskId, {
-      lastSyncAt: new Date().toISOString()
-    });
     try {
       const filePath = getTaskFilePath(taskId);
       const jiraUrl = process.env.JIRA_URL ? `${process.env.JIRA_URL}/browse/${createdIssue.key}` : undefined;
@@ -26544,7 +27014,7 @@ async function createIssue(options) {
         jiraKey: createdIssue.key,
         jiraUrl,
         jiraLastSync: new Date().toISOString(),
-        jiraSyncState: "InSync"
+        jiraSyncState: failures.length > 0 ? "NeedsPush" : "InSync"
       });
       logger.debug({ taskId, jiraKey: createdIssue.key }, "Updated frontmatter with Jira metadata");
     } catch (error) {
@@ -26554,7 +27024,10 @@ async function createIssue(options) {
     return {
       success: true,
       taskId,
-      jiraKey: createdIssue.key
+      jiraKey: createdIssue.key,
+      ...failures.length > 0 ? {
+        warnings: [formatMappedFieldFailures(createdIssue.key, failures)]
+      } : {}
     };
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : String(error);
@@ -26731,6 +27204,67 @@ async function checkConfigFile() {
     throw error;
   }
 }
+async function checkFieldMappings(jira, cwd = process.cwd()) {
+  const mappings = loadFieldMappings(cwd);
+  if (mappings.length === 0) {
+    logger.info("  ✓ No field mappings configured");
+    return [];
+  }
+  const config = JSON.parse(await readFile(join7(cwd, ".backlog-jira", "config.json"), "utf8"));
+  const projectKey = config.jira?.projectKey || process.env.JIRA_PROJECT || "";
+  const issueType = config.jira?.issueType || "Task";
+  let knownFields;
+  try {
+    knownFields = await jira.searchFields("", 1000);
+  } catch (error) {
+    throw new Error(`Could not list Jira fields to verify field mappings: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  let screenFieldIds = null;
+  const writesToJira = mappings.some((m) => m.direction !== "pull");
+  if (writesToJira) {
+    if (!projectKey) {
+      logger.warn("  ⚠ jira.projectKey is not configured; cannot check mapped fields are editable");
+    } else {
+      try {
+        const types = await jira.getProjectIssueTypes(projectKey);
+        const type = types.find((t) => t.name.toLowerCase() === issueType.toLowerCase());
+        if (!type) {
+          throw new Error(`issue type "${issueType}" not found in project ${projectKey}`);
+        }
+        screenFieldIds = new Set(await jira.getCreateFieldIds(projectKey, type.id));
+      } catch (error) {
+        logger.warn(`  ⚠ Could not read screen fields for ${projectKey} / ${issueType}, skipping editability check: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+  }
+  const results = verifyFieldMappings(mappings, knownFields, screenFieldIds, {
+    projectKey,
+    issueType
+  });
+  for (const { mapping, problems } of results) {
+    const label = `${mapping.backlog} ↔ ${mapping.jira} (${mapping.direction})`;
+    if (problems.length === 0) {
+      logger.info(`  ✓ Field mapping ${label}`);
+    } else {
+      for (const problem of problems) {
+        logger.error(`  ✗ Field mapping ${label}: ${problem}`);
+      }
+    }
+  }
+  const failed = results.filter((r) => r.problems.length > 0);
+  if (failed.length > 0) {
+    throw new Error(`${failed.length} field mapping${failed.length === 1 ? "" : "s"} failed verification (${failed.map((r) => r.mapping.jira).join(", ")})`);
+  }
+  return results;
+}
+async function checkFieldMappingsWithJira() {
+  const jira = new JiraClient({ ...getJiraClientOptions(), silentMode: true });
+  try {
+    await checkFieldMappings(jira);
+  } finally {
+    await jira.close().catch(() => {});
+  }
+}
 async function doctorCommand() {
   logger.info(`Running environment checks...
 `);
@@ -26741,6 +27275,7 @@ async function doctorCommand() {
     { name: "Configuration", fn: checkConfigFile, critical: true },
     { name: "Database", fn: checkDatabasePerms, critical: true },
     { name: "MCP Connectivity", fn: checkMCPConnectivity, critical: true },
+    { name: "Field mappings", fn: checkFieldMappingsWithJira, critical: true },
     { name: "Backlog.md project", fn: checkMCPServer, critical: false },
     { name: "Git status", fn: checkGitStatus, critical: false },
     { name: "Disk space", fn: checkDiskSpace, critical: false }
@@ -27532,7 +28067,8 @@ function removeFieldMapping(config, backlogTarget) {
 }
 function describeMapping(mapping) {
   const valueMap = mapping.valueMap ? source_default.gray(` valueMap: ${Object.entries(mapping.valueMap).map(([from, to]) => `${from}→${to}`).join(", ")}`) : "";
-  return `  ${source_default.cyan(mapping.backlog)} ← ${source_default.yellow(mapping.jira)} ${source_default.gray(`(${mapping.type}, ${mapping.direction})`)}${valueMap}`;
+  const arrow = mapping.direction === "both" ? "↔" : mapping.direction === "push" ? "→" : "←";
+  return `  ${source_default.cyan(mapping.backlog)} ${arrow} ${source_default.yellow(mapping.jira)} ${source_default.gray(`(${mapping.type}, ${mapping.direction})`)}${valueMap}`;
 }
 async function listFieldMappings() {
   const config = readConfig();
@@ -27556,7 +28092,7 @@ async function listFieldMappings() {
     process.exitCode = 1;
   }
   console.log(source_default.gray(`
-  Phase 1: mappings are applied on pull (Jira → Backlog) only.
+  ← pull (Jira → Backlog)   → push (Backlog → Jira)   ↔ both
 `));
 }
 async function discoverFields(options) {
@@ -27595,7 +28131,7 @@ function registerMapFieldsCommand(program) {
     }
   };
   mapFieldsCmd.command("list").alias("show").description("List configured field mappings").action(run("List field mappings", listFieldMappings));
-  mapFieldsCmd.command("add").description("Add a field mapping").argument("<backlog-target>", "milestone, dependencies, references, priority, labels, or frontmatter:<key>").argument("<jira-field>", "Jira field ID (customfield_NNNNN) or system field name (e.g. fixVersions)").requiredOption("--type <type>", `One of: ${FIELD_MAPPING_TYPES.join(", ")}`).option("--direction <direction>", `One of: ${FIELD_MAPPING_DIRECTIONS.join(", ")} (only pull is applied today)`, "pull").option("--value-map <entry>", 'Translate a Jira value, e.g. "Highest=high" (repeatable)', (value, previous = []) => [...previous, value]).option("--force", "Replace an existing mapping for the same target").action(run("Add field mapping", async (backlogTarget, jiraField, options) => {
+  mapFieldsCmd.command("add").description("Add a field mapping").argument("<backlog-target>", "milestone, dependencies, references, priority, labels, or frontmatter:<key>").argument("<jira-field>", "Jira field ID (customfield_NNNNN) or system field name (e.g. fixVersions)").requiredOption("--type <type>", `One of: ${FIELD_MAPPING_TYPES.join(", ")}`).option("--direction <direction>", `One of: ${FIELD_MAPPING_DIRECTIONS.join(", ")} (pull: Jira → Backlog, push: Backlog → Jira)`, "pull").option("--value-map <entry>", 'Translate a Jira value, e.g. "Highest=high" (repeatable)', (value, previous = []) => [...previous, value]).option("--force", "Replace an existing mapping for the same target").action(run("Add field mapping", async (backlogTarget, jiraField, options) => {
     const config = addFieldMapping(readConfig(), {
       backlog: backlogTarget,
       jira: jiraField,
@@ -28331,7 +28867,7 @@ function findBestTransitionMatch(transitions, acceptableStatuses) {
 }
 
 // src/utils/sync-state.ts
-function classifySyncState(currentBacklogHash, currentJiraHash, backlogSnapshot, jiraSnapshot, currentPayloads) {
+function classifySyncState(currentBacklogHash, currentJiraHash, backlogSnapshot, jiraSnapshot, currentPayloads, options) {
   logger.debug({
     currentBacklogHash,
     currentJiraHash,
@@ -28349,11 +28885,20 @@ function classifySyncState(currentBacklogHash, currentJiraHash, backlogSnapshot,
   const baseJiraHash = jiraSnapshot.hash;
   let backlogChanged = currentBacklogHash !== baseBacklogHash;
   let jiraChanged = currentJiraHash !== baseJiraHash;
+  let restorePull = false;
+  let restorePush = false;
   if (currentPayloads) {
-    const adjusted = detectChangesAcrossMappingChange(currentPayloads, backlogSnapshot, jiraSnapshot);
+    const directions = getMappingDirections(options?.fieldMappings);
+    const adjusted = detectChangesAcrossMappingChange(currentPayloads, backlogSnapshot, jiraSnapshot, directions);
     if (adjusted) {
       backlogChanged = adjusted.backlogChanged;
       jiraChanged = adjusted.jiraChanged;
+    } else {
+      const directional = applyMappingDirections(currentPayloads, backlogSnapshot, jiraSnapshot, directions, { backlogChanged, jiraChanged });
+      backlogChanged = directional.backlogChanged;
+      jiraChanged = directional.jiraChanged;
+      restorePull = directional.restorePull;
+      restorePush = directional.restorePush;
     }
   }
   logger.debug({
@@ -28371,6 +28916,11 @@ function classifySyncState(currentBacklogHash, currentJiraHash, backlogSnapshot,
     state = "NeedsPull";
   } else {
     state = "Conflict";
+  }
+  if (state === "InSync" && restorePull) {
+    state = "NeedsPull";
+  } else if (state === "InSync" && restorePush) {
+    state = "NeedsPush";
   }
   return {
     state,
@@ -28397,7 +28947,7 @@ function restrictMappedFields(payload, keys) {
   }
   return { ...payload, mappedFields };
 }
-function detectChangesAcrossMappingChange(current, backlogSnapshot, jiraSnapshot) {
+function detectChangesAcrossMappingChange(current, backlogSnapshot, jiraSnapshot, directions = new Map) {
   const currentKeys = mappedFieldKeys(current.jira);
   const baseBacklogPayload = parseSnapshotPayload(backlogSnapshot);
   const baseJiraPayload = parseSnapshotPayload(jiraSnapshot);
@@ -28413,15 +28963,63 @@ function detectChangesAcrossMappingChange(current, backlogSnapshot, jiraSnapshot
     return computeHash(restrictMappedFields(payload, commonKeys));
   };
   const backlogChanged = computeHash(restrictMappedFields(current.backlog, commonKeys)) !== baseHash(backlogSnapshot, baseBacklogPayload);
+  let backlogChangedResult = backlogChanged;
   let jiraChanged = computeHash(restrictMappedFields(current.jira, commonKeys)) !== baseHash(jiraSnapshot, baseJiraPayload);
   const newKeys = currentKeys.filter((k) => !baseKeys.includes(k));
   for (const key of newKeys) {
     if ((current.backlog.mappedFields?.[key] ?? "") !== (current.jira.mappedFields?.[key] ?? "")) {
-      jiraChanged = true;
+      if (directions.get(key) === "push")
+        backlogChangedResult = true;
+      else
+        jiraChanged = true;
     }
   }
-  logger.debug({ currentKeys, baseKeys, backlogChanged, jiraChanged }, "Mapped field set changed since snapshot");
-  return { backlogChanged, jiraChanged };
+  logger.debug({
+    currentKeys,
+    baseKeys,
+    backlogChanged: backlogChangedResult,
+    jiraChanged
+  }, "Mapped field set changed since snapshot");
+  return { backlogChanged: backlogChangedResult, jiraChanged };
+}
+function getMappingDirections(fieldMappings) {
+  let mappings = fieldMappings;
+  if (!mappings) {
+    try {
+      mappings = loadFieldMappings();
+    } catch (error) {
+      logger.debug({ error }, "Ignoring invalid fieldMappings for sync state");
+      mappings = [];
+    }
+  }
+  return new Map(mappings.map((m) => [m.backlog, m.direction]));
+}
+function applyMappingDirections(current, backlogSnapshot, jiraSnapshot, directions, changed) {
+  const result = { ...changed, restorePull: false, restorePush: false };
+  if (directions.size === 0)
+    return result;
+  const changedKeys = (payload, snapshot) => {
+    const base = parseSnapshotPayload(snapshot);
+    return base ? comparePayloads(payload, base) : null;
+  };
+  if (changed.backlogChanged) {
+    const keys = changedKeys(current.backlog, backlogSnapshot);
+    if (keys?.every((k) => directions.get(k) === "pull")) {
+      result.backlogChanged = false;
+      result.restorePull = keys.length > 0;
+    }
+  }
+  if (changed.jiraChanged) {
+    const keys = changedKeys(current.jira, jiraSnapshot);
+    if (keys?.every((k) => directions.get(k) === "push")) {
+      result.jiraChanged = false;
+      result.restorePush = keys.length > 0;
+    }
+  }
+  if (result.restorePull || result.restorePush) {
+    logger.debug(result, "Applied field mapping directions");
+  }
+  return result;
 }
 
 // src/utils/title-sanitizer.ts
@@ -28524,7 +29122,6 @@ async function pull(options = {}) {
     logger.level = originalLevel;
   }
   logger.info({ result }, "Pull operation completed");
-  process.exit(0);
   return result;
 }
 async function getTaskIds(options, backlog, jira, store) {
@@ -28661,9 +29258,10 @@ async function pullTask(taskId, context) {
     }
     applyMappedFrontmatter(taskId, issue, fieldMappings);
     const updatedTask = await backlog.getTask(taskId);
-    const syncedHash = computeHash(normalizeJiraIssue(issue));
-    store.setSnapshot(taskId, "backlog", syncedHash, normalizeBacklogTask(updatedTask));
-    store.setSnapshot(taskId, "jira", syncedHash, normalizeJiraIssue(issue));
+    recordSyncedSnapshots(store, taskId, {
+      backlog: normalizeBacklogTask(updatedTask),
+      jira: normalizeJiraIssue(issue)
+    }, "jira", fieldMappings);
     store.updateSyncState(taskId, {
       lastSyncAt: new Date().toISOString()
     });
@@ -28685,7 +29283,7 @@ async function pullTask(taskId, context) {
 }
 function buildBacklogUpdates(issue, currentTask, projectKey, fieldMappings = []) {
   const updates = {};
-  const overridden = new Set(getPullMappings(fieldMappings).map((m) => m.backlog).filter(isCoreOverrideTarget));
+  const overridden = new Set(fieldMappings.map((m) => m.backlog).filter(isCoreOverrideTarget));
   const sanitizedTitle = sanitizeTitle(issue.summary);
   if (sanitizedTitle !== currentTask.title) {
     updates.title = sanitizedTitle;
@@ -28832,13 +29430,14 @@ async function importJiraIssue(jiraKey, context) {
       logger.warn({ jiraKey, jiraAssignee: issue.assignee }, "No Backlog assignees available for auto-discovery. Using Jira identifier as fallback.");
     }
   }
+  const overridden = new Set(fieldMappings.map((m) => m.backlog).filter(isCoreOverrideTarget));
   const taskId = await backlog.createTask({
     title: sanitizeTitle(issue.summary),
     description: cleanDescription,
     status: mapJiraStatusToBacklog(issue.status, projectKey),
     assignee: mappedAssignee || issue.assignee,
-    labels: issue.labels,
-    priority: issue.priority,
+    labels: overridden.has("labels") ? undefined : issue.labels,
+    priority: overridden.has("priority") ? undefined : issue.priority,
     ac: acceptanceCriteria.map((ac) => ac.text)
   });
   logger.info({ taskId, jiraKey }, "Created Backlog task from Jira issue");
@@ -28892,6 +29491,13 @@ async function push(options = {}) {
     logger.level = "error";
   }
   logger.info({ options }, "Starting push operation");
+  let fieldMappings;
+  try {
+    fieldMappings = loadFieldMappings();
+  } catch (error) {
+    logger.level = originalLevel;
+    throw error;
+  }
   const store = new FrontmatterStore;
   const backlog = new BacklogClient;
   const jira = new JiraClient(getJiraClientOptions());
@@ -28921,6 +29527,7 @@ async function push(options = {}) {
             jira,
             projectKey,
             issueType,
+            fieldMappings,
             force: options.force || false,
             dryRun: options.dryRun || false
           });
@@ -28928,7 +29535,11 @@ async function push(options = {}) {
           logger.info({ taskId }, "Successfully pushed task");
         } catch (error) {
           const errorMsg = error instanceof Error ? error.message : String(error);
-          result.failed.push({ taskId, error: errorMsg });
+          result.failed.push({
+            taskId,
+            error: errorMsg,
+            ...error instanceof MappedFieldPushError ? { mappedFieldError: error } : {}
+          });
           logger.error({ taskId, error: errorMsg }, "Failed to push task");
           result.success = false;
         }
@@ -28976,7 +29587,17 @@ async function getTaskIds2(options, backlog, jira, store) {
   return needsPush;
 }
 async function pushTask(taskId, context) {
-  const { store, backlog, jira, projectKey, issueType, force, dryRun } = context;
+  const {
+    store,
+    backlog,
+    jira,
+    projectKey,
+    issueType,
+    fieldMappings,
+    force,
+    dryRun
+  } = context;
+  const overridden = getOverriddenCoreFields(fieldMappings);
   const task = await backlog.getTask(taskId);
   const backlogPayload = normalizeBacklogTask(task);
   const backlogHash = computeHash(backlogPayload);
@@ -28992,22 +29613,31 @@ async function pushTask(taskId, context) {
         throw new Error(`Conflict detected. Use --force to override or run 'backlog-jira sync' to resolve`);
       }
     }
-    const updates = await buildJiraUpdates(task, issue, jira, projectKey);
+    const updates = await buildJiraUpdates(task, issue, jira, projectKey, overridden);
+    const mappedUpdates = buildMappedJiraFields(readTaskFrontmatter(taskId), issue, fieldMappings);
     if (dryRun) {
-      logger.info({ taskId, jiraKey: mapping.jiraKey, updates }, "DRY RUN: Would update Jira issue");
+      logger.info({
+        taskId,
+        jiraKey: mapping.jiraKey,
+        updates,
+        mappedFields: mappedUpdates.fields
+      }, "DRY RUN: Would update Jira issue");
     } else {
-      if (Object.keys(updates.fields).length > 0) {
-        await jira.updateIssue(mapping.jiraKey, updates.fields);
-      }
+      const failures = await updateIssueWithMappedFields(jira, mapping.jiraKey, updates.fields, mappedUpdates);
       if (updates.transition) {
         await jira.transitionIssue(mapping.jiraKey, updates.transition.id, {
           comment: updates.transition.comment
         });
       }
       const updatedIssue = await jira.getIssue(mapping.jiraKey);
-      const syncedHash = computeHash(normalizeBacklogTask(task));
-      store.setSnapshot(taskId, "backlog", syncedHash, normalizeBacklogTask(task));
-      store.setSnapshot(taskId, "jira", syncedHash, normalizeJiraIssue(updatedIssue));
+      if (failures.length > 0) {
+        recordPartialPush(store, taskId, task, updatedIssue, failures, fieldMappings);
+        throw new MappedFieldPushError(mapping.jiraKey, failures);
+      }
+      recordSyncedSnapshots(store, taskId, {
+        backlog: normalizeBacklogTask(task),
+        jira: normalizeJiraIssue(updatedIssue)
+      }, "backlog", fieldMappings);
       store.updateSyncState(taskId, {
         lastSyncAt: new Date().toISOString()
       });
@@ -29026,23 +29656,29 @@ async function pushTask(taskId, context) {
       }
     }
   } else {
+    const mappedUpdates = buildMappedJiraFields(readTaskFrontmatter(taskId), null, fieldMappings);
     if (dryRun) {
-      logger.info({ taskId, projectKey, issueType }, "DRY RUN: Would create new Jira issue");
+      logger.info({ taskId, projectKey, issueType, mappedFields: mappedUpdates.fields }, "DRY RUN: Would create new Jira issue");
     } else {
       const descriptionWithAc = task.acceptanceCriteria ? mergeDescriptionWithAc(task.description || "", task.acceptanceCriteria, task.implementationPlan, task.implementationNotes) : task.description;
       const mappedAssignee = task.assignee ? mapBacklogAssigneeToJira(task.assignee) : undefined;
       if (task.assignee && !mappedAssignee) {
         logger.warn({ taskId, assignee: task.assignee }, "No Jira user mapping found for Backlog assignee. Configure mapping with: backlog-jira map-assignees add");
       }
-      const issue = await jira.createIssue(projectKey, issueType, task.title, {
+      const { issue, failures } = await createIssueWithMappedFields(jira, projectKey, issueType, task.title, {
         description: descriptionWithAc,
         assignee: mappedAssignee || undefined,
-        priority: task.priority ? mapBacklogPriorityToJira(task.priority) : undefined,
-        labels: task.labels
-      });
+        priority: task.priority && !overridden.has("priority") ? mapBacklogPriorityToJira(task.priority) : undefined,
+        labels: overridden.has("labels") ? undefined : task.labels
+      }, mappedUpdates);
       store.addMapping(taskId, issue.key);
-      store.setSnapshot(taskId, "backlog", backlogHash, normalizeBacklogTask(task));
-      store.setSnapshot(taskId, "jira", backlogHash, normalizeJiraIssue(issue));
+      if (failures.length > 0) {
+        const createdIssue = await jira.getIssue(issue.key);
+        recordPartialPush(store, taskId, task, createdIssue, failures, fieldMappings);
+      } else {
+        store.setSnapshot(taskId, "backlog", backlogHash, normalizeBacklogTask(task));
+        store.setSnapshot(taskId, "jira", backlogHash, normalizeJiraIssue(issue));
+      }
       store.updateSyncState(taskId, {
         lastSyncAt: new Date().toISOString()
       });
@@ -29053,17 +29689,20 @@ async function pushTask(taskId, context) {
           jiraKey: issue.key,
           jiraUrl,
           jiraLastSync: new Date().toISOString(),
-          jiraSyncState: "InSync"
+          jiraSyncState: failures.length > 0 ? "NeedsPush" : "InSync"
         });
         logger.debug({ taskId, jiraKey: issue.key }, "Updated frontmatter with Jira metadata for new issue");
       } catch (error) {
         logger.error({ taskId, error }, "Failed to update frontmatter, but push was successful");
       }
+      if (failures.length > 0) {
+        throw new MappedFieldPushError(issue.key, failures);
+      }
       logger.info({ taskId, jiraKey: issue.key }, "Created new Jira issue");
     }
   }
 }
-async function buildJiraUpdates(task, currentIssue, jiraClient, projectKey) {
+async function buildJiraUpdates(task, currentIssue, jiraClient, projectKey, overridden = new Set) {
   const fields = {};
   if (task.title !== currentIssue.summary) {
     fields.summary = task.title;
@@ -29088,7 +29727,7 @@ async function buildJiraUpdates(task, currentIssue, jiraClient, projectKey) {
       }, "Mapped Backlog assignee to Jira user");
     }
   }
-  if (task.priority) {
+  if (task.priority && !overridden.has("priority")) {
     const mappedPriority = mapBacklogPriorityToJira(task.priority);
     if (mappedPriority && mappedPriority !== currentIssue.priority) {
       fields.priority = mappedPriority;
@@ -29099,7 +29738,7 @@ async function buildJiraUpdates(task, currentIssue, jiraClient, projectKey) {
       }, "Mapped Backlog priority to Jira priority");
     }
   }
-  if (task.labels && JSON.stringify(task.labels) !== JSON.stringify(currentIssue.labels)) {
+  if (!overridden.has("labels") && task.labels && JSON.stringify(task.labels) !== JSON.stringify(currentIssue.labels)) {
     fields.labels = task.labels;
   }
   let transition;
@@ -29453,6 +30092,15 @@ async function sync(options = {}) {
   if (options.verbose) {
     logger.info({ options }, "Starting sync operation");
   }
+  let fieldMappings;
+  try {
+    fieldMappings = loadFieldMappings();
+  } catch (error) {
+    if (restoreIo)
+      restoreIo();
+    logger.level = originalLevel;
+    throw error;
+  }
   const store = new FrontmatterStore;
   const backlog = new BacklogClient;
   const jiraClientOptions = getJiraClientOptions();
@@ -29482,6 +30130,7 @@ async function sync(options = {}) {
             backlog,
             jira,
             strategy,
+            fieldMappings,
             dryRun: options.dryRun || false
           });
           if (outcome.type === "synced") {
@@ -29500,7 +30149,11 @@ async function sync(options = {}) {
           const m = store.getMapping(taskId);
           const jiraKey = m?.jiraKey;
           const minimal = `${taskId}${jiraKey ? ` (${jiraKey})` : ""} sync failed`;
-          result.failed.push({ taskId, error: minimal });
+          result.failed.push({
+            taskId,
+            error: error instanceof MappedFieldPushError ? `${minimal}
+${error.message}` : minimal
+          });
           const em = errorMsg.toLowerCase();
           if (em.includes("expecting value") || em.includes("jsondecodeerror") || em.includes("proxy authentication") || em.includes("login") && em.includes("html")) {
             const jiraUrl = process.env.JIRA_URL || "your Jira URL";
@@ -29541,19 +30194,23 @@ async function getTaskIds3(options, store) {
   return Array.from(mappings.keys());
 }
 async function syncTask(taskId, context) {
-  const { store, backlog, jira, strategy, dryRun } = context;
+  const { store, backlog, jira, strategy, fieldMappings, dryRun } = context;
   const mapping = store.getMapping(taskId);
   if (!mapping) {
     return { type: "skipped", reason: "No Jira mapping" };
   }
   const task = await backlog.getTask(taskId);
   const issue = await jira.getIssue(mapping.jiraKey);
-  const backlogPayload = normalizeBacklogTask(task);
-  const jiraPayload = normalizeJiraIssue(issue);
+  const frontmatter = readTaskFrontmatter(taskId);
+  const backlogPayload = normalizeBacklogTask(task, {
+    fieldMappings,
+    frontmatter
+  });
+  const jiraPayload = normalizeJiraIssue(issue, { fieldMappings });
   const backlogHash = computeHash(backlogPayload);
   const jiraHash = computeHash(jiraPayload);
   const snapshots = store.getSnapshots(taskId);
-  const state = classifySyncState(backlogHash, jiraHash, snapshots.backlog, snapshots.jira, { backlog: backlogPayload, jira: jiraPayload });
+  const state = classifySyncState(backlogHash, jiraHash, snapshots.backlog, snapshots.jira, { backlog: backlogPayload, jira: jiraPayload }, { fieldMappings });
   logger.debug({ taskId, state: state.state }, "Sync state classified");
   switch (state.state) {
     case "InSync":
@@ -29561,24 +30218,38 @@ async function syncTask(taskId, context) {
       return { type: "skipped", reason: "Already in sync" };
     case "NeedsPush":
       if (!dryRun) {
-        await push({ taskIds: [taskId] });
+        assertSucceeded(await push({ taskIds: [taskId] }));
       }
       return { type: "synced", direction: "push" };
     case "NeedsPull":
       if (!dryRun) {
-        await pull({ taskIds: [taskId] });
+        assertSucceeded(await pull({ taskIds: [taskId] }));
       }
       return { type: "synced", direction: "pull" };
-    case "Conflict":
+    case "Conflict": {
+      const mappedState = {
+        current: { backlog: backlogPayload, jira: jiraPayload },
+        base: {
+          backlog: parsePayload(snapshots.backlog?.payload),
+          jira: parsePayload(snapshots.jira?.payload)
+        },
+        frontmatter,
+        issue
+      };
       return await resolveConflict({
         taskId,
         jiraKey: mapping.jiraKey,
-        fields: detectFieldConflicts(task, issue, snapshots),
+        fields: [
+          ...detectFieldConflicts(task, issue, snapshots, fieldMappings),
+          ...detectMappedFieldConflicts(mappedState, fieldMappings)
+        ],
         backlogTask: task,
         jiraIssue: issue,
         baseBacklog: snapshots.backlog ? JSON.parse(snapshots.backlog.payload) : null,
-        baseJira: snapshots.jira ? JSON.parse(snapshots.jira.payload) : null
-      }, strategy, { store, backlog, jira, dryRun });
+        baseJira: snapshots.jira ? JSON.parse(snapshots.jira.payload) : null,
+        mappedState
+      }, strategy, { store, backlog, jira, fieldMappings, dryRun });
+    }
     case "Unknown":
       logger.info({ taskId }, "No baseline snapshot, creating initial sync");
       if (!dryRun) {
@@ -29604,11 +30275,27 @@ async function syncTask(taskId, context) {
       return { type: "synced", direction: "none" };
   }
 }
-function detectFieldConflicts(task, issue, snapshots) {
+function assertSucceeded(result) {
+  const failure = result.failed[0];
+  if (failure) {
+    throw failure.mappedFieldError ?? new Error(failure.error);
+  }
+}
+function parsePayload(payload) {
+  if (!payload)
+    return null;
+  try {
+    return JSON.parse(payload);
+  } catch {
+    return null;
+  }
+}
+function detectFieldConflicts(task, issue, snapshots, fieldMappings = []) {
   const conflicts = [];
   if (!snapshots.backlog || !snapshots.jira) {
     return conflicts;
   }
+  const overridden = getOverriddenCoreFields(fieldMappings);
   const baseBacklog = JSON.parse(snapshots.backlog.payload);
   const baseJira = JSON.parse(snapshots.jira.payload);
   if (task.title !== baseBacklog.title && issue.summary !== baseJira.summary) {
@@ -29643,7 +30330,7 @@ function detectFieldConflicts(task, issue, snapshots) {
       baseValue: baseBacklog.assignee
     });
   }
-  if (task.priority !== baseBacklog.priority && issue.priority !== baseJira.priority) {
+  if (!overridden.has("priority") && task.priority !== baseBacklog.priority && issue.priority !== baseJira.priority) {
     conflicts.push({
       field: "priority",
       backlogValue: task.priority,
@@ -29655,7 +30342,7 @@ function detectFieldConflicts(task, issue, snapshots) {
   const baseLabelsStr = JSON.stringify(baseBacklog.labels);
   const issueLabelsStr = JSON.stringify(issue.labels || []);
   const baseJiraLabelsStr = JSON.stringify(baseJira.labels);
-  if (taskLabelsStr !== baseLabelsStr && issueLabelsStr !== baseJiraLabelsStr) {
+  if (!overridden.has("labels") && taskLabelsStr !== baseLabelsStr && issueLabelsStr !== baseJiraLabelsStr) {
     conflicts.push({
       field: "labels",
       backlogValue: task.labels,
@@ -29666,24 +30353,30 @@ function detectFieldConflicts(task, issue, snapshots) {
   return conflicts;
 }
 async function resolveConflict(conflict, strategy, context) {
-  const { store, backlog, jira, dryRun } = context;
+  const { store, backlog, jira, fieldMappings, dryRun } = context;
   logger.info({ taskId: conflict.taskId, strategy, fieldCount: conflict.fields.length }, "Resolving conflict");
   switch (strategy) {
     case "prefer-backlog":
       if (!dryRun) {
-        await push({ taskIds: [conflict.taskId], force: true });
+        assertSucceeded(await push({ taskIds: [conflict.taskId], force: true }));
       }
       return { type: "conflict", resolution: "preferred-backlog" };
     case "prefer-jira":
       if (!dryRun) {
-        await pull({ taskIds: [conflict.taskId], force: true });
+        assertSucceeded(await pull({ taskIds: [conflict.taskId], force: true }));
       }
       return { type: "conflict", resolution: "preferred-jira" };
     case "prompt":
       try {
         const resolution = await promptForConflictResolution(conflict);
         if (!dryRun) {
-          await applyFieldResolutions(conflict.taskId, conflict.jiraKey, resolution.resolutions, { backlog, jira, store });
+          await applyFieldResolutions(conflict.taskId, conflict.jiraKey, resolution.resolutions, {
+            backlog,
+            jira,
+            store,
+            fieldMappings,
+            mappedState: conflict.mappedState
+          });
           if (resolution.savePreference) {
             const preferredSource = determinePreferredSource(resolution.resolutions);
             if (preferredSource) {
@@ -29693,6 +30386,9 @@ async function resolveConflict(conflict, strategy, context) {
         }
         return { type: "conflict", resolution: "user-resolved" };
       } catch (error) {
+        if (error instanceof MappedFieldPushError) {
+          throw error;
+        }
         logger.error({ taskId: conflict.taskId, error }, "Interactive resolution failed");
         store.updateSyncState(conflict.taskId, {
           conflictState: "manual-resolution-required"
@@ -29719,10 +30415,17 @@ function loadConfig3() {
   }
 }
 async function applyFieldResolutions(taskId, jiraKey, resolutions, context) {
-  const { backlog, jira, store } = context;
+  const { backlog, jira, store, fieldMappings = [], mappedState } = context;
   const backlogUpdates = {};
   const jiraUpdates = {};
+  const mappingsByTarget = new Map(fieldMappings.map((m) => [m.backlog, m]));
+  const mappedResolutions = new Map;
   for (const resolution of resolutions) {
+    const fieldMapping = mappingsByTarget.get(resolution.field);
+    if (fieldMapping && fieldMapping.direction === "both") {
+      mappedResolutions.set(resolution.field, resolution.source === "manual" ? parseManualMappedValue(resolution.value, fieldMapping) : resolution.value);
+      continue;
+    }
     const fieldKey = resolution.field.replace("/", "_");
     if (resolution.source === "backlog" || resolution.source === "manual") {
       jiraUpdates[fieldKey] = resolution.value;
@@ -29732,11 +30435,27 @@ async function applyFieldResolutions(taskId, jiraKey, resolutions, context) {
   }
   if (Object.keys(backlogUpdates).length > 0) {
     logger.info({ taskId, fields: Object.keys(backlogUpdates) }, "Updating Backlog from Jira");
-    await pull({ taskIds: [taskId], force: true });
+    assertSucceeded(await pull({ taskIds: [taskId], force: true }));
   }
   if (Object.keys(jiraUpdates).length > 0) {
     logger.info({ jiraKey, fields: Object.keys(jiraUpdates) }, "Updating Jira from Backlog");
-    await push({ taskIds: [taskId], force: true });
+    assertSucceeded(await push({ taskIds: [taskId], force: true }));
+  }
+  if (mappedState && fieldMappings.length > 0) {
+    const plan = planMappedFieldMerge(mappedState, fieldMappings, mappedResolutions);
+    if (plan.length > 0) {
+      const failures = await applyMappedFieldMerge(plan, {
+        taskId,
+        issueKey: jiraKey,
+        backlog,
+        jira,
+        frontmatter: readTaskFrontmatter(taskId),
+        issue: await jira.getIssue(jiraKey)
+      });
+      if (failures.length > 0) {
+        throw new MappedFieldPushError(jiraKey, failures);
+      }
+    }
   }
   const task = await backlog.getTask(taskId);
   const issue = await jira.getIssue(jiraKey);
@@ -29881,6 +30600,11 @@ ${c}`;
     } else {
       console.log("Interactive view not yet implemented. Use --plain flag.");
     }
+    const mappedLines = await getMappedFieldLines(taskId, mapping?.jiraKey);
+    if (mappedLines.length > 0) {
+      console.log(mappedLines.join(`
+`));
+    }
   } catch (error) {
     logger.error({ error, taskId }, "Failed to view task");
     console.error(`Error viewing task ${taskId}: ${error}`);
@@ -29888,6 +30612,36 @@ ${c}`;
   } finally {
     store.close();
   }
+}
+async function getMappedFieldLines(taskId, jiraKey) {
+  let mappings;
+  try {
+    mappings = loadFieldMappings();
+  } catch (error) {
+    return [
+      "",
+      `Mapped Fields: ${error instanceof Error ? error.message : String(error)}`
+    ];
+  }
+  if (mappings.length === 0)
+    return [];
+  let issue = null;
+  let unavailable = "(task not linked to Jira)";
+  if (jiraKey) {
+    const jira = new JiraClient({
+      ...getJiraClientOptions(),
+      silentMode: true
+    });
+    try {
+      issue = await jira.getIssue(jiraKey);
+    } catch (error) {
+      unavailable = `(could not fetch ${jiraKey}: ${error instanceof Error ? error.message.split(`
+`)[0] : String(error)})`;
+    } finally {
+      await jira.close().catch(() => {});
+    }
+  }
+  return formatMappedFieldsSection(mappings, readTaskFrontmatter(taskId), issue, unavailable);
 }
 function registerViewCommand(program) {
   program.command("view <taskId>").description("View task with Jira integration details").option("--plain", "Output plain text format").action(async (taskId, options) => {
@@ -30082,6 +30836,10 @@ program2.command("create-issue <taskId>").description("Create a Jira issue from 
       if (result.jiraKey) {
         console.log(`
 ✅ Successfully created Jira issue ${result.jiraKey} for task ${result.taskId}`);
+      }
+      for (const warning of result.warnings ?? []) {
+        console.warn(`
+⚠️  ${warning}`);
       }
       process.exit(0);
     } else {

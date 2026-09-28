@@ -121,6 +121,9 @@ program
 						`\n✅ Successfully created Jira issue ${result.jiraKey} for task ${result.taskId}`,
 					);
 				}
+				for (const warning of result.warnings ?? []) {
+					console.warn(`\n⚠️  ${warning}`);
+				}
 				process.exit(0);
 			} else {
 				console.error(`\n❌ Failed to create Jira issue: ${result.error}`);

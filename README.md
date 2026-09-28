@@ -312,18 +312,19 @@ Edit `.backlog-jira/config.json`:
 
 #### Custom Field Mappings
 
-Top-level `fieldMappings` maps extra Jira fields onto Backlog tasks. Mappings are
-**pull-only** today: `backlog-jira pull` writes Jira values into Backlog, but
-mapped values are never sent to Jira and local edits to them are overwritten on
-the next pull.
+Top-level `fieldMappings` maps extra Jira fields onto Backlog tasks. Each
+mapping's `direction` decides where values flow: `pull` (default) writes Jira
+values into Backlog, `push` sends Backlog values to Jira (on `push`, `sync` and
+`create-issue`), and `both` syncs both ways with per-field conflict detection.
 
 ```json
 {
   "fieldMappings": [
-    { "backlog": "frontmatter:story_points", "jira": "customfield_10016", "type": "number" },
+    { "backlog": "frontmatter:story_points", "jira": "customfield_10016", "type": "number",
+      "direction": "both" },
     { "backlog": "milestone", "jira": "fixVersions", "type": "version" },
     { "backlog": "frontmatter:team", "jira": "customfield_10020", "type": "option",
-      "valueMap": { "Platform Team": "platform" } }
+      "direction": "push", "valueMap": { "Platform Team": "platform" } }
   ]
 }
 ```
@@ -333,14 +334,18 @@ the next pull.
 | `backlog` | `milestone`, `dependencies`, `references`, `priority`, `labels` (written with `backlog task edit`), or `frontmatter:<key>` (a plugin-owned key in the task file) |
 | `jira` | Custom field ID (`customfield_10016`) or system field name (`fixVersions`, `components`, `duedate`) |
 | `type` | `string`, `number`, `date`, `option`, `multi-option`, `user`, `version`, `array` |
-| `direction` | Optional, default `pull`. `push` and `both` are accepted for forward compatibility; only the pull side is applied |
-| `valueMap` | Optional. Translates Jira values to Backlog values, e.g. `{ "Highest": "high" }` |
+| `direction` | Optional, default `pull`. `pull` mappings are never written to Jira; `push` mappings are never written to Backlog; `both` syncs both ways |
+| `valueMap` | Optional. Translates Jira values to Backlog values, e.g. `{ "Highest": "high" }`, and back when pushing |
 
 Invalid entries (unknown targets, unknown types, duplicate targets, or
 `frontmatter:` keys that collide with Backlog core keys such as `status` or with
-the plugin's `jira_*` keys) stop `pull` with an error listing every problem.
-Mapping `priority` or `labels` replaces the built-in Jira priority/labels as the
-source for that field. Manage mappings with
+the plugin's `jira_*` keys) stop `pull`, `push` and `sync` with an error listing
+every problem. Mapping `priority` or `labels` replaces the built-in Jira
+priority/labels for that field, which are then not synced. If Jira rejects a
+mapped field on push (for example because it is not on the issue type's edit
+screen), the rest of the push still goes through and the error names the
+failing field; `backlog-jira doctor` checks each mapped field exists and is
+editable. Manage mappings with
 [`backlog-jira map-fields`](#backlog-jira-map-fields); see the
 [Custom Field Mapping Guide](docs/custom-field-mapping.md) for details.
 
@@ -507,6 +512,7 @@ Checks:
 - Backlog CLI installation
 - Configuration validity
 - Database connectivity
+- Field mappings: each mapped Jira field exists, and `push`/`both` fields are editable for the configured project and issue type
 - Project structure
 - Git status
 
@@ -584,7 +590,7 @@ backlog-jira map --remove task-123
 
 ### `backlog-jira map-fields`
 
-Manage [custom field mappings](#custom-field-mappings) (applied on pull).
+Manage [custom field mappings](#custom-field-mappings).
 
 ```bash
 # Find field IDs and suggested adapter types
@@ -594,6 +600,7 @@ backlog-jira map-fields discover --custom-only
 # Add mappings
 backlog-jira map-fields add frontmatter:story_points customfield_10016 --type number
 backlog-jira map-fields add milestone fixVersions --type version
+backlog-jira map-fields add frontmatter:team customfield_10020 --type option --direction both
 backlog-jira map-fields add priority customfield_10050 --type option \
   --value-map "P1=high" --value-map "P2=medium" --value-map "P3=low"
 
@@ -690,6 +697,7 @@ backlog-jira push task-123 --force
 - Assignee → Assignee
 - Labels → Labels
 - Acceptance Criteria → Embedded in description
+- Mapped fields with direction `push` or `both` → their Jira fields
 
 ### `backlog-jira pull [taskIds...]`
 
@@ -779,13 +787,16 @@ backlog-jira sync task-123 --dry-run
 - `prompt`: Ask user for each conflict (interactive)
 - `manual`: Skip conflicts, log them for manual resolution
 
+Mapped fields with direction `both` are compared per field; `pull` and `push`
+mappings never conflict because their owning side always wins.
+
 ### `backlog-jira view`
 
 View task/issue details and sync status.
 
 ```bash
-# View task details
-backlog-jira view task-123
+# View task details (mapped fields show Backlog and Jira values)
+backlog-jira view task-123 --plain
 
 # View with Jira issue details
 backlog-jira view task-123 --with-jira

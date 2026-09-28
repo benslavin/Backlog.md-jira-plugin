@@ -1,7 +1,10 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { JiraIssue } from "../integrations/jira.ts";
-import { mapJiraUserToBacklog } from "./assignee-mapping.ts";
+import {
+	mapBacklogAssigneeToJira,
+	mapJiraUserToBacklog,
+} from "./assignee-mapping.ts";
 import { getTaskFilePath, parseFrontmatter } from "./frontmatter.ts";
 import { logger } from "./logger.ts";
 
@@ -17,7 +20,9 @@ import { logger } from "./logger.ts";
  *   ]
  * }
  *
- * Phase 1 applies mappings in the pull direction only (Jira → Backlog).
+ * Each mapping's direction decides which side it writes to: `pull` mappings
+ * only write Jira values into Backlog, `push` mappings only write Backlog
+ * values into Jira, and `both` mappings sync in both directions.
  */
 
 export const FIELD_MAPPING_TYPES = [
@@ -281,6 +286,13 @@ export function loadFieldMappings(cwd = process.cwd()): FieldMapping[] {
  */
 export function getPullMappings(mappings: FieldMapping[]): FieldMapping[] {
 	return mappings.filter((m) => m.direction !== "push");
+}
+
+/**
+ * Mappings applied when pushing to Jira (direction push or both)
+ */
+export function getPushMappings(mappings: FieldMapping[]): FieldMapping[] {
+	return mappings.filter((m) => m.direction !== "pull");
 }
 
 /**
@@ -578,50 +590,68 @@ export function buildMappedFieldUpdates(
 	currentFrontmatter: Record<string, unknown>,
 	mappings: FieldMapping[],
 ): MappedFieldUpdates {
+	return buildBacklogValueUpdates(
+		getPullMappings(mappings).map((mapping) => ({
+			mapping,
+			value: getMappedJiraValue(issue, mapping),
+		})),
+		currentFrontmatter,
+	);
+}
+
+/**
+ * Build the Backlog updates that set each mapping's target to the given value
+ * (in Backlog representation). Values that already match produce no update.
+ * Callers are responsible for honouring mapping direction.
+ */
+export function buildBacklogValueUpdates(
+	values: Array<{ mapping: FieldMapping; value: MappedValue }>,
+	currentFrontmatter: Record<string, unknown>,
+): MappedFieldUpdates {
 	const updates: MappedFieldUpdates = { cli: {}, frontmatter: {} };
 
-	for (const mapping of getPullMappings(mappings)) {
+	for (const { mapping, value } of values) {
 		const target = mapping.backlog;
-		const jiraValue = getMappedJiraValue(issue, mapping);
+		const newValue = coerceForTarget(value, target);
 		const currentValue = getBacklogTargetValue(currentFrontmatter, target);
 
 		if (
-			canonicalMappedValue(jiraValue, target) ===
+			canonicalMappedValue(newValue, target) ===
 			canonicalMappedValue(currentValue, target)
 		) {
 			continue;
 		}
 
 		if (target.startsWith(FRONTMATTER_PREFIX)) {
-			updates.frontmatter[frontmatterKeyForTarget(target)] = jiraValue;
+			updates.frontmatter[frontmatterKeyForTarget(target)] = newValue;
 			continue;
 		}
 
 		switch (target as NativeBacklogTarget) {
 			case "milestone":
-				if (jiraValue === null) updates.cli.clearMilestone = true;
-				else updates.cli.milestone = jiraValue as string;
+				if (newValue === null) updates.cli.clearMilestone = true;
+				else updates.cli.milestone = newValue as string;
 				break;
 			case "dependencies":
-				if (jiraValue === null) updates.cli.clearDependencies = true;
-				else updates.cli.dependencies = jiraValue as string[];
+				if (newValue === null) updates.cli.clearDependencies = true;
+				else updates.cli.dependencies = newValue as string[];
 				break;
 			case "references":
-				if (jiraValue === null) updates.cli.clearReferences = true;
-				else updates.cli.references = jiraValue as string[];
+				if (newValue === null) updates.cli.clearReferences = true;
+				else updates.cli.references = newValue as string[];
 				break;
 			case "labels":
-				if (jiraValue === null) updates.cli.clearLabels = true;
-				else updates.cli.labels = jiraValue as string[];
+				if (newValue === null) updates.cli.clearLabels = true;
+				else updates.cli.labels = newValue as string[];
 				break;
 			case "priority":
-				if (jiraValue === null) {
+				if (newValue === null) {
 					logger.warn(
 						{ jiraField: mapping.jira },
-						"Mapped priority is empty in Jira; Backlog priority cannot be cleared via CLI, leaving it unchanged",
+						"Mapped priority is empty; Backlog priority cannot be cleared via CLI, leaving it unchanged",
 					);
 				} else {
-					updates.cli.priority = (jiraValue as string).toLowerCase();
+					updates.cli.priority = (newValue as string).toLowerCase();
 				}
 				break;
 		}
@@ -641,10 +671,11 @@ export function hasMappedFieldUpdates(updates: MappedFieldUpdates): boolean {
 }
 
 /**
- * Jira field IDs that must be requested when fetching issues
+ * Jira field IDs that must be requested when fetching issues.
+ * Push mappings are included so their Jira values can be compared and shown.
  */
 export function getMappedJiraFieldIds(mappings: FieldMapping[]): string[] {
-	return [...new Set(getPullMappings(mappings).map((m) => m.jira))];
+	return [...new Set(mappings.map((m) => m.jira))];
 }
 
 /**
@@ -715,4 +746,207 @@ export function suggestTypeForSchema(schema?: {
 		default:
 			return undefined;
 	}
+}
+
+// ===== Type adapters (Backlog → Jira) =====
+
+/** A Backlog value that cannot be converted for its Jira field */
+export class FieldValueError extends Error {
+	constructor(message: string) {
+		super(message);
+		this.name = "FieldValueError";
+	}
+}
+
+/** System fields that always hold a list in Jira */
+const JIRA_LIST_FIELDS: ReadonlySet<string> = new Set([
+	"fixVersions",
+	"versions",
+	"components",
+	"labels",
+]);
+
+/** Jira account IDs (Cloud) in their legacy and current formats */
+const ACCOUNT_ID_PATTERN = /^([0-9a-f]{24}|[0-9]{5,}:[a-f0-9-]+)$/;
+
+/**
+ * Translate a Backlog value back to its Jira value using a mapping's valueMap.
+ * Exact matches win, then case-insensitive; the first matching entry is used.
+ */
+function reverseValueMap(
+	value: string,
+	valueMap?: Record<string, string>,
+): string {
+	if (!valueMap) return value;
+	for (const [from, to] of Object.entries(valueMap)) {
+		if (to === value) return from;
+	}
+	const lower = value.toLowerCase();
+	for (const [from, to] of Object.entries(valueMap)) {
+		if (to.toLowerCase() === lower) return from;
+	}
+	return value;
+}
+
+/** Backlog value as a list; comma-separated text is split */
+function toList(value: MappedValue): string[] {
+	if (value === null) return [];
+	const items = Array.isArray(value) ? value : value.split(",");
+	return items.map((v) => v.trim()).filter(Boolean);
+}
+
+/** Backlog value as a single string; lists are joined */
+function toScalar(value: MappedValue): string | null {
+	if (value === null) return null;
+	const text = Array.isArray(value) ? value.join(", ") : value;
+	return text.trim() || null;
+}
+
+/**
+ * Jira user field value for a Backlog user. Account IDs are sent as
+ * `{ accountId }`; other identifiers as `{ name }` (Server/DC), and can be
+ * resolved to account IDs by the caller for Jira Cloud.
+ */
+function toJiraUser(user: string): { accountId: string } | { name: string } {
+	const mapped = mapBacklogAssigneeToJira(user) ?? user.replace(/^@/, "");
+	return ACCOUNT_ID_PATTERN.test(mapped)
+		? { accountId: mapped }
+		: { name: mapped };
+}
+
+/**
+ * Convert a Backlog value to the Jira field value expected by the REST API,
+ * using the mapping's type adapter. Empty values clear the field (null for
+ * single-value fields, [] for list fields).
+ * Throws FieldValueError when the value cannot be represented.
+ */
+export function convertBacklogValue(
+	value: MappedValue,
+	mapping: Pick<FieldMapping, "type" | "jira" | "valueMap">,
+): unknown {
+	const { valueMap } = mapping;
+	const mapped: MappedValue =
+		value === null
+			? null
+			: Array.isArray(value)
+				? value.map((v) => reverseValueMap(v, valueMap))
+				: reverseValueMap(value, valueMap);
+
+	switch (mapping.type) {
+		case "string":
+			return toScalar(mapped);
+		case "number": {
+			const text = toScalar(mapped);
+			if (text === null) return null;
+			const num = Number(text);
+			if (!Number.isFinite(num)) {
+				throw new FieldValueError(`"${text}" is not a number`);
+			}
+			return num;
+		}
+		case "date": {
+			const text = toScalar(mapped);
+			if (text === null) return null;
+			const match = text.match(/^(\d{4}-\d{2}-\d{2})/);
+			if (!match || Number.isNaN(Date.parse(match[1]))) {
+				throw new FieldValueError(`"${text}" is not a YYYY-MM-DD date`);
+			}
+			return match[1];
+		}
+		case "option": {
+			const text = toScalar(mapped);
+			return text === null ? null : { value: text };
+		}
+		case "multi-option":
+			return toList(mapped).map((v) => ({ value: v }));
+		case "user": {
+			const text = toScalar(mapped);
+			return text === null ? null : toJiraUser(text);
+		}
+		case "version":
+			if (Array.isArray(mapped) || JIRA_LIST_FIELDS.has(mapping.jira)) {
+				return toList(mapped).map((name) => ({ name }));
+			}
+			return toScalar(mapped) === null ? null : { name: toScalar(mapped) };
+		case "array":
+			return mapping.jira === "components"
+				? toList(mapped).map((name) => ({ name }))
+				: toList(mapped);
+	}
+}
+
+export interface MappedJiraChange {
+	mapping: FieldMapping;
+	backlogValue: MappedValue;
+	jiraValue: MappedValue;
+}
+
+export interface MappedJiraFieldUpdates {
+	/** Jira field ID → value to send */
+	fields: Record<string, unknown>;
+	changes: MappedJiraChange[];
+	/** Mappings whose Backlog value could not be converted */
+	errors: Array<{ mapping: FieldMapping; error: string }>;
+}
+
+/**
+ * Build the Jira field updates for push/both mappings whose Backlog value
+ * differs from Jira. Pass `issue: null` when creating an issue; every
+ * non-empty Backlog value is then included.
+ */
+export function buildMappedJiraFields(
+	frontmatter: Record<string, unknown>,
+	issue: JiraIssue | null,
+	mappings: FieldMapping[],
+): MappedJiraFieldUpdates {
+	return buildJiraValueUpdates(
+		getPushMappings(mappings).map((mapping) => ({
+			mapping,
+			value: getBacklogTargetValue(frontmatter, mapping.backlog),
+		})),
+		issue,
+	);
+}
+
+/**
+ * Build the Jira field updates that set each mapping's Jira field to the
+ * given value (in Backlog representation). Values that already match the
+ * issue produce no update; with `issue: null` empty values are skipped.
+ * Callers are responsible for honouring mapping direction.
+ */
+export function buildJiraValueUpdates(
+	values: Array<{ mapping: FieldMapping; value: MappedValue }>,
+	issue: JiraIssue | null,
+): MappedJiraFieldUpdates {
+	const result: MappedJiraFieldUpdates = {
+		fields: {},
+		changes: [],
+		errors: [],
+	};
+
+	for (const { mapping, value } of values) {
+		const backlogValue = coerceForTarget(value, mapping.backlog);
+		const jiraValue = issue ? getMappedJiraValue(issue, mapping) : null;
+
+		if (issue === null && backlogValue === null) continue;
+		if (
+			issue !== null &&
+			canonicalMappedValue(backlogValue, mapping.backlog) ===
+				canonicalMappedValue(jiraValue, mapping.backlog)
+		) {
+			continue;
+		}
+
+		try {
+			result.fields[mapping.jira] = convertBacklogValue(backlogValue, mapping);
+			result.changes.push({ mapping, backlogValue, jiraValue });
+		} catch (error) {
+			result.errors.push({
+				mapping,
+				error: error instanceof Error ? error.message : String(error),
+			});
+		}
+	}
+
+	return result;
 }

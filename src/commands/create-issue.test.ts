@@ -286,4 +286,93 @@ describe("createIssue", () => {
 		const options = createCall[3];
 		expect(options?.labels).toEqual(["test", "feature"]);
 	});
+
+	describe("field mappings", () => {
+		function configureMappings(fieldMappings: unknown[]): void {
+			writeJson(join(configDir, "config.json"), {
+				jira: { projectKey: "TEST", issueType: "Task" },
+				fieldMappings,
+			});
+		}
+
+		function addFrontmatter(taskId: string, lines: string[]): void {
+			const { readFileSync, writeFileSync } = require("node:fs");
+			const { getTaskFilePath } = require("../utils/frontmatter.ts");
+			const path = getTaskFilePath(taskId);
+			const content = readFileSync(path, "utf-8") as string;
+			writeFileSync(
+				path,
+				content.replace("---\n", `---\n${lines.join("\n")}\n`),
+				"utf-8",
+			);
+		}
+
+		it("includes push/both mapped values when creating the issue", async () => {
+			configureMappings([
+				{
+					backlog: "frontmatter:story_points",
+					jira: "customfield_10016",
+					type: "number",
+					direction: "both",
+				},
+				{
+					backlog: "frontmatter:team",
+					jira: "customfield_10020",
+					type: "option",
+					direction: "push",
+					valueMap: { "Platform Team": "platform" },
+				},
+				{
+					backlog: "frontmatter:sprint",
+					jira: "customfield_10030",
+					type: "string",
+					direction: "pull",
+				},
+			]);
+			addFrontmatter("task-123", [
+				"story_points: 5",
+				"team: platform",
+				"sprint: S1",
+			]);
+
+			const result = await createIssue({ taskId: "task-123", configDir });
+
+			expect(result.success).toBe(true);
+			const options = mockJiraClient.createIssue.mock.calls[0][3];
+			// pull-only mappings are never written to Jira
+			expect(options?.fields).toEqual({
+				customfield_10016: 5,
+				customfield_10020: { value: "Platform Team" },
+			});
+		});
+
+		it("sends priority through the mapping instead of the built-in field", async () => {
+			configureMappings([
+				{
+					backlog: "priority",
+					jira: "customfield_10050",
+					type: "option",
+					direction: "both",
+					valueMap: { P1: "high" },
+				},
+			]);
+			addFrontmatter("task-123", ["priority: high"]);
+
+			await createIssue({ taskId: "task-123", configDir });
+
+			const options = mockJiraClient.createIssue.mock.calls[0][3];
+			expect(options?.priority).toBeUndefined();
+			expect(options?.fields).toEqual({ customfield_10050: { value: "P1" } });
+		});
+
+		it("reports an invalid mapping configuration", async () => {
+			configureMappings([{ backlog: "frontmatter:id", jira: "x", type: "?" }]);
+
+			const result = await createIssue({ taskId: "task-123", configDir });
+
+			expect(result.success).toBe(false);
+			expect(result.error).toContain("Invalid fieldMappings");
+			expect(mockJiraClient.createIssue).not.toHaveBeenCalled();
+		});
+	});
 });

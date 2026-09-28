@@ -1,12 +1,20 @@
 import type { Command } from "commander";
 import { BacklogClient } from "../integrations/backlog.ts";
+import { JiraClient, type JiraIssue } from "../integrations/jira.ts";
 import { FrontmatterStore } from "../state/store.ts";
 import {
 	type JiraMetadata,
 	type TaskWithJira,
 	formatTaskWithJira,
 } from "../ui/display-adapter.ts";
+import {
+	type FieldMapping,
+	loadFieldMappings,
+	readTaskFrontmatter,
+} from "../utils/field-mapping.ts";
+import { getJiraClientOptions } from "../utils/jira-config.ts";
 import { logger } from "../utils/logger.ts";
+import { formatMappedFieldsSection } from "../utils/mapped-field-sync.ts";
 
 // Import core formatter from backlog.md
 // In the real implementation, this would need to be properly imported from core
@@ -69,6 +77,11 @@ async function viewTask(
 			// and pass to viewTaskEnhanced
 			console.log("Interactive view not yet implemented. Use --plain flag.");
 		}
+
+		const mappedLines = await getMappedFieldLines(taskId, mapping?.jiraKey);
+		if (mappedLines.length > 0) {
+			console.log(mappedLines.join("\n"));
+		}
 	} catch (error) {
 		logger.error({ error, taskId }, "Failed to view task");
 		console.error(`Error viewing task ${taskId}: ${error}`);
@@ -76,6 +89,48 @@ async function viewTask(
 	} finally {
 		store.close();
 	}
+}
+
+/**
+ * Mapped field values from Backlog and, when the task is linked, Jira
+ */
+async function getMappedFieldLines(
+	taskId: string,
+	jiraKey: string | undefined,
+): Promise<string[]> {
+	let mappings: FieldMapping[];
+	try {
+		mappings = loadFieldMappings();
+	} catch (error) {
+		return [
+			"",
+			`Mapped Fields: ${error instanceof Error ? error.message : String(error)}`,
+		];
+	}
+	if (mappings.length === 0) return [];
+
+	let issue: JiraIssue | null = null;
+	let unavailable = "(task not linked to Jira)";
+	if (jiraKey) {
+		const jira = new JiraClient({
+			...getJiraClientOptions(),
+			silentMode: true,
+		});
+		try {
+			issue = await jira.getIssue(jiraKey);
+		} catch (error) {
+			unavailable = `(could not fetch ${jiraKey}: ${error instanceof Error ? error.message.split("\n")[0] : String(error)})`;
+		} finally {
+			await jira.close().catch(() => {});
+		}
+	}
+
+	return formatMappedFieldsSection(
+		mappings,
+		readTaskFrontmatter(taskId),
+		issue,
+		unavailable,
+	);
 }
 
 /**

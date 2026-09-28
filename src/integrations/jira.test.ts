@@ -1,5 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
-import { JiraClient, type JiraClientOptions } from "./jira.ts";
+import {
+	JiraClient,
+	type JiraClientOptions,
+	getJsonErrorText,
+} from "./jira.ts";
 
 describe("JiraClient", () => {
 	describe("searchIssues", () => {
@@ -340,5 +344,26 @@ describe("JiraClient", () => {
 				"Missing required Jira credentials",
 			);
 		});
+	});
+});
+
+describe("getJsonErrorText", () => {
+	it("treats regular results as success even if values mention errors", () => {
+		expect(
+			getJsonErrorText({ key: "PROJ-1", summary: "Fix error handling" }),
+		).toBeNull();
+		expect(getJsonErrorText([{ error: "not a top-level error" }])).toBeNull();
+	});
+
+	it("extracts Jira and MCP error payloads", () => {
+		expect(getJsonErrorText({ error: "Issue not found" })).toBe(
+			"Issue not found",
+		);
+		expect(
+			getJsonErrorText({
+				errorMessages: [],
+				errors: { customfield_10016: "Field cannot be set" },
+			}),
+		).toBe("customfield_10016: Field cannot be set");
 	});
 });

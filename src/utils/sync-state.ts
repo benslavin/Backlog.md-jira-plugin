@@ -1,6 +1,15 @@
 import type { Snapshot } from "../state/store.ts";
+import {
+	type FieldMapping,
+	type FieldMappingDirection,
+	loadFieldMappings,
+} from "./field-mapping.ts";
 import { logger } from "./logger.ts";
-import { type NormalizedPayload, computeHash } from "./normalizer.ts";
+import {
+	type NormalizedPayload,
+	comparePayloads,
+	computeHash,
+} from "./normalizer.ts";
 
 /**
  * Sync state classification
@@ -37,6 +46,7 @@ export function classifySyncState(
 	backlogSnapshot: Snapshot | null,
 	jiraSnapshot: Snapshot | null,
 	currentPayloads?: { backlog: NormalizedPayload; jira: NormalizedPayload },
+	options?: { fieldMappings?: FieldMapping[] },
 ): SyncStateResult {
 	logger.debug(
 		{
@@ -64,18 +74,37 @@ export function classifySyncState(
 	let backlogChanged = currentBacklogHash !== baseBacklogHash;
 	let jiraChanged = currentJiraHash !== baseJiraHash;
 
-	// When the set of mapped fields differs from the snapshot (mappings were
-	// added or removed), compare only the fields both know about so that the
-	// config change itself isn't seen as a change on both sides.
+	// Owner-side corrections for one-directional mappings (see below)
+	let restorePull = false;
+	let restorePush = false;
+
 	if (currentPayloads) {
+		const directions = getMappingDirections(options?.fieldMappings);
+
+		// When the set of mapped fields differs from the snapshot (mappings were
+		// added or removed), compare only the fields both know about so that the
+		// config change itself isn't seen as a change on both sides.
 		const adjusted = detectChangesAcrossMappingChange(
 			currentPayloads,
 			backlogSnapshot,
 			jiraSnapshot,
+			directions,
 		);
 		if (adjusted) {
 			backlogChanged = adjusted.backlogChanged;
 			jiraChanged = adjusted.jiraChanged;
+		} else {
+			const directional = applyMappingDirections(
+				currentPayloads,
+				backlogSnapshot,
+				jiraSnapshot,
+				directions,
+				{ backlogChanged, jiraChanged },
+			);
+			backlogChanged = directional.backlogChanged;
+			jiraChanged = directional.jiraChanged;
+			restorePull = directional.restorePull;
+			restorePush = directional.restorePush;
 		}
 	}
 
@@ -100,6 +129,14 @@ export function classifySyncState(
 	} else {
 		// Both changed
 		state = "Conflict";
+	}
+
+	// Only fields owned by the other side were edited: restore them from
+	// their owner (Jira for pull-only mappings, Backlog for push-only)
+	if (state === "InSync" && restorePull) {
+		state = "NeedsPull";
+	} else if (state === "InSync" && restorePush) {
+		state = "NeedsPush";
 	}
 
 	return {
@@ -149,6 +186,7 @@ export function detectChangesAcrossMappingChange(
 	current: { backlog: NormalizedPayload; jira: NormalizedPayload },
 	backlogSnapshot: Snapshot,
 	jiraSnapshot: Snapshot,
+	directions: Map<string, FieldMappingDirection> = new Map(),
 ): { backlogChanged: boolean; jiraChanged: boolean } | null {
 	const currentKeys = mappedFieldKeys(current.jira);
 	const baseBacklogPayload = parseSnapshotPayload(backlogSnapshot);
@@ -181,26 +219,117 @@ export function detectChangesAcrossMappingChange(
 	const backlogChanged =
 		computeHash(restrictMappedFields(current.backlog, commonKeys)) !==
 		baseHash(backlogSnapshot, baseBacklogPayload);
+	let backlogChangedResult = backlogChanged;
 	let jiraChanged =
 		computeHash(restrictMappedFields(current.jira, commonKeys)) !==
 		baseHash(jiraSnapshot, baseJiraPayload);
 
+	// A newly mapped field that differs is a change on its source side:
+	// Backlog for push-only mappings, Jira otherwise
 	const newKeys = currentKeys.filter((k) => !baseKeys.includes(k));
 	for (const key of newKeys) {
 		if (
 			(current.backlog.mappedFields?.[key] ?? "") !==
 			(current.jira.mappedFields?.[key] ?? "")
 		) {
-			jiraChanged = true;
+			if (directions.get(key) === "push") backlogChangedResult = true;
+			else jiraChanged = true;
 		}
 	}
 
 	logger.debug(
-		{ currentKeys, baseKeys, backlogChanged, jiraChanged },
+		{
+			currentKeys,
+			baseKeys,
+			backlogChanged: backlogChangedResult,
+			jiraChanged,
+		},
 		"Mapped field set changed since snapshot",
 	);
 
-	return { backlogChanged, jiraChanged };
+	return { backlogChanged: backlogChangedResult, jiraChanged };
+}
+
+/**
+ * Direction of each mapped payload key (the mapping's Backlog target,
+ * which is also the core field name for priority/labels mappings)
+ */
+function getMappingDirections(
+	fieldMappings?: FieldMapping[],
+): Map<string, FieldMappingDirection> {
+	let mappings = fieldMappings;
+	if (!mappings) {
+		try {
+			mappings = loadFieldMappings();
+		} catch (error) {
+			logger.debug({ error }, "Ignoring invalid fieldMappings for sync state");
+			mappings = [];
+		}
+	}
+	return new Map(mappings.map((m) => [m.backlog, m.direction]));
+}
+
+/**
+ * Apply mapping direction to change detection.
+ *
+ * A side whose only changes are to fields it does not own is not treated as
+ * changed: Backlog edits to pull-only fields and Jira edits to push-only
+ * fields never propagate. Instead the owner's value is restored
+ * (restorePull / restorePush) when nothing else needs syncing.
+ *
+ * A side whose payload is identical to its own snapshot payload is also not
+ * treated as changed, even if its hash differs from the synced hash. This
+ * happens when a pushed value comes back from Jira in a different form.
+ */
+export function applyMappingDirections(
+	current: { backlog: NormalizedPayload; jira: NormalizedPayload },
+	backlogSnapshot: Snapshot,
+	jiraSnapshot: Snapshot,
+	directions: Map<string, FieldMappingDirection>,
+	changed: { backlogChanged: boolean; jiraChanged: boolean },
+): {
+	backlogChanged: boolean;
+	jiraChanged: boolean;
+	restorePull: boolean;
+	restorePush: boolean;
+} {
+	const result = { ...changed, restorePull: false, restorePush: false };
+	if (directions.size === 0) return result;
+
+	// Fields that differ from the side's own snapshot payload, or null when
+	// the snapshot payload is unavailable
+	const changedKeys = (
+		payload: NormalizedPayload,
+		snapshot: Snapshot,
+	): string[] | null => {
+		const base = parseSnapshotPayload(snapshot);
+		return base ? comparePayloads(payload, base as NormalizedPayload) : null;
+	};
+
+	if (changed.backlogChanged) {
+		const keys = changedKeys(current.backlog, backlogSnapshot);
+		if (keys?.every((k) => directions.get(k) === "pull")) {
+			// No field differs from the snapshot (hash-only difference), or only
+			// pull-only fields were edited in Backlog
+			result.backlogChanged = false;
+			result.restorePull = keys.length > 0;
+		}
+	}
+	if (changed.jiraChanged) {
+		const keys = changedKeys(current.jira, jiraSnapshot);
+		if (keys?.every((k) => directions.get(k) === "push")) {
+			// No field differs from the snapshot (e.g. a pushed value Jira
+			// reports in a different form), or only push-only fields were
+			// edited in Jira
+			result.jiraChanged = false;
+			result.restorePush = keys.length > 0;
+		}
+	}
+
+	if (result.restorePull || result.restorePush) {
+		logger.debug(result, "Applied field mapping directions");
+	}
+	return result;
 }
 
 /**

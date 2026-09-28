@@ -131,7 +131,13 @@ function describeMapping(mapping: FieldMapping): string {
 					.join(", ")}`,
 			)
 		: "";
-	return `  ${chalk.cyan(mapping.backlog)} ← ${chalk.yellow(mapping.jira)} ${chalk.gray(`(${mapping.type}, ${mapping.direction})`)}${valueMap}`;
+	const arrow =
+		mapping.direction === "both"
+			? "↔"
+			: mapping.direction === "push"
+				? "→"
+				: "←";
+	return `  ${chalk.cyan(mapping.backlog)} ${arrow} ${chalk.yellow(mapping.jira)} ${chalk.gray(`(${mapping.type}, ${mapping.direction})`)}${valueMap}`;
 }
 
 async function listFieldMappings(): Promise<void> {
@@ -159,7 +165,7 @@ async function listFieldMappings(): Promise<void> {
 	}
 	console.log(
 		chalk.gray(
-			"\n  Phase 1: mappings are applied on pull (Jira → Backlog) only.\n",
+			"\n  ← pull (Jira → Backlog)   → push (Backlog → Jira)   ↔ both\n",
 		),
 	);
 }
@@ -249,7 +255,7 @@ export function registerMapFieldsCommand(program: Command): void {
 		)
 		.option(
 			"--direction <direction>",
-			`One of: ${FIELD_MAPPING_DIRECTIONS.join(", ")} (only pull is applied today)`,
+			`One of: ${FIELD_MAPPING_DIRECTIONS.join(", ")} (pull: Jira → Backlog, push: Backlog → Jira)`,
 			"pull",
 		)
 		.option(
