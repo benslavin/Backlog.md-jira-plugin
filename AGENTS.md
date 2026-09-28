@@ -172,7 +172,7 @@ backlog-jira init
 ## Storage
 
 The plugin uses file-based storage for sync state:
-- **Task frontmatter**: Jira metadata (jira_key, jira_last_sync, jira_sync_state) stored in task file frontmatter
+- **Link records**: Jira metadata (jira_key, jira_url, jira_last_sync, jira_sync_state) and mapped `frontmatter:<key>` values stored in `.backlog-jira/links/<task-id>.json` and mirrored into task file frontmatter. `backlog task edit` drops these frontmatter keys; the plugin reads them back from the link record and restores them after its own edits
 - **Snapshots**: Stored as JSON files in `.backlog-jira/snapshots/<task-id>-<side>.json`
 - **Operations log**: Append-only log in `.backlog-jira/ops-log.jsonl`
 

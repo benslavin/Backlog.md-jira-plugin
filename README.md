@@ -45,7 +45,7 @@ The plugin follows a **zero-coupling architecture** that ensures complete separa
 
 2. **External State Management**:
    - File-based storage in `.backlog-jira/` stores all plugin state
-   - Task frontmatter stores Jira metadata (jira_key, jira_last_sync, etc.)
+   - Jira link records in `.backlog-jira/links/<task-id>.json` (mirrored into task frontmatter as jira_key, jira_last_sync, etc.)
    - Snapshots stored as JSON files in `.backlog-jira/snapshots/`
    - Operations log in `.backlog-jira/ops-log.jsonl`
    - No modifications to Backlog.md data structures
@@ -89,7 +89,7 @@ The plugin follows a **zero-coupling architecture** that ensures complete separa
 
 The plugin uses file-based storage in `.backlog-jira/`:
 
-- **Task Frontmatter**: Jira metadata (jira_key, jira_last_sync, jira_sync_state) stored directly in task files
+- **Link Records**: Jira metadata (jira_key, jira_url, jira_last_sync, jira_sync_state) and mapped `frontmatter:<key>` values stored in `.backlog-jira/links/<task-id>.json` and mirrored into task frontmatter. Backlog.md 1.5x drops unknown frontmatter keys on `backlog task edit`; the plugin falls back to the link record and restores the keys after its own edits, so tasks stay linked
 - **Snapshots**: Payload snapshots for 3-way merge stored in `.backlog-jira/snapshots/<task-id>-<side>.json`
 - **Operations Log**: Audit log in `.backlog-jira/ops-log.jsonl` (JSONL format)
 
@@ -218,8 +218,9 @@ backlog-jira init
 This creates `.backlog-jira/` directory with:
 - `config.json` - Configuration file
 - `snapshots/` - Snapshot directory for 3-way merge
+- `links/` - Jira link records per task (version controlled)
 - `ops-log.jsonl` - Operations audit log
-- `.gitignore` - Excludes sensitive files
+- `.gitignore` - Excludes everything except `links/`
 
 ### 2. Configure MCP Atlassian Server
 
@@ -523,6 +524,7 @@ backlog-jira init
 Creates:
 - `.backlog-jira/config.json`
 - `.backlog-jira/snapshots/`
+- `.backlog-jira/links/` (created on first link)
 - `.backlog-jira/ops-log.jsonl`
 - `.backlog-jira/.gitignore`
 
@@ -1071,6 +1073,7 @@ backlog-jira/
 ├── .backlog-jira/               # Plugin state
 │   ├── config.json
 │   ├── snapshots/               # Snapshot JSON files
+│   ├── links/                   # Jira link records per task
 │   ├── ops-log.jsonl            # Operations audit log
 │   └── .gitignore
 ├── package.json

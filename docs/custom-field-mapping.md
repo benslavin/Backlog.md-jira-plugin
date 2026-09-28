@@ -51,7 +51,7 @@ Mappings live in `.backlog-jira/config.json` under the top-level `fieldMappings`
 | `references` | `backlog task edit --ref` / `--clear-refs` | |
 | `priority` | `backlog task edit --priority` | With `"jira": "priority"`, overrides the [built-in priority mapping](#built-in-priority-mapping). With any other Jira field, replaces the built-in Jira priority, which is then not synced in either direction; values must be valid Backlog priorities (use `valueMap`), and an empty Jira value leaves the Backlog priority unchanged. |
 | `labels` | `backlog task edit --label` / `--clear-labels` | Replaces the built-in Jira labels, which are then not synced in either direction. |
-| `frontmatter:<key>` | Plugin frontmatter utilities | Stored as `<key>` in the task file's frontmatter. |
+| `frontmatter:<key>` | Plugin frontmatter utilities | Stored as `<key>` in the task file's frontmatter and in `.backlog-jira/links/<task-id>.json`, so the value survives `backlog task edit` (which drops unknown frontmatter keys) and is restored after the plugin's own edits. A value edited by hand in the file takes precedence. |
 
 `frontmatter:<key>` targets are rejected when `<key>` is a Backlog core key (`id`, `title`, `status`, `assignee`, `labels`, `milestone`, `dependencies`, `priority`, `created_date`, ...) or starts with `jira_` (reserved for the plugin's sync metadata).
 

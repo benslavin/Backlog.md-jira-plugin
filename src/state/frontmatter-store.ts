@@ -10,9 +10,11 @@ import {
 	getJiraMetadata,
 	getTaskFilePath,
 	parseFrontmatter,
+	readPluginFrontmatter,
 	updateJiraMetadata,
 } from "../utils/frontmatter.ts";
 import { logger } from "../utils/logger.ts";
+import { normalizeTaskId, taskIdFromFilePath } from "../utils/task-links.ts";
 import type { Mapping, OpLog, Snapshot, SyncState } from "./types.ts";
 
 /**
@@ -74,8 +76,7 @@ export class FrontmatterStore {
 			}
 
 			// Get created/updated timestamps from file metadata
-			const content = readFileSync(filePath, "utf-8");
-			const { frontmatter } = parseFrontmatter(content);
+			const { frontmatter } = parseFrontmatter(readFileSync(filePath, "utf-8"));
 
 			return {
 				backlogId,
@@ -96,23 +97,20 @@ export class FrontmatterStore {
 			const files = readdirSync(tasksDir).filter((f) => f.endsWith(".md"));
 
 			for (const file of files) {
-				const filePath = join(tasksDir, file);
-				const content = readFileSync(filePath, "utf-8");
-				const { frontmatter } = parseFrontmatter(content);
+				// Extract task ID from filename: task-123 - Title.md
+				const backlogId = taskIdFromFilePath(file);
+				if (!backlogId) continue;
 
+				const frontmatter = readPluginFrontmatter(join(tasksDir, file));
 				if (frontmatter.jira_key === jiraKey) {
-					// Extract task ID from filename: task-123 - Title.md
-					const match = file.match(/^(task-[\d.]+)\s+-\s+/);
-					if (match) {
-						return {
-							backlogId: match[1],
-							jiraKey,
-							createdAt:
-								(frontmatter.created as string) || new Date().toISOString(),
-							updatedAt:
-								(frontmatter.updated as string) || new Date().toISOString(),
-						};
-					}
+					return {
+						backlogId,
+						jiraKey,
+						createdAt:
+							(frontmatter.created as string) || new Date().toISOString(),
+						updatedAt:
+							(frontmatter.updated as string) || new Date().toISOString(),
+					};
 				}
 			}
 
@@ -131,16 +129,12 @@ export class FrontmatterStore {
 			const files = readdirSync(tasksDir).filter((f) => f.endsWith(".md"));
 
 			for (const file of files) {
-				const filePath = join(tasksDir, file);
-				const content = readFileSync(filePath, "utf-8");
-				const { frontmatter } = parseFrontmatter(content);
+				const backlogId = taskIdFromFilePath(file);
+				if (!backlogId) continue;
 
+				const frontmatter = readPluginFrontmatter(join(tasksDir, file));
 				if (frontmatter.jira_key) {
-					// Extract task ID from filename
-					const match = file.match(/^(task-[\d.]+)\s+-\s+/);
-					if (match) {
-						mappings.set(match[1], frontmatter.jira_key as string);
-					}
+					mappings.set(backlogId, frontmatter.jira_key as string);
 				}
 			}
 		} catch (error) {
@@ -170,7 +164,10 @@ export class FrontmatterStore {
 	// Snapshots are stored as JSON files in .backlog-jira/snapshots/
 
 	private getSnapshotPath(backlogId: string, side: "backlog" | "jira"): string {
-		return join(this.snapshotsDir, `${backlogId}-${side}.json`);
+		return join(
+			this.snapshotsDir,
+			`${normalizeTaskId(backlogId)}-${side}.json`,
+		);
 	}
 
 	setSnapshot(

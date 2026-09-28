@@ -179,4 +179,73 @@ Acceptance Criteria:
 			]);
 		});
 	});
+
+	describe("Backlog.md 1.5x output (upper-case IDs)", () => {
+		type Parsers = {
+			parseTaskList: (output: string) => unknown[];
+			parseTaskDetail: (output: string) => { id: string; title: string };
+			parseCreatedTaskId: (output: string) => string | null;
+		};
+		const parsers = () => new BacklogClient() as unknown as Parsers;
+
+		it("parses the status-grouped task list", () => {
+			const output = `To Do:
+  TASK-1.1 - Sub
+
+In Progress:
+  TASK-1 - Hello (ac: 0/1)
+
+Done:
+  [HIGH] TASK-2 - Second one
+`;
+			expect(parsers().parseTaskList(output)).toEqual([
+				{ id: "task-1.1", title: "Sub", status: "To Do", priority: undefined },
+				{
+					id: "task-1",
+					title: "Hello",
+					status: "In Progress",
+					priority: undefined,
+				},
+				{ id: "task-2", title: "Second one", status: "Done", priority: "high" },
+			]);
+		});
+
+		it("parses upper-case IDs in the legacy list layout", () => {
+			const tasks = parsers().parseTaskList("TASK-7 - Seven (To Do)");
+			expect(tasks).toEqual([
+				expect.objectContaining({ id: "task-7", status: "To Do" }),
+			]);
+		});
+
+		it("parses upper-case IDs in task detail", () => {
+			const output = `File: /repo/backlog/tasks/task-1 - Hello.md
+
+Task TASK-1 - Hello
+==================================================
+
+Status: ◒ In Progress
+Priority: High
+Ordinal: 1000
+Created: 2026-09-28 20:42 (UTC)
+`;
+			const task = parsers().parseTaskDetail(output);
+			expect(task).toMatchObject({
+				id: "task-1",
+				title: "Hello",
+				status: "In Progress",
+			});
+		});
+
+		it("parses the created task ID from create output", () => {
+			const p = parsers();
+			expect(
+				p.parseCreatedTaskId(
+					"Created task TASK-12\nFile: /repo/backlog/tasks/task-12 - Hello.md\n",
+				),
+			).toBe("task-12");
+			expect(p.parseCreatedTaskId("Created task-3")).toBe("task-3");
+			expect(p.parseCreatedTaskId("TASK-4.1")).toBe("task-4.1");
+			expect(p.parseCreatedTaskId("nothing here")).toBeNull();
+		});
+	});
 });

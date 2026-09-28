@@ -5,7 +5,7 @@ import {
 	mapBacklogAssigneeToJira,
 	mapJiraUserToBacklog,
 } from "./assignee-mapping.ts";
-import { getTaskFilePath, parseFrontmatter } from "./frontmatter.ts";
+import { getTaskFilePath, readPluginFrontmatter } from "./frontmatter.ts";
 import { logger } from "./logger.ts";
 
 /**
@@ -694,8 +694,7 @@ export function canonicalMappedValue(
  */
 export function readTaskFrontmatter(taskId: string): Record<string, unknown> {
 	try {
-		const content = readFileSync(getTaskFilePath(taskId), "utf-8");
-		return parseFrontmatter(content).frontmatter;
+		return readPluginFrontmatter(getTaskFilePath(taskId));
 	} catch (error) {
 		logger.debug({ taskId, error }, "Could not read task frontmatter");
 		return {};

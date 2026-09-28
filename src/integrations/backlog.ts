@@ -1,5 +1,10 @@
 import { spawn } from "node:child_process";
+import { restorePluginFrontmatter } from "../utils/frontmatter.ts";
 import { logger } from "../utils/logger.ts";
+import { normalizeTaskId } from "../utils/task-links.ts";
+
+// Task IDs as printed by the Backlog.md CLI: task-1, TASK-1, TASK-1.2
+const TASK_ID = "[A-Za-z][A-Za-z0-9_]*-\\d+(?:\\.\\d+)*";
 
 export interface BacklogTask {
 	id: string;
@@ -243,9 +248,22 @@ export class BacklogClient {
 		try {
 			await this.execute(args);
 			logger.info({ taskId, updates }, "Task updated successfully");
+			this.restorePluginMetadata(taskId);
 		} catch (error) {
 			logger.error({ error, taskId, updates }, "Failed to update task");
 			throw error;
+		}
+	}
+
+	/**
+	 * `backlog task edit` drops frontmatter keys Backlog.md does not know,
+	 * including jira_* metadata and mapped fields; put them back.
+	 */
+	private restorePluginMetadata(taskId: string): void {
+		try {
+			restorePluginFrontmatter(taskId);
+		} catch (error) {
+			logger.warn({ error, taskId }, "Failed to restore plugin frontmatter");
 		}
 	}
 
@@ -287,25 +305,13 @@ export class BacklogClient {
 
 		try {
 			const output = await this.execute(args);
-			// Parse output to extract task ID
-			// Expected format: "Created task-123" or similar
-			const match = output.match(/task-(\d+)/);
-			if (match) {
-				const taskId = `task-${match[1]}`;
+			const taskId = this.parseCreatedTaskId(output);
+			if (taskId) {
 				logger.info(
 					{ taskId, title: options.title },
 					"Task created successfully",
 				);
 				return taskId;
-			}
-			// If no match, try to parse the entire output as task ID
-			const trimmed = output.trim();
-			if (trimmed.startsWith("task-")) {
-				logger.info(
-					{ taskId: trimmed, title: options.title },
-					"Task created successfully",
-				);
-				return trimmed;
 			}
 			throw new Error(`Failed to parse task ID from output: ${output}`);
 		} catch (error) {
@@ -315,27 +321,60 @@ export class BacklogClient {
 	}
 
 	/**
-	 * Parse task list output from --plain format
+	 * Extract the new task ID from `backlog task create` output.
+	 * Backlog.md 1.5x prints "Created task TASK-1"; older versions "Created task-1".
+	 */
+	private parseCreatedTaskId(output: string): string | null {
+		const match =
+			output.match(new RegExp(`Created task\\s+(${TASK_ID})`, "i")) ??
+			output.match(/\b(task-\d+(?:\.\d+)*)\b/i) ??
+			output.trim().match(new RegExp(`^(${TASK_ID})$`));
+		return match ? normalizeTaskId(match[1]) : null;
+	}
+
+	/**
+	 * Parse task list output from --plain format.
+	 * Supports the Backlog.md 1.5x layout, grouped by status:
+	 *   In Progress:
+	 *     [HIGH] TASK-1 - Title (ac: 0/1)
+	 * and the older one-line layout:
+	 *   task-1 - Title (Status) [@assignee] [labels] [priority]
 	 */
 	private parseTaskList(output: string): BacklogTaskListItem[] {
 		const tasks: BacklogTaskListItem[] = [];
 		const lines = output.trim().split("\n");
 
+		const groupedLine = new RegExp(
+			`^\\s+(?:\\[([^\\]]+)\\]\\s+)?(${TASK_ID})\\s+-\\s+(.+?)(?:\\s+\\(ac:\\s*\\d+\\/\\d+\\))?$`,
+		);
+		const legacyLine = new RegExp(
+			`^(${TASK_ID})\\s+-\\s+(.+?)(?:\\s+\\((.+?)\\))?(?:\\s+\\[@(.+?)\\])?(?:\\s+\\[(.+?)\\])?(?:\\s+\\[(.+?)\\])?$`,
+		);
+		let groupStatus: string | undefined;
+
 		for (const line of lines) {
-			// Skip empty lines and section headers
+			// Skip empty lines and section dividers
 			if (!line.trim() || line.startsWith("===") || line.startsWith("---")) {
 				continue;
 			}
 
-			// Match pattern: task-123 - Title (Status) [@assignee] [labels] [priority]
-			const match = line.match(
-				/^(task-[\d.]+)\s+-\s+(.+?)(?:\s+\((.+?)\))?(?:\s+\[@(.+?)\])?(?:\s+\[(.+?)\])?(?:\s+\[(.+?)\])?$/,
-			);
+			const grouped = line.match(groupedLine);
+			if (grouped) {
+				const [, priority, id, title] = grouped;
+				tasks.push({
+					id: normalizeTaskId(id),
+					title: title.trim(),
+					status: groupStatus || "Unknown",
+					priority: priority ? priority.toLowerCase() : undefined,
+				});
+				continue;
+			}
 
+			const match = line.match(legacyLine);
 			if (match) {
 				const [, id, title, status, assignee, labelsStr, priority] = match;
 				tasks.push({
-					id,
+					id: normalizeTaskId(id),
 					title: title.trim(),
 					status: status || "Unknown",
 					assignee: assignee || undefined,
@@ -344,6 +383,12 @@ export class BacklogClient {
 						: undefined,
 					priority: priority || undefined,
 				});
+				continue;
+			}
+
+			// Status group header, e.g. "In Progress:"
+			if (!/^\s/.test(line) && line.trimEnd().endsWith(":")) {
+				groupStatus = line.trim().slice(0, -1);
 			}
 		}
 
@@ -365,9 +410,11 @@ export class BacklogClient {
 
 			// Parse header info
 			if (line.startsWith("Task ")) {
-				const match = line.match(/^Task\s+(task-[\d.]+)\s+-\s+(.+)$/);
+				const match = line.match(
+					new RegExp(`^Task\\s+(${TASK_ID})\\s+-\\s+(.+)$`),
+				);
 				if (match) {
-					task.id = match[1];
+					task.id = normalizeTaskId(match[1]);
 					task.title = match[2];
 				}
 			} else if (line.startsWith("Status:")) {

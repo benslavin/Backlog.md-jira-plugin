@@ -1,5 +1,13 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { logger } from "./logger.ts";
+import {
+	LINK_FRONTMATTER_KEYS,
+	type TaskLink,
+	linkToFrontmatter,
+	readTaskLink,
+	taskIdFromFilePath,
+	writeTaskLink,
+} from "./task-links.ts";
 
 export interface JiraMetadata {
 	jiraKey?: string;
@@ -224,7 +232,9 @@ function serializeYamlValue(value: unknown): string {
 }
 
 /**
- * Add or update Jira metadata in a task file's frontmatter
+ * Add or update Jira metadata for a task file.
+ * The metadata is recorded in the task's link record (which Backlog.md does
+ * not rewrite) and mirrored into the file's frontmatter.
  */
 export function updateJiraMetadata(
 	filePath: string,
@@ -233,36 +243,26 @@ export function updateJiraMetadata(
 	try {
 		const content = readFileSync(filePath, "utf-8");
 		const { frontmatter, body } = parseFrontmatter(content);
+		const taskId = taskIdFromFilePath(filePath);
+		const link = taskId ? seedLink(taskId, frontmatter) : {};
 
 		// Update Jira fields - undefined values delete the field
-		if ("jiraKey" in metadata) {
-			if (metadata.jiraKey === undefined) {
-				delete frontmatter.jira_key;
+		for (const [field, key] of Object.entries(LINK_FRONTMATTER_KEYS)) {
+			if (!(field in metadata)) continue;
+			const value = metadata[field as keyof JiraMetadata];
+			if (value === undefined) {
+				delete frontmatter[key];
+				delete link[field as keyof JiraMetadata];
 			} else {
-				frontmatter.jira_key = metadata.jiraKey;
+				frontmatter[key] = value;
+				link[field as keyof JiraMetadata] = value;
 			}
 		}
-		if ("jiraLastSync" in metadata) {
-			if (metadata.jiraLastSync === undefined) {
-				delete frontmatter.jira_last_sync;
-			} else {
-				frontmatter.jira_last_sync = metadata.jiraLastSync;
-			}
+
+		if (taskId) {
+			writeTaskLink(taskId, link);
 		}
-		if ("jiraSyncState" in metadata) {
-			if (metadata.jiraSyncState === undefined) {
-				delete frontmatter.jira_sync_state;
-			} else {
-				frontmatter.jira_sync_state = metadata.jiraSyncState;
-			}
-		}
-		if ("jiraUrl" in metadata) {
-			if (metadata.jiraUrl === undefined) {
-				delete frontmatter.jira_url;
-			} else {
-				frontmatter.jira_url = metadata.jiraUrl;
-			}
-		}
+		fillMissing(frontmatter, linkToFrontmatter(link));
 
 		// Reconstruct file
 		const newFrontmatter = serializeFrontmatter(frontmatter);
@@ -282,6 +282,8 @@ export function updateJiraMetadata(
 /**
  * Set or remove plugin-owned frontmatter fields in a task file
  * A null value removes the key; other keys are preserved.
+ * The fields are also recorded in the task's link record so they can be
+ * restored after Backlog.md rewrites the file.
  */
 export function updateFrontmatterFields(
 	filePath: string,
@@ -290,14 +292,27 @@ export function updateFrontmatterFields(
 	try {
 		const content = readFileSync(filePath, "utf-8");
 		const { frontmatter, body } = parseFrontmatter(content);
+		const taskId = taskIdFromFilePath(filePath);
+		const link = taskId ? seedLink(taskId, frontmatter) : {};
+		const owned = { ...(link.frontmatter ?? {}) };
 
 		for (const [key, value] of Object.entries(fields)) {
 			if (value === null) {
 				delete frontmatter[key];
+				delete owned[key];
 			} else {
 				frontmatter[key] = value;
+				owned[key] = value;
 			}
 		}
+
+		if (taskId) {
+			writeTaskLink(taskId, { ...link, frontmatter: owned });
+		}
+		fillMissing(
+			frontmatter,
+			linkToFrontmatter({ ...link, frontmatter: owned }),
+		);
 
 		const newFrontmatter = serializeFrontmatter(frontmatter);
 		writeFileSync(filePath, `---\n${newFrontmatter}\n---\n${body}`, "utf-8");
@@ -309,12 +324,92 @@ export function updateFrontmatterFields(
 }
 
 /**
- * Get Jira metadata from a task file
+ * Set keys absent from the frontmatter; values already in the file win.
+ * Returns the keys that were added.
+ */
+function fillMissing(
+	frontmatter: Record<string, unknown>,
+	values: Record<string, string | string[]>,
+): string[] {
+	const added: string[] = [];
+	for (const [key, value] of Object.entries(values)) {
+		if (frontmatter[key] === undefined) {
+			frontmatter[key] = value;
+			added.push(key);
+		}
+	}
+	return added;
+}
+
+/**
+ * Load a task's link record, filling Jira fields missing from it with the
+ * values currently in the file (migrates frontmatter-only metadata)
+ */
+function seedLink(
+	taskId: string,
+	frontmatter: Record<string, unknown>,
+): TaskLink {
+	const link: TaskLink = { ...(readTaskLink(taskId) ?? {}) };
+	for (const [field, key] of Object.entries(LINK_FRONTMATTER_KEYS)) {
+		const name = field as keyof JiraMetadata;
+		if (link[name] === undefined && typeof frontmatter[key] === "string") {
+			link[name] = frontmatter[key] as string;
+		}
+	}
+	return link;
+}
+
+/**
+ * Read a task file's frontmatter, filling in plugin-owned keys (jira_* and
+ * mapped fields) from the link record when Backlog.md has dropped them
+ */
+export function readPluginFrontmatter(
+	filePath: string,
+): Record<string, unknown> {
+	const { frontmatter } = parseFrontmatter(readFileSync(filePath, "utf-8"));
+	const taskId = taskIdFromFilePath(filePath);
+	if (!taskId) {
+		return frontmatter;
+	}
+	return { ...linkToFrontmatter(readTaskLink(taskId)), ...frontmatter };
+}
+
+/**
+ * Re-apply plugin-owned frontmatter keys from the link record to a task file,
+ * e.g. after `backlog task edit` dropped them. Values already present in the
+ * file are kept. Returns true when the file was rewritten.
+ */
+export function restorePluginFrontmatter(taskId: string): boolean {
+	const link = readTaskLink(taskId);
+	if (!link) {
+		return false;
+	}
+
+	const filePath = getTaskFilePath(taskId);
+	const { frontmatter, body } = parseFrontmatter(
+		readFileSync(filePath, "utf-8"),
+	);
+	const restored = fillMissing(frontmatter, linkToFrontmatter(link));
+	if (restored.length === 0) {
+		return false;
+	}
+
+	writeFileSync(
+		filePath,
+		`---\n${serializeFrontmatter(frontmatter)}\n---\n${body}`,
+		"utf-8",
+	);
+	logger.debug({ taskId, restored }, "Restored plugin frontmatter");
+	return true;
+}
+
+/**
+ * Get Jira metadata from a task file, falling back to the task's link record
+ * for fields Backlog.md has dropped from the frontmatter
  */
 export function getJiraMetadata(filePath: string): JiraMetadata {
 	try {
-		const content = readFileSync(filePath, "utf-8");
-		const { frontmatter } = parseFrontmatter(content);
+		const frontmatter = readPluginFrontmatter(filePath);
 
 		return {
 			jiraKey: frontmatter.jira_key as string | undefined,

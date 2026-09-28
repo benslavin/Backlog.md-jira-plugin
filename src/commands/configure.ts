@@ -4,6 +4,7 @@ import chalk from "chalk";
 import prompts from "prompts";
 import { JiraClient } from "../integrations/jira.ts";
 import { getLogLevel, logger, setLogLevel } from "../utils/logger.ts";
+import { CONFIG_DIR_GITIGNORE } from "../utils/task-links.ts";
 import type { JiraConfig } from "./init.ts";
 
 interface ConfigureOptions {
@@ -890,10 +891,7 @@ export async function configureCommand(
 		// Create .gitignore for .backlog-jira if it doesn't exist
 		const backlogGitignorePath = join(configDir, ".gitignore");
 		if (!existsSync(backlogGitignorePath)) {
-			writeFileSync(
-				backlogGitignorePath,
-				"# Ignore all files in .backlog-jira/\n*\n!.gitignore\n",
-			);
+			writeFileSync(backlogGitignorePath, CONFIG_DIR_GITIGNORE);
 		}
 
 		// Success!

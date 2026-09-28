@@ -8,6 +8,7 @@ import {
 	addAgentInstructions,
 } from "../utils/agent-instructions.ts";
 import { logger } from "../utils/logger.ts";
+import { CONFIG_DIR_GITIGNORE } from "../utils/task-links.ts";
 
 export interface JiraConfig {
 	jira: {
@@ -84,13 +85,7 @@ export async function initCommand(
 
 	// Create .gitignore
 	const gitignorePath = join(configDir, ".gitignore");
-	writeFileSync(
-		gitignorePath,
-		`# Ignore all files in .backlog-jira/
-*
-!.gitignore
-`,
-	);
+	writeFileSync(gitignorePath, CONFIG_DIR_GITIGNORE);
 
 	// Agent instructions setup
 	await setupAgentInstructions(baseDir);
