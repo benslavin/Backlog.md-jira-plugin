@@ -157,7 +157,25 @@ Before installing the plugin, ensure you have:
 npm install -g backlog-jira
 ```
 
-### From Source (Current)
+### From the Git Repository (Recommended)
+
+Install the CLI globally straight from GitHub:
+
+```bash
+npm install -g git+https://github.com/YOUR-USERNAME/Backlog.md-jira-plugin.git
+```
+
+To pin a specific branch, tag, or commit, append `#<ref>`:
+
+```bash
+npm install -g git+https://github.com/YOUR-USERNAME/Backlog.md-jira-plugin.git#main
+```
+
+The package's `prepare` script builds the CLI during install, so [Bun](https://bun.sh) must be on your `PATH`.
+
+To upgrade, re-run the same install command.
+
+### From Source (Development)
 
 ```bash
 # Clone the repository
