@@ -27556,26 +27556,25 @@ async function checkDiskSpace() {
     logger.warn("  ⚠ Could not check disk space");
   }
 }
-async function checkConfigFile() {
-  const configPath = join9(process.cwd(), ".backlog-jira", "config.json");
+async function checkConfigFile(cwd = process.cwd()) {
+  const configPath = join9(cwd, ".backlog-jira", "config.json");
   if (!existsSync7(configPath)) {
     throw new Error("Config file not found. Run 'backlog-jira init' first.");
   }
+  let config;
   try {
-    const configContent = await readFile(configPath, "utf8");
-    const config = JSON.parse(configContent);
-    const requiredFields = ["jiraProjectKey", "mcpServerName"];
-    const missingFields = requiredFields.filter((field) => !config[field]);
-    if (missingFields.length > 0) {
-      throw new Error(`Missing required config fields: ${missingFields.join(", ")}`);
-    }
-    logger.info("  ✓ Configuration file valid");
+    config = JSON.parse(await readFile(configPath, "utf8"));
   } catch (error) {
     if (error instanceof SyntaxError) {
       throw new Error("Config file contains invalid JSON");
     }
     throw error;
   }
+  const projectKey = config?.jira?.projectKey;
+  if (typeof projectKey !== "string" || projectKey.trim() === "") {
+    throw new Error("Missing required config field: jira.projectKey (set it in .backlog-jira/config.json)");
+  }
+  logger.info("  ✓ Configuration file valid");
 }
 async function checkFieldMappings(jira, cwd = process.cwd()) {
   const mappings = loadFieldMappings(cwd);
@@ -27645,7 +27644,7 @@ async function doctorCommand() {
     { name: "Node.js runtime", fn: checkNodeRuntime, critical: true },
     { name: "Backlog CLI", fn: checkBacklogCLI, critical: true },
     { name: "Dependencies", fn: checkNodeModules, critical: true },
-    { name: "Configuration", fn: checkConfigFile, critical: true },
+    { name: "Configuration", fn: () => checkConfigFile(), critical: true },
     { name: "Database", fn: checkDatabasePerms, critical: true },
     { name: "MCP Connectivity", fn: checkMCPConnectivity, critical: true },
     { name: "Field mappings", fn: checkFieldMappingsWithJira, critical: true },

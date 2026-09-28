@@ -1,7 +1,84 @@
-import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
+import {
+	afterEach,
+	beforeEach,
+	describe,
+	expect,
+	it,
+	mock,
+	spyOn,
+} from "bun:test";
+import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { cleanupDir, uniqueTestDir, writeJson } from "../../test/helpers/fs.ts";
-import { checkFieldMappings } from "./doctor.ts";
+import { checkConfigFile, checkFieldMappings } from "./doctor.ts";
+import { initCommand } from "./init.ts";
+
+describe("doctor: configuration", () => {
+	let testDir: string;
+	let configPath: string;
+
+	beforeEach(() => {
+		testDir = uniqueTestDir("doctor-config-test");
+		configPath = join(testDir, ".backlog-jira", "config.json");
+	});
+
+	afterEach(() => {
+		mock.restore();
+		cleanupDir(testDir);
+	});
+
+	async function initWithProjectKey(projectKey: string): Promise<void> {
+		const prompts = await import("prompts");
+		spyOn(prompts, "default").mockResolvedValue({ shouldSetup: false });
+		await initCommand({ baseDir: testDir });
+		const config = JSON.parse(readFileSync(configPath, "utf8"));
+		config.jira.projectKey = projectKey;
+		writeFileSync(configPath, JSON.stringify(config, null, 2));
+	}
+
+	it("passes for a config written by init once the project key is set", async () => {
+		await initWithProjectKey("PROJ");
+		await expect(checkConfigFile(testDir)).resolves.toBeUndefined();
+	});
+
+	it("reports the empty project key init leaves behind", async () => {
+		await initWithProjectKey("");
+		await expect(checkConfigFile(testDir)).rejects.toThrow(
+			"Missing required config field: jira.projectKey",
+		);
+	});
+
+	it("reports a missing project key", async () => {
+		writeJson(configPath, { jira: { baseUrl: "https://x.atlassian.net" } });
+		await expect(checkConfigFile(testDir)).rejects.toThrow(
+			"Missing required config field: jira.projectKey",
+		);
+	});
+
+	it("reports a whitespace-only project key", async () => {
+		writeJson(configPath, { jira: { projectKey: "  " } });
+		await expect(checkConfigFile(testDir)).rejects.toThrow("jira.projectKey");
+	});
+
+	it("does not require the legacy top-level keys", async () => {
+		writeJson(configPath, { jira: { projectKey: "PROJ" } });
+		await expect(checkConfigFile(testDir)).resolves.toBeUndefined();
+	});
+
+	it("reports a missing config file", async () => {
+		await expect(checkConfigFile(testDir)).rejects.toThrow(
+			"Config file not found",
+		);
+	});
+
+	it("reports invalid JSON", async () => {
+		writeJson(configPath, {});
+		writeFileSync(configPath, "{ not json");
+		await expect(checkConfigFile(testDir)).rejects.toThrow(
+			"Config file contains invalid JSON",
+		);
+	});
+});
 
 describe("doctor: field mappings", () => {
 	let testDir: string;
