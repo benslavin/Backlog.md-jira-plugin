@@ -10,6 +10,11 @@ import {
 	loadFieldMappings,
 	readTaskFrontmatter,
 } from "./field-mapping.ts";
+import {
+	type StatusMappingConfig,
+	loadStatusMapping,
+	mapJiraStatusToBacklog,
+} from "./status-mapping.ts";
 
 /**
  * Normalized payload for comparison between Backlog and Jira
@@ -35,6 +40,8 @@ export interface NormalizeOptions {
 	fieldMappings?: FieldMapping[];
 	/** Task frontmatter; read from the task file when omitted and needed */
 	frontmatter?: Record<string, unknown>;
+	/** Status mapping for Jira statuses; loaded from config.json when omitted */
+	statusMapping?: StatusMappingConfig;
 }
 
 /**
@@ -57,7 +64,7 @@ export function normalizeBacklogTask(
 	const payload: NormalizedPayload = {
 		title: task.title.trim(),
 		description: (task.description || "").trim(),
-		status: normalizeStatus(task.status, "backlog"),
+		status: canonicalStatus(task.status),
 		priority: task.priority?.toLowerCase(),
 		labels: (task.labels || []).map((l) => l.toLowerCase()).sort(),
 		assignee: task.assignee?.trim().toLowerCase(),
@@ -89,12 +96,18 @@ export function normalizeBacklogTask(
  */
 export function normalizeJiraIssue(
 	issue: JiraIssue,
-	options?: Pick<NormalizeOptions, "fieldMappings">,
+	options?: Pick<NormalizeOptions, "fieldMappings" | "statusMapping">,
 ): NormalizedPayload {
 	const payload: NormalizedPayload = {
 		title: issue.summary.trim(),
 		description: (issue.description || "").trim(),
-		status: normalizeStatus(issue.status, "jira"),
+		status: canonicalStatus(
+			mapJiraStatusToBacklog(
+				issue.status,
+				issue.key.split("-")[0],
+				options?.statusMapping ?? loadStatusMapping(),
+			),
+		),
 		priority: issue.priority?.toLowerCase(),
 		labels: (issue.labels || []).map((l) => l.toLowerCase()).sort(),
 		assignee: issue.assignee?.trim().toLowerCase(),
@@ -126,32 +139,24 @@ export function normalizeJiraIssue(
 }
 
 /**
- * Normalize status values between Backlog and Jira
- * Maps common status names to canonical values
+ * Canonical tokens for Backlog's default statuses. Kept so hashes stored by
+ * earlier versions stay valid; other statuses are compared lower-cased.
  */
-function normalizeStatus(status: string, side: "backlog" | "jira"): string {
+const CANONICAL_STATUS_TOKENS: Record<string, string> = {
+	"to do": "todo",
+	"in progress": "in_progress",
+};
+
+/**
+ * Canonical form of a Backlog status for comparison. Jira statuses are first
+ * resolved to their Backlog status through the configured status mapping
+ * (backlog.statusMapping and projectOverrides in config.json), the same
+ * mapping pull uses, so both sides compare equal exactly when pull would
+ * leave the Backlog status unchanged.
+ */
+function canonicalStatus(status: string): string {
 	const normalized = status.toLowerCase().trim();
-
-	// Backlog statuses: To Do, In Progress, Done, Blocked
-	// Jira statuses vary by workflow, but common ones: To Do, In Progress, Done, Closed
-
-	const statusMap: Record<string, string> = {
-		"to do": "todo",
-		todo: "todo",
-		backlog: "todo",
-		"in progress": "in_progress",
-		inprogress: "in_progress",
-		"in-progress": "in_progress",
-		doing: "in_progress",
-		done: "done",
-		completed: "done",
-		closed: "done",
-		resolved: "done",
-		blocked: "blocked",
-		"on hold": "blocked",
-	};
-
-	return statusMap[normalized] || normalized;
+	return CANONICAL_STATUS_TOKENS[normalized] ?? normalized;
 }
 
 /**

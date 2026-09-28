@@ -139,6 +139,10 @@ When pulling a status change from Jira to Backlog:
 2. Looks up the corresponding Backlog status in the configuration
 3. Updates the Backlog task status via CLI
 
+### Change Detection
+
+`sync`, `push` and `status` compare the Backlog and Jira statuses through the same mapping: a Jira status counts as equal to a Backlog status when the configuration (including project overrides for the issue's project) maps it to that Backlog status. A Jira status that is not in the configuration only matches a Backlog status with the same name (case-insensitive).
+
 ## Error Handling
 
 ### No Transition Available

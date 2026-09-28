@@ -840,7 +840,9 @@ async function importJiraIssue(
 		status: mapJiraStatusToBacklog(issue.status, projectKey),
 		assignee: mappedAssignee || issue.assignee,
 		labels: overridden.has("labels") ? undefined : issue.labels,
-		priority: overridden.has("priority") ? undefined : issue.priority,
+		priority: overridden.has("priority")
+			? undefined
+			: mapJiraPriorityToBacklog(issue.priority),
 		// Add acceptance criteria during creation
 		ac: acceptanceCriteria.map((ac) => ac.text),
 	});

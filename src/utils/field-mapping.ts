@@ -121,6 +121,58 @@ export class FieldMappingConfigError extends Error {
 	}
 }
 
+/** Jira system field carrying the built-in priority */
+export const PRIORITY_SYSTEM_FIELD = "priority";
+
+/** Valid Backlog.md priority values */
+export const BACKLOG_PRIORITIES = ["high", "medium", "low"] as const;
+
+/**
+ * Built-in priority mapping: Backlog priority ↔ Jira's system priority field.
+ * Entries are ordered so the first entry per Backlog value is the Jira value
+ * sent on push (high → High, medium → Medium, low → Low).
+ */
+export const DEFAULT_PRIORITY_MAPPING: Readonly<FieldMapping> = Object.freeze({
+	backlog: "priority",
+	jira: PRIORITY_SYSTEM_FIELD,
+	type: "option",
+	direction: "both",
+	valueMap: Object.freeze({
+		High: "high",
+		Medium: "medium",
+		Low: "low",
+		Highest: "high",
+		Lowest: "low",
+		Critical: "high",
+		Blocker: "high",
+		Major: "medium",
+		Minor: "low",
+		Trivial: "low",
+	}) as Record<string, string>,
+});
+
+/**
+ * Whether a mapping overrides the built-in priority mapping (the Jira system
+ * priority field) rather than replacing priority with another Jira field
+ */
+export function isBuiltInPriorityMapping(
+	mapping: Pick<FieldMapping, "backlog" | "jira">,
+): boolean {
+	return (
+		mapping.backlog === "priority" && mapping.jira === PRIORITY_SYSTEM_FIELD
+	);
+}
+
+/**
+ * Mappings handled by the generic mapping engine, i.e. without the built-in
+ * priority override (which is applied by the core priority sync)
+ */
+export function withoutBuiltInMappings(
+	mappings: FieldMapping[],
+): FieldMapping[] {
+	return mappings.filter((m) => !isBuiltInPriorityMapping(m));
+}
+
 const FRONTMATTER_KEY_PATTERN = /^[A-Za-z_][A-Za-z0-9_-]*$/;
 const JIRA_FIELD_PATTERN = /^(customfield_\d+|[A-Za-z][A-Za-z0-9_]*)$/;
 
@@ -235,6 +287,16 @@ export function validateFieldMappings(raw: unknown): {
 			}
 		}
 
+		const builtInPriority =
+			entryErrors.length === 0 &&
+			isBuiltInPriorityMapping({
+				backlog: (e.backlog as string).trim(),
+				jira: (e.jira as string).trim(),
+			});
+		if (builtInPriority) {
+			entryErrors.push(...validateBuiltInPriorityEntry(label, e));
+		}
+
 		if (entryErrors.length > 0) {
 			errors.push(...entryErrors);
 			return;
@@ -246,7 +308,9 @@ export function validateFieldMappings(raw: unknown): {
 			backlog,
 			jira: (e.jira as string).trim(),
 			type: e.type as FieldMappingType,
-			direction: (e.direction as FieldMappingDirection | undefined) ?? "pull",
+			direction:
+				(e.direction as FieldMappingDirection | undefined) ??
+				(builtInPriority ? "both" : "pull"),
 			...(e.valueMap
 				? { valueMap: e.valueMap as Record<string, string> }
 				: undefined),
@@ -257,10 +321,47 @@ export function validateFieldMappings(raw: unknown): {
 }
 
 /**
- * Load and validate fieldMappings from .backlog-jira/config.json
+ * Extra rules for an entry overriding the built-in priority mapping, which
+ * always syncs the Jira system priority field in both directions
+ */
+function validateBuiltInPriorityEntry(
+	label: string,
+	e: Record<string, unknown>,
+): string[] {
+	const errors: string[] = [];
+	if (e.type !== "option") {
+		errors.push(
+			`${label}: the built-in priority mapping must use "type": "option"`,
+		);
+	}
+	if (e.direction !== undefined && e.direction !== "both") {
+		errors.push(
+			`${label}: the built-in priority mapping always syncs both ways; omit "direction" or use "both"`,
+		);
+	}
+	if (e.valueMap && typeof e.valueMap === "object") {
+		for (const [from, to] of Object.entries(e.valueMap)) {
+			if (
+				typeof to === "string" &&
+				!(BACKLOG_PRIORITIES as readonly string[]).includes(
+					to.trim().toLowerCase(),
+				)
+			) {
+				errors.push(
+					`${label}: valueMap maps "${from}" to "${to}", which is not a Backlog priority (${BACKLOG_PRIORITIES.join(", ")})`,
+				);
+			}
+		}
+	}
+	return errors;
+}
+
+/**
+ * Load and validate every fieldMappings entry from .backlog-jira/config.json,
+ * including a built-in priority override
  * Throws FieldMappingConfigError if any entry is invalid
  */
-export function loadFieldMappings(cwd = process.cwd()): FieldMapping[] {
+function loadAllFieldMappings(cwd: string): FieldMapping[] {
 	const configPath = join(cwd, ".backlog-jira", "config.json");
 	if (!existsSync(configPath)) {
 		return [];
@@ -279,6 +380,47 @@ export function loadFieldMappings(cwd = process.cwd()): FieldMapping[] {
 		throw new FieldMappingConfigError(errors);
 	}
 	return mappings;
+}
+
+/**
+ * Load and validate fieldMappings from .backlog-jira/config.json
+ * Returns the mappings handled by the generic mapping engine; a built-in
+ * priority override is returned by loadPriorityMapping instead.
+ * Throws FieldMappingConfigError if any entry is invalid
+ */
+export function loadFieldMappings(cwd = process.cwd()): FieldMapping[] {
+	return withoutBuiltInMappings(loadAllFieldMappings(cwd));
+}
+
+/**
+ * The effective built-in priority mapping: the default mapping, with the
+ * valueMap of a `{ "backlog": "priority", "jira": "priority" }` entry merged
+ * over the defaults (configured entries win and are preferred on push)
+ */
+export function resolvePriorityMapping(mappings: FieldMapping[]): FieldMapping {
+	const override = mappings.find(isBuiltInPriorityMapping);
+	const defaults = DEFAULT_PRIORITY_MAPPING.valueMap as Record<string, string>;
+	if (!override?.valueMap) {
+		return { ...DEFAULT_PRIORITY_MAPPING, valueMap: { ...defaults } };
+	}
+
+	const valueMap: Record<string, string> = {};
+	for (const [from, to] of Object.entries(override.valueMap)) {
+		valueMap[from] = to.trim().toLowerCase();
+	}
+	const configured = new Set(Object.keys(valueMap).map((k) => k.toLowerCase()));
+	for (const [from, to] of Object.entries(defaults)) {
+		if (!configured.has(from.toLowerCase())) valueMap[from] = to;
+	}
+	return { ...DEFAULT_PRIORITY_MAPPING, valueMap };
+}
+
+/**
+ * Load the effective built-in priority mapping from .backlog-jira/config.json
+ * Throws FieldMappingConfigError if any fieldMappings entry is invalid
+ */
+export function loadPriorityMapping(cwd = process.cwd()): FieldMapping {
+	return resolvePriorityMapping(loadAllFieldMappings(cwd));
 }
 
 /**
@@ -398,7 +540,7 @@ function unwrapScalar(value: unknown): unknown {
 	return value;
 }
 
-function applyValueMap(
+export function applyValueMap(
 	value: string,
 	valueMap?: Record<string, string>,
 ): string {
@@ -773,7 +915,7 @@ const ACCOUNT_ID_PATTERN = /^([0-9a-f]{24}|[0-9]{5,}:[a-f0-9-]+)$/;
  * Translate a Backlog value back to its Jira value using a mapping's valueMap.
  * Exact matches win, then case-insensitive; the first matching entry is used.
  */
-function reverseValueMap(
+export function reverseValueMap(
 	value: string,
 	valueMap?: Record<string, string>,
 ): string {

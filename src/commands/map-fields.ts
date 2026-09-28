@@ -8,6 +8,7 @@ import {
 	FIELD_MAPPING_TYPES,
 	type FieldMapping,
 	FieldMappingConfigError,
+	isBuiltInPriorityMapping,
 	suggestTypeForSchema,
 	validateFieldMappings,
 } from "../utils/field-mapping.ts";
@@ -89,7 +90,9 @@ export function addFieldMapping(
 		backlog: mapping.backlog,
 		jira: mapping.jira,
 		type: mapping.type,
-		direction: mapping.direction ?? "pull",
+		direction:
+			mapping.direction ??
+			(isBuiltInPriorityMapping(mapping) ? "both" : "pull"),
 	};
 	if (mapping.valueMap) entry.valueMap = mapping.valueMap;
 
@@ -255,8 +258,7 @@ export function registerMapFieldsCommand(program: Command): void {
 		)
 		.option(
 			"--direction <direction>",
-			`One of: ${FIELD_MAPPING_DIRECTIONS.join(", ")} (pull: Jira → Backlog, push: Backlog → Jira)`,
-			"pull",
+			`One of: ${FIELD_MAPPING_DIRECTIONS.join(", ")} (pull: Jira → Backlog, push: Backlog → Jira; default: pull, or both for priority ↔ priority)`,
 		)
 		.option(
 			"--value-map <entry>",
@@ -272,7 +274,7 @@ export function registerMapFieldsCommand(program: Command): void {
 					jiraField: string,
 					options: {
 						type: string;
-						direction: string;
+						direction?: string;
 						valueMap?: string[];
 						force?: boolean;
 					},

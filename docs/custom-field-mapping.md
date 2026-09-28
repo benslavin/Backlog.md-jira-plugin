@@ -49,7 +49,7 @@ Mappings live in `.backlog-jira/config.json` under the top-level `fieldMappings`
 | `milestone` | `backlog task edit --milestone` / `--clear-milestone` | List values are joined with `, `. |
 | `dependencies` | `backlog task edit --dep` / `--clear-deps` | Values should be Backlog task IDs. |
 | `references` | `backlog task edit --ref` / `--clear-refs` | |
-| `priority` | `backlog task edit --priority` | Replaces the built-in Jira priority, which is then not synced in either direction. Values must be valid Backlog priorities; use `valueMap`. An empty Jira value leaves the Backlog priority unchanged. |
+| `priority` | `backlog task edit --priority` | With `"jira": "priority"`, overrides the [built-in priority mapping](#built-in-priority-mapping). With any other Jira field, replaces the built-in Jira priority, which is then not synced in either direction; values must be valid Backlog priorities (use `valueMap`), and an empty Jira value leaves the Backlog priority unchanged. |
 | `labels` | `backlog task edit --label` / `--clear-labels` | Replaces the built-in Jira labels, which are then not synced in either direction. |
 | `frontmatter:<key>` | Plugin frontmatter utilities | Stored as `<key>` in the task file's frontmatter. |
 
@@ -69,6 +69,43 @@ Mappings live in `.backlog-jira/config.json` under the top-level `fieldMappings`
 | `array` | Labels-like list (`components`, text lists) | List of names; comma-separated text is split | `components`: `[{ "name": ... }]`; other fields: list of strings |
 
 Empty Jira values clear the Backlog target (except `priority`). Empty Backlog values clear the Jira field (`null`, or `[]` for list fields); on `create-issue` empty values are simply omitted.
+
+## Built-in Priority Mapping
+
+Priority is synced through a default field mapping between Backlog `priority` and Jira's system `priority` field:
+
+```json
+{
+  "backlog": "priority",
+  "jira": "priority",
+  "type": "option",
+  "direction": "both",
+  "valueMap": {
+    "High": "high", "Medium": "medium", "Low": "low",
+    "Highest": "high", "Lowest": "low",
+    "Critical": "high", "Blocker": "high",
+    "Major": "medium", "Minor": "low", "Trivial": "low"
+  }
+}
+```
+
+Jira values are matched exactly, then case-insensitively; unknown values become `medium`. On push, the first entry for the Backlog value is sent (`High`, `Medium`, `Low`), and unknown Backlog values send the Jira value for `medium`.
+
+To adjust it, add an entry with `"backlog": "priority"` and `"jira": "priority"` to `fieldMappings`:
+
+```json
+{ "backlog": "priority", "jira": "priority", "type": "option",
+  "valueMap": { "P1": "high", "P2": "medium", "P3": "low", "Major": "high" } }
+```
+
+or `backlog-jira map-fields add priority priority --type option --value-map "P1=high" ...`.
+
+- Configured entries are merged over the defaults: they win for the same Jira value (case-insensitive), and are listed first, so `high` is pushed as `P1` above. Default entries not overridden still apply when pulling.
+- `type` must be `option`; `direction` defaults to `both` and cannot be changed.
+- Every value must be `high`, `medium` or `low`.
+- Configs without this entry keep the default mapping; no migration is needed.
+
+Status is not a field mapping: it is configured with `backlog.statusMapping` (and `backlog.projectOverrides`), which `pull` uses to translate Jira statuses and change detection uses to decide whether a Jira status matches the Backlog status. See the [Status Mapping Guide](status-mapping.md).
 
 ## Commands
 

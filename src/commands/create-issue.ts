@@ -4,10 +4,13 @@ import { BacklogClient, type BacklogTask } from "../integrations/backlog.ts";
 import { JiraClient, type JiraIssue } from "../integrations/jira.ts";
 import { FrontmatterStore } from "../state/store.ts";
 import {
+	type FieldMapping,
 	FieldMappingConfigError,
 	buildMappedJiraFields,
 	readTaskFrontmatter,
+	resolvePriorityMapping,
 	validateFieldMappings,
+	withoutBuiltInMappings,
 } from "../utils/field-mapping.ts";
 import { getTaskFilePath, updateJiraMetadata } from "../utils/frontmatter.ts";
 import { getJiraClientOptions } from "../utils/jira-config.ts";
@@ -97,16 +100,21 @@ export async function createIssue(
 			);
 		}
 
-		const { mappings: fieldMappings, errors: mappingErrors } =
+		const { mappings: allFieldMappings, errors: mappingErrors } =
 			validateFieldMappings(config.fieldMappings);
 		if (mappingErrors.length > 0) {
 			throw new FieldMappingConfigError(mappingErrors);
 		}
+		// A built-in priority override is applied by the core priority mapping
+		const fieldMappings = withoutBuiltInMappings(allFieldMappings);
 		const overridden = getOverriddenCoreFields(fieldMappings);
 
 		// Build Jira issue from Backlog task
 		logger.debug({ taskId }, "Building Jira issue from Backlog task");
-		const issueData = buildJiraIssueFromBacklogTask(task, projectKey);
+		const issueData = buildJiraIssueFromBacklogTask(
+			task,
+			resolvePriorityMapping(allFieldMappings),
+		);
 		if (overridden.has("priority")) issueData.priority = undefined;
 		if (overridden.has("labels")) issueData.labels = undefined;
 
@@ -289,7 +297,7 @@ export async function createIssue(
  */
 function buildJiraIssueFromBacklogTask(
 	task: BacklogTask,
-	projectKey?: string,
+	priorityMapping: FieldMapping,
 ): {
 	summary: string;
 	description?: string;
@@ -314,7 +322,7 @@ function buildJiraIssueFromBacklogTask(
 
 	// Priority (map from Backlog to Jira)
 	const priority = task.priority
-		? mapBacklogPriorityToJira(task.priority)
+		? mapBacklogPriorityToJira(task.priority, priorityMapping)
 		: undefined;
 
 	// Labels

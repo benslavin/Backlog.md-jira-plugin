@@ -12,6 +12,7 @@ import {
 	getBacklogTargetValue,
 	getMappedJiraValue,
 	isCoreOverrideTarget,
+	withoutBuiltInMappings,
 } from "./field-mapping.ts";
 import { getTaskFilePath, updateFrontmatterFields } from "./frontmatter.ts";
 import { logger } from "./logger.ts";
@@ -606,6 +607,8 @@ export function verifyFieldMappings(
  */
 export function getOverriddenCoreFields(mappings: FieldMapping[]): Set<string> {
 	return new Set(
-		mappings.map((m) => m.backlog).filter((t) => isCoreOverrideTarget(t)),
+		withoutBuiltInMappings(mappings)
+			.map((m) => m.backlog)
+			.filter((t) => isCoreOverrideTarget(t)),
 	);
 }

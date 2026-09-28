@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { JiraClient, JiraTransition } from "../integrations/jira.ts";
 import { logger } from "./logger.ts";
@@ -29,45 +29,49 @@ export interface StatusTransitionResult {
 
 /**
  * Load status mapping configuration from .backlog-jira/config.json
+ * Falls back to the default mapping when the config is missing or unreadable
  */
-export function loadStatusMapping(): StatusMappingConfig {
+export function loadStatusMapping(cwd = process.cwd()): StatusMappingConfig {
+	const configPath = join(cwd, ".backlog-jira", "config.json");
+	if (!existsSync(configPath)) {
+		logger.debug("No config.json found, using default status mapping");
+		return buildStatusMapping(getDefaultBacklogToJiraMapping());
+	}
+
 	try {
-		const configPath = join(process.cwd(), ".backlog-jira", "config.json");
-		const content = readFileSync(configPath, "utf-8");
-		const config = JSON.parse(content);
-
-		// Extract status mapping from config
-		const backlogToJira =
-			config.backlog?.statusMapping || getDefaultBacklogToJiraMapping();
-
-		// Build reverse mapping (Jira → Backlog), case-insensitive keys
-		const jiraToBacklog: Record<string, string> = {};
-		for (const [backlogStatus, jiraStatuses] of Object.entries(backlogToJira)) {
-			for (const jiraStatus of jiraStatuses as string[]) {
-				jiraToBacklog[jiraStatus.toLowerCase()] = backlogStatus;
-			}
-		}
-
-		return {
-			backlogToJira,
-			jiraToBacklog,
-			projectOverrides: config.backlog?.projectOverrides,
-		};
+		const config = JSON.parse(readFileSync(configPath, "utf-8"));
+		return buildStatusMapping(
+			config.backlog?.statusMapping || getDefaultBacklogToJiraMapping(),
+			config.backlog?.projectOverrides,
+		);
 	} catch (error) {
 		logger.warn(
 			{ error },
 			"Failed to load status mapping config, using defaults",
 		);
-		const defaults = getDefaultBacklogToJiraMapping();
-		const lowered: Record<string, string> = {};
-		for (const [backlogStatus, jiraStatuses] of Object.entries(defaults)) {
-			for (const s of jiraStatuses) lowered[s.toLowerCase()] = backlogStatus;
-		}
-		return {
-			backlogToJira: defaults,
-			jiraToBacklog: lowered,
-		};
+		return buildStatusMapping(getDefaultBacklogToJiraMapping());
 	}
+}
+
+/**
+ * Build a status mapping from Backlog → Jira statuses, adding the reverse
+ * (Jira → Backlog) mapping with lower-cased keys
+ */
+export function buildStatusMapping(
+	backlogToJira: Record<string, string[]>,
+	projectOverrides?: StatusMappingConfig["projectOverrides"],
+): StatusMappingConfig {
+	const jiraToBacklog: Record<string, string> = {};
+	for (const [backlogStatus, jiraStatuses] of Object.entries(backlogToJira)) {
+		for (const jiraStatus of jiraStatuses) {
+			jiraToBacklog[jiraStatus.toLowerCase()] = backlogStatus;
+		}
+	}
+	return {
+		backlogToJira,
+		jiraToBacklog,
+		...(projectOverrides ? { projectOverrides } : undefined),
+	};
 }
 
 /**
@@ -106,9 +110,8 @@ function getDefaultJiraToBacklogMapping(): Record<string, string> {
 export function mapJiraStatusToBacklog(
 	jiraStatus: string,
 	projectKey?: string,
+	mapping: StatusMappingConfig = loadStatusMapping(),
 ): string {
-	const mapping = loadStatusMapping();
-
 	// Check project-specific override first (case-insensitive)
 	if (projectKey && mapping.projectOverrides?.[projectKey]) {
 		const override = mapping.projectOverrides[projectKey].jiraToBacklog;

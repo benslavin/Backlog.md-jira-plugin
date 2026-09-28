@@ -28,7 +28,7 @@ The Backlog.md Jira plugin enables seamless bidirectional synchronization betwee
 - **✅ Acceptance Criteria**: Sync acceptance criteria with full checked/unchecked state
 - **📊 Status Mapping**: Flexible status mapping with project-specific overrides
 - **🔍 Conflict Detection**: Field-level conflict detection with multiple resolution strategies
-- **📝 Field Mapping**: Sync titles, descriptions, statuses, priorities, assignees and labels; pull additional Jira fields (story points, fix versions, custom fields) into Backlog with [custom field mappings](#custom-field-mappings)
+- **📝 Field Mapping**: Sync titles, descriptions, statuses, priorities, assignees and labels; sync additional Jira fields (story points, fix versions, custom fields) with configurable [custom field mappings](#custom-field-mappings), including your own priority values
 - **🔐 Secure**: Uses MCP (Model Context Protocol) for secure Jira access
 - **📦 Standalone**: Zero modifications to Backlog.md core - fully independent plugin
 
@@ -126,8 +126,6 @@ The plugin uses file-based storage in `.backlog-jira/`:
 ### 🚧 Future Enhancements
 
 - [ ] **Web UI Integration**: Pull/Push buttons in browser interface
-- [x] **Custom Field Mapping (pull)**: User-defined Jira → Backlog field mappings (see [Custom Field Mappings](#custom-field-mappings))
-- [ ] **Custom Field Mapping (push)**: Send mapped fields from Backlog to Jira and resolve per-field conflicts
 - [ ] **Webhooks**: Real-time sync triggered by Jira webhooks
 
 ## Prerequisites
@@ -299,7 +297,7 @@ Edit `.backlog-jira/config.json`:
 
 | Option | Description | Details |
 |--------|-------------|---------|  
-| `statusMapping` | Maps Backlog statuses to Jira | See [Status Mapping Guide](docs/status-mapping.md) |
+| `statusMapping` | Maps Backlog statuses to Jira; also used to decide whether a Jira status matches the Backlog status during change detection | See [Status Mapping Guide](docs/status-mapping.md) |
 | `projectOverrides` | Project-specific status mappings | Override per Jira project |
 
 #### Sync Section
@@ -324,10 +322,26 @@ values into Backlog, `push` sends Backlog values to Jira (on `push`, `sync` and
       "direction": "both" },
     { "backlog": "milestone", "jira": "fixVersions", "type": "version" },
     { "backlog": "frontmatter:team", "jira": "customfield_10020", "type": "option",
-      "direction": "push", "valueMap": { "Platform Team": "platform" } }
+      "direction": "push", "valueMap": { "Platform Team": "platform" } },
+    { "backlog": "priority", "jira": "priority", "type": "option",
+      "valueMap": { "P1": "high", "P2": "medium", "P3": "low" } }
   ]
 }
 ```
+
+The whole lifecycle for a mapping:
+
+1. **Find the field**: `backlog-jira map-fields discover --search "story"` lists
+   Jira field IDs with a suggested `type`.
+2. **Add the mapping**: `backlog-jira map-fields add <target> <jira-field> --type <type>`
+   (or edit `config.json`), choosing a `direction` and optional `valueMap`.
+3. **Verify it**: `backlog-jira doctor` checks the field exists and, for `push`
+   and `both` mappings, is editable for your project and issue type.
+4. **Sync**: `pull` writes Jira values into Backlog, `push` and `create-issue`
+   send Backlog values to Jira, and `sync` does both, reporting per-field
+   conflicts for `both` mappings. Adding a mapping never causes a conflict.
+5. **Inspect**: `backlog-jira view <task-id>` shows each mapped value from both
+   sides.
 
 | Property | Description |
 |----------|-------------|
@@ -337,11 +351,24 @@ values into Backlog, `push` sends Backlog values to Jira (on `push`, `sync` and
 | `direction` | Optional, default `pull`. `pull` mappings are never written to Jira; `push` mappings are never written to Backlog; `both` syncs both ways |
 | `valueMap` | Optional. Translates Jira values to Backlog values, e.g. `{ "Highest": "high" }`, and back when pushing |
 
+**Built-in priority mapping.** Priority is synced through a default mapping
+between Backlog `priority` and Jira's system `priority` field. Its default
+`valueMap` maps Highest/High/Critical/Blocker to `high`, Medium/Major to
+`medium` and Low/Lowest/Minor/Trivial to `low`, and pushes `High`, `Medium` and
+`Low`; unknown values fall back to medium. To use your own Jira priorities, add
+a `{ "backlog": "priority", "jira": "priority", "type": "option", "valueMap": {...} }`
+entry: its entries are merged over the defaults, and the first entry for each
+Backlog priority is the value pushed to Jira. This mapping always syncs both
+ways and its values must be `high`, `medium` or `low`. Configs without it need
+no changes.
+
+
 Invalid entries (unknown targets, unknown types, duplicate targets, or
 `frontmatter:` keys that collide with Backlog core keys such as `status` or with
 the plugin's `jira_*` keys) stop `pull`, `push` and `sync` with an error listing
-every problem. Mapping `priority` or `labels` replaces the built-in Jira
-priority/labels for that field, which are then not synced. If Jira rejects a
+every problem. Mapping `priority` to another Jira field (e.g. a custom
+select) or `labels` to any field replaces the built-in Jira priority/labels,
+which are then not synced. If Jira rejects a
 mapped field on push (for example because it is not on the issue type's edit
 screen), the rest of the push still goes through and the error names the
 failing field; `backlog-jira doctor` checks each mapped field exists and is
@@ -601,8 +628,12 @@ backlog-jira map-fields discover --custom-only
 backlog-jira map-fields add frontmatter:story_points customfield_10016 --type number
 backlog-jira map-fields add milestone fixVersions --type version
 backlog-jira map-fields add frontmatter:team customfield_10020 --type option --direction both
-backlog-jira map-fields add priority customfield_10050 --type option \
+# Override the built-in priority valueMap (Jira system priority field)
+backlog-jira map-fields add priority priority --type option \
   --value-map "P1=high" --value-map "P2=medium" --value-map "P3=low"
+# Or take priority from a custom field instead
+backlog-jira map-fields add priority customfield_10050 --type option --force \
+  --value-map "Urgent=high" --value-map "Normal=medium"
 
 # Review and remove
 backlog-jira map-fields list
@@ -648,7 +679,7 @@ backlog-jira create-issue task-123 --issue-type Epic
 1. Validates that the task exists in Backlog
 2. Validates that the task is not already mapped to a Jira issue
 3. Reads all task metadata (title, description, status, assignee, labels, priority, AC)
-4. Maps Backlog priority to Jira priority (High/Medium/Low → High/Medium/Low)
+4. Maps Backlog priority to Jira priority (high/medium/low → High/Medium/Low, or your [priority mapping](#custom-field-mappings))
 5. Merges acceptance criteria into Jira description format
 6. Creates the Jira issue via MCP `jira_create_issue` tool
 7. Creates the mapping between task and Jira issue
