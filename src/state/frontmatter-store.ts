@@ -2,18 +2,18 @@ import {
 	existsSync,
 	mkdirSync,
 	readFileSync,
-	writeFileSync,
 	readdirSync,
+	writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
-import { logger } from "../utils/logger.ts";
 import {
 	getJiraMetadata,
 	getTaskFilePath,
-	updateJiraMetadata,
 	parseFrontmatter,
+	updateJiraMetadata,
 } from "../utils/frontmatter.ts";
-import type { Mapping, Snapshot, SyncState, OpLog } from "./types.ts";
+import { logger } from "../utils/logger.ts";
+import type { Mapping, OpLog, Snapshot, SyncState } from "./types.ts";
 
 /**
  * FrontmatterStore provides file-based sync state storage
@@ -288,7 +288,7 @@ export class FrontmatterStore {
 		};
 
 		try {
-			const line = JSON.stringify(logEntry) + "\n";
+			const line = `${JSON.stringify(logEntry)}\n`;
 			writeFileSync(this.opsLogPath, line, { flag: "a", encoding: "utf-8" });
 			logger.debug({ op, backlogId, jiraKey, outcome }, "Logged operation");
 		} catch (error) {

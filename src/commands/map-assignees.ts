@@ -5,9 +5,9 @@ import * as readline from "node:readline/promises";
 import chalk from "chalk";
 import type { Command } from "commander";
 import { JiraClient } from "../integrations/jira.ts";
+import { getAssigneeMappingDescription } from "../utils/assignee-mapping.ts";
 import { getJiraClientOptions } from "../utils/jira-config.ts";
 import { logger } from "../utils/logger.ts";
-import { getAssigneeMappingDescription } from "../utils/assignee-mapping.ts";
 
 /**
  * Show current assignee mappings

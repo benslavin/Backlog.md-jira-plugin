@@ -27,7 +27,7 @@ export function getJiraClientOptions(): JiraClientOptions {
 			};
 		};
 
-		const options: JiraClientOptions = {} as JiraClientOptions;
+		const options: JiraClientOptions = {};
 
 		if (config.mcp) {
 			if (config.mcp.serverArgs && Array.isArray(config.mcp.serverArgs)) {
@@ -35,27 +35,24 @@ export function getJiraClientOptions(): JiraClientOptions {
 					{ dockerArgs: config.mcp.serverArgs },
 					"Using Docker args from config.json",
 				);
-				(options as any).dockerArgs = config.mcp.serverArgs;
+				options.dockerArgs = config.mcp.serverArgs;
 			}
 
 			if (typeof config.mcp.useExternalServer === "boolean") {
-				(options as any).useExternalServer = config.mcp.useExternalServer;
+				options.useExternalServer = config.mcp.useExternalServer;
 			}
 			if (typeof config.mcp.fallbackToDocker === "boolean") {
-				(options as any).fallbackToDocker = config.mcp.fallbackToDocker;
+				options.fallbackToDocker = config.mcp.fallbackToDocker;
 			}
 			if (typeof config.mcp.serverCommand === "string") {
-				(options as any).serverCommand = config.mcp.serverCommand;
+				options.serverCommand = config.mcp.serverCommand;
 			}
 			if (config.mcp.serverArgs && Array.isArray(config.mcp.serverArgs)) {
 				// Reuse serverArgs for external server too (naming overlap in config)
-				(options as any).serverArgs = config.mcp.serverArgs;
+				options.serverArgs = config.mcp.serverArgs;
 			}
 			if (config.mcp.envVars && typeof config.mcp.envVars === "object") {
-				(options as any).extraEnv = config.mcp.envVars as Record<
-					string,
-					string
-				>;
+				options.extraEnv = config.mcp.envVars as Record<string, string>;
 			}
 		}
 

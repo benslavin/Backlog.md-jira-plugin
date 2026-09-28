@@ -1,41 +1,46 @@
 import { beforeEach, describe, expect, it, mock } from "bun:test";
+import type { BacklogTask } from "../integrations/backlog.ts";
+import type { JiraIssue } from "../integrations/jira.ts";
+import type { Mapping } from "../state/types.ts";
 
 // Mock clients and store
 const mockBacklogClient = {
-	getTask: mock((taskId: string) =>
-		Promise.resolve({
-			id: taskId,
-			title: "Test Task",
-			description: "Test description",
-			status: "To Do",
-			assignee: "alice",
-			priority: "high",
-			labels: ["backend"],
-		}),
+	getTask: mock(
+		(taskId: string): Promise<Partial<BacklogTask>> =>
+			Promise.resolve({
+				id: taskId,
+				title: "Test Task",
+				description: "Test description",
+				status: "To Do",
+				assignee: "alice",
+				priority: "high",
+				labels: ["backend"],
+			}),
 	),
 };
 
 const mockJiraClient = {
-	getIssue: mock((issueKey: string) =>
-		Promise.resolve({
-			key: issueKey,
-			id: "10001",
-			summary: "Test Jira Issue",
-			description: "Test Jira description",
-			status: "To Do",
-			issueType: "Task",
-			assignee: "bob",
-			priority: "medium",
-			labels: ["frontend"],
-			created: "2025-01-01T00:00:00Z",
-			updated: "2025-01-01T00:00:00Z",
-		}),
+	getIssue: mock(
+		(issueKey: string): Promise<Partial<JiraIssue>> =>
+			Promise.resolve({
+				key: issueKey,
+				id: "10001",
+				summary: "Test Jira Issue",
+				description: "Test Jira description",
+				status: "To Do",
+				issueType: "Task",
+				assignee: "bob",
+				priority: "medium",
+				labels: ["frontend"],
+				created: "2025-01-01T00:00:00Z",
+				updated: "2025-01-01T00:00:00Z",
+			}),
 	),
 	close: mock(() => Promise.resolve()),
 };
 
 const mockStore = {
-	getMapping: mock((backlogId: string) => null),
+	getMapping: mock((backlogId: string): Mapping | null => null),
 	addMapping: mock((backlogId: string, jiraKey: string) => {}),
 	setSnapshot: mock(
 		(backlogId: string, side: string, hash: string, payload: unknown) => {},

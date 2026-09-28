@@ -35,7 +35,7 @@
 		"test": "bun test",
 		"test:integration": "./tests/integration/test-clean-install.sh",
 		"check": "biome check .",
-		"check:types": "bunx tsc --noEmit",
+		"check:types": "tsc --noEmit",
 		"prepublishOnly": "npm run build && npm run check && npm run test"
 	},
 	"dependencies": {

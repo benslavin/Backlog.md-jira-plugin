@@ -313,7 +313,7 @@ describe("JiraClient", () => {
 		});
 
 		it("should throw error for missing JIRA_URL", () => {
-			process.env.JIRA_URL = undefined;
+			delete process.env.JIRA_URL;
 			const client = new JiraClient();
 
 			const clientInternal = client as unknown as {
@@ -326,10 +326,10 @@ describe("JiraClient", () => {
 		});
 
 		it("should throw error for missing authentication credentials", () => {
-			process.env.JIRA_USERNAME = undefined;
-			process.env.JIRA_API_TOKEN = undefined;
-			process.env.JIRA_EMAIL = undefined;
-			process.env.JIRA_PERSONAL_TOKEN = undefined;
+			delete process.env.JIRA_USERNAME;
+			delete process.env.JIRA_API_TOKEN;
+			delete process.env.JIRA_EMAIL;
+			delete process.env.JIRA_PERSONAL_TOKEN;
 			const client = new JiraClient();
 
 			const clientInternal = client as unknown as {

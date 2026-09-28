@@ -79,38 +79,22 @@ export async function sync(options: SyncOptions = {}): Promise<SyncResult> {
 			/INFO\s-\s/,
 		];
 		const shouldFilter = (s: string) => patterns.some((p) => p.test(s));
-		const origStdout = process.stdout.write.bind(process.stdout) as (
-			chunk: any,
-			encoding?: BufferEncoding | ((err?: Error) => void),
-			cb?: (err?: Error) => void,
-		) => boolean;
-		const origStderr = process.stderr.write.bind(process.stderr) as (
-			chunk: any,
-			encoding?: BufferEncoding | ((err?: Error) => void),
-			cb?: (err?: Error) => void,
-		) => boolean;
-		// @ts-ignore Node typings allow any
-		process.stdout.write = (chunk: any, enc?: any, cb?: any) => {
-			try {
-				const s =
-					typeof chunk === "string" ? chunk : (chunk?.toString?.() ?? "");
-				if (s && shouldFilter(s)) return true;
-			} catch {}
-			return origStdout(chunk, enc as any, cb as any);
-		};
-		// @ts-ignore Node typings allow any
-		process.stderr.write = (chunk: any, enc?: any, cb?: any) => {
-			try {
-				const s =
-					typeof chunk === "string" ? chunk : (chunk?.toString?.() ?? "");
-				if (s && shouldFilter(s)) return true;
-			} catch {}
-			return origStderr(chunk, enc as any, cb as any);
-		};
+		type Write = NodeJS.WriteStream["write"];
+		const filtered = (stream: NodeJS.WriteStream, orig: Write): Write =>
+			((chunk: string | Uint8Array, ...rest: unknown[]) => {
+				try {
+					const s =
+						typeof chunk === "string" ? chunk : Buffer.from(chunk).toString();
+					if (s && shouldFilter(s)) return true;
+				} catch {}
+				return Reflect.apply(orig, stream, [chunk, ...rest]);
+			}) as Write;
+		const origStdout = process.stdout.write;
+		const origStderr = process.stderr.write;
+		process.stdout.write = filtered(process.stdout, origStdout);
+		process.stderr.write = filtered(process.stderr, origStderr);
 		restoreIo = () => {
-			// @ts-ignore restore
 			process.stdout.write = origStdout;
-			// @ts-ignore restore
 			process.stderr.write = origStderr;
 		};
 	}
@@ -196,7 +180,8 @@ export async function sync(options: SyncOptions = {}): Promise<SyncResult> {
 					) {
 						const jiraUrl = process.env.JIRA_URL || "your Jira URL";
 						const hint = `Hint: If you're behind a corporate proxy, open ${jiraUrl} in your browser, sign in, then retry. Use --verbose for details.`;
-						if (!result.hints!.includes(hint)) result.hints!.push(hint);
+						result.hints ??= [];
+						if (!result.hints.includes(hint)) result.hints.push(hint);
 					}
 					// Only log detailed error when verbose
 					if (options.verbose) {

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "bun:test";
 import { hasUnsafeCharacters, sanitizeTitle } from "./title-sanitizer.ts";
 
 describe("sanitizeTitle", () => {
@@ -9,8 +9,8 @@ describe("sanitizeTitle", () => {
 
 	it("should handle empty or null titles", () => {
 		expect(sanitizeTitle("")).toBe("");
-		expect(sanitizeTitle(null as any)).toBe(null);
-		expect(sanitizeTitle(undefined as any)).toBe(undefined);
+		expect(sanitizeTitle(null as unknown as string)).toBeNull();
+		expect(sanitizeTitle(undefined as unknown as string)).toBeUndefined();
 	});
 
 	it("should replace brackets with parentheses", () => {

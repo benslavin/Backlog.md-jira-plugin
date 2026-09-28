@@ -353,9 +353,13 @@ export class JiraClient {
 				);
 			}
 
+			const resultContent = result.content as
+				| Array<{ type: string; text?: string }>
+				| undefined;
+
 			// Check if result indicates an error (isError flag)
 			if (result.isError) {
-				const errorText = this.extractErrorText(result.content);
+				const errorText = this.extractErrorText(resultContent);
 				if (this.silentMode) {
 					logger.debug(
 						{ toolName, error: errorText },
@@ -374,14 +378,7 @@ export class JiraClient {
 					errorText.includes("API has been removed")
 				) {
 					throw new Error(
-						`Jira API v2 deprecated: Your Jira server has disabled the v2 REST API.\n` +
-							`\nThe MCP Atlassian server (${this.dockerImage}) uses the deprecated v2 API.\n` +
-							`\nPossible solutions:\n` +
-							`1. Check if a newer version of mcp-atlassian is available that supports v3\n` +
-							`2. Report this issue to: https://github.com/sooperset/mcp-atlassian/issues\n` +
-							`3. Temporarily re-enable v2 API in Jira (if possible)\n` +
-							`\nFor details, see: https://developer.atlassian.com/changelog/#CHANGE-2046\n` +
-							`\nOriginal error: ${errorText}`,
+						`Jira API v2 deprecated: Your Jira server has disabled the v2 REST API.\n\nThe MCP Atlassian server (${this.dockerImage}) uses the deprecated v2 API.\n\nPossible solutions:\n1. Check if a newer version of mcp-atlassian is available that supports v3\n2. Report this issue to: https://github.com/sooperset/mcp-atlassian/issues\n3. Temporarily re-enable v2 API in Jira (if possible)\n\nFor details, see: https://developer.atlassian.com/changelog/#CHANGE-2046\n\nOriginal error: ${errorText}`,
 					);
 				}
 
@@ -391,24 +388,14 @@ export class JiraClient {
 					errorText.includes("JSONDecodeError")
 				) {
 					throw new Error(
-						`Proxy authentication required: The MCP server is receiving HTML instead of JSON from Jira.\n` +
-							`This typically happens when your corporate proxy requires browser-based authentication.\n` +
-							`\nTo resolve this:\n` +
-							`1. Open your browser and navigate to your Jira URL: ${process.env.JIRA_URL || "(not set)"}\n` +
-							`2. Complete the proxy authentication/login\n` +
-							`3. Try the command again\n` +
-							`\nOriginal error: ${errorText}`,
+						`Proxy authentication required: The MCP server is receiving HTML instead of JSON from Jira.\nThis typically happens when your corporate proxy requires browser-based authentication.\n\nTo resolve this:\n1. Open your browser and navigate to your Jira URL: ${process.env.JIRA_URL || "(not set)"}\n2. Complete the proxy authentication/login\n3. Try the command again\n\nOriginal error: ${errorText}`,
 					);
 				}
 
 				// Generic tool error (often hides proxy/HTML issues). Provide guidance.
 				if (errorText.startsWith("Error calling tool")) {
 					throw new Error(
-						`MCP tool ${toolName} failed with a server-side error.\n` +
-							`This can happen if Jira returned HTML (e.g., proxy login page) instead of JSON.\n` +
-							`Try: backlog-jira mcp start --debug to inspect logs, and consider adding HTTP(S)_PROXY/NO_PROXY to .backlog-jira/config.json -> mcp.envVars.\n` +
-							`If you're behind a corporate proxy, authenticate in the browser to ${process.env.JIRA_URL || "your Jira URL"} first.\n` +
-							`Original error: ${errorText}`,
+						`MCP tool ${toolName} failed with a server-side error.\nThis can happen if Jira returned HTML (e.g., proxy login page) instead of JSON.\nTry: backlog-jira mcp start --debug to inspect logs, and consider adding HTTP(S)_PROXY/NO_PROXY to .backlog-jira/config.json -> mcp.envVars.\nIf you're behind a corporate proxy, authenticate in the browser to ${process.env.JIRA_URL || "your Jira URL"} first.\nOriginal error: ${errorText}`,
 					);
 				}
 
@@ -416,9 +403,6 @@ export class JiraClient {
 			}
 
 			// Extract the actual content from the MCP response
-			const resultContent = result.content as
-				| Array<{ type: string; text?: string }>
-				| undefined;
 			if (resultContent && resultContent.length > 0) {
 				const content = resultContent[0];
 				if (content.type === "text" && content.text) {
@@ -496,14 +480,7 @@ export class JiraClient {
 				errorString.includes("Expecting value: line 1 column 1")
 			) {
 				const proxyError = new Error(
-					`Proxy authentication required: The MCP server is receiving HTML instead of JSON from Jira.\n` +
-						`This typically happens when your corporate proxy requires browser-based authentication.\n` +
-						`\nTo resolve this:\n` +
-						`1. Open your browser and navigate to your Jira URL: ${process.env.JIRA_URL || "(not set)"}\n` +
-						`2. Complete the proxy authentication/login\n` +
-						`3. Try the command again\n` +
-						`\nAlternatively, configure proxy settings or DNS to bypass authentication for the Docker container.\n` +
-						`\nOriginal error: ${errorMessage}`,
+					`Proxy authentication required: The MCP server is receiving HTML instead of JSON from Jira.\nThis typically happens when your corporate proxy requires browser-based authentication.\n\nTo resolve this:\n1. Open your browser and navigate to your Jira URL: ${process.env.JIRA_URL || "(not set)"}\n2. Complete the proxy authentication/login\n3. Try the command again\n\nAlternatively, configure proxy settings or DNS to bypass authentication for the Docker container.\n\nOriginal error: ${errorMessage}`,
 				);
 				if (this.silentMode) {
 					logger.debug(
@@ -585,13 +562,13 @@ export class JiraClient {
 				lowerText.includes("authentication"))
 		) {
 			return (
-				`Proxy authentication required: The MCP server is being redirected to a login page.\n` +
-				`This typically happens when your corporate proxy requires browser-based authentication.\n` +
-				`\nTo resolve this:\n` +
-				`1. Open your browser and navigate to your Jira URL\n` +
-				`2. Complete the proxy authentication/login\n` +
-				`3. Try the command again\n` +
-				`\nAlternatively, configure proxy settings to bypass authentication for the Docker container.`
+				"Proxy authentication required: The MCP server is being redirected to a login page.\n" +
+				"This typically happens when your corporate proxy requires browser-based authentication.\n" +
+				"\nTo resolve this:\n" +
+				"1. Open your browser and navigate to your Jira URL\n" +
+				"2. Complete the proxy authentication/login\n" +
+				"3. Try the command again\n" +
+				"\nAlternatively, configure proxy settings to bypass authentication for the Docker container."
 			);
 		}
 
@@ -600,14 +577,7 @@ export class JiraClient {
 			lowerText.includes("expecting value") &&
 			lowerText.includes("line 1 column 1")
 		) {
-			return (
-				`Invalid JSON response from Jira API (received HTML instead of JSON).\n` +
-				`This often indicates:\n` +
-				`1. Proxy authentication is required (login in browser first)\n` +
-				`2. The Jira URL is incorrect or unreachable\n` +
-				`3. Network/DNS configuration issues\n` +
-				`\nCurrent tool: ${toolName}`
-			);
+			return `Invalid JSON response from Jira API (received HTML instead of JSON).\nThis often indicates:\n1. Proxy authentication is required (login in browser first)\n2. The Jira URL is incorrect or unreachable\n3. Network/DNS configuration issues\n\nCurrent tool: ${toolName}`;
 		}
 
 		// Default error message
@@ -1240,7 +1210,7 @@ export class JiraClient {
 					"Invalid response: missing key or id",
 				);
 				throw new Error(
-					`Invalid response from jira_create_issue: missing required fields (key, id)`,
+					"Invalid response from jira_create_issue: missing required fields (key, id)",
 				);
 			}
 
@@ -1250,7 +1220,7 @@ export class JiraClient {
 					"Invalid response: missing fields object",
 				);
 				throw new Error(
-					`Invalid response from jira_create_issue: missing fields object`,
+					"Invalid response from jira_create_issue: missing fields object",
 				);
 			}
 

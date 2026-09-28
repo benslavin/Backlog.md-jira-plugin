@@ -11,7 +11,7 @@ import {
 import { join } from "node:path";
 import { cleanupDir, uniqueTestDir, writeJson } from "../../test/helpers/fs.ts";
 import type { BacklogTask } from "../integrations/backlog.ts";
-import type { JiraIssue } from "../integrations/jira.ts";
+import type { JiraClient, JiraIssue } from "../integrations/jira.ts";
 import { createIssue } from "./create-issue.ts";
 
 let testDir: string;
@@ -46,7 +46,7 @@ const mockJiraClient = {
 			projectKey: string,
 			issueType: string,
 			summary: string,
-			options?: unknown,
+			options?: Parameters<JiraClient["createIssue"]>[3],
 		): Promise<JiraIssue> => {
 			return {
 				key: "TEST-123",
@@ -85,9 +85,9 @@ function createTaskFile(taskId: string, title: string, jiraKey?: string): void {
 	const frontmatter: string[] = [
 		`id: ${taskId}`,
 		`title: ${title}`,
-		`status: To Do`,
-		`created: 2025-01-01`,
-		`updated: 2025-01-01`,
+		"status: To Do",
+		"created: 2025-01-01",
+		"updated: 2025-01-01",
 	];
 
 	if (jiraKey) {
@@ -245,10 +245,10 @@ describe("createIssue", () => {
 		// Verify description includes AC
 		const createCall = mockJiraClient.createIssue.mock.calls[0];
 		const options = createCall[3];
-		expect(options.description).toContain("Test description");
-		expect(options.description).toContain("Acceptance Criteria");
-		expect(options.description).toContain("First criterion");
-		expect(options.description).toContain("Second criterion");
+		expect(options?.description).toContain("Test description");
+		expect(options?.description).toContain("Acceptance Criteria");
+		expect(options?.description).toContain("First criterion");
+		expect(options?.description).toContain("Second criterion");
 	});
 
 	it("should map priority correctly", async () => {
@@ -260,7 +260,7 @@ describe("createIssue", () => {
 		// Verify priority was mapped
 		const createCall = mockJiraClient.createIssue.mock.calls[0];
 		const options = createCall[3];
-		expect(options.priority).toBe("High");
+		expect(options?.priority).toBe("High");
 	});
 
 	it("should handle assignee correctly", async () => {
@@ -272,7 +272,7 @@ describe("createIssue", () => {
 		// Verify assignee was extracted (@ prefix removed)
 		const createCall = mockJiraClient.createIssue.mock.calls[0];
 		const options = createCall[3];
-		expect(options.assignee).toBe("testuser");
+		expect(options?.assignee).toBe("testuser");
 	});
 
 	it("should pass labels to Jira", async () => {
@@ -284,6 +284,6 @@ describe("createIssue", () => {
 		// Verify labels were passed
 		const createCall = mockJiraClient.createIssue.mock.calls[0];
 		const options = createCall[3];
-		expect(options.labels).toEqual(["test", "feature"]);
+		expect(options?.labels).toEqual(["test", "feature"]);
 	});
 });

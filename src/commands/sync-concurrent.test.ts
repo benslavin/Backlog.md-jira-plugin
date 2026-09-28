@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it, mock } from "bun:test";
 import type { BacklogTask } from "../integrations/backlog.ts";
 import type { JiraIssue } from "../integrations/jira.ts";
+import type { PullOptions } from "./pull.ts";
+import type { PushOptions } from "./push.ts";
 import type { ConflictStrategy } from "./sync.ts";
 
 /**
@@ -118,31 +120,21 @@ const mockStore = {
 	close: mock(() => {}),
 };
 
-const mockPush = mock(
-	(options: {
-		taskId?: string;
-		project?: string;
-		issueType?: string;
-		dryRun?: boolean;
-	}) =>
-		Promise.resolve({
-			success: true,
-			pushed: ["task-1"],
-			failed: [],
-			skipped: [],
-		}),
+const mockPush = mock((options: PushOptions) =>
+	Promise.resolve({
+		success: true,
+		pushed: ["task-1"],
+		failed: [],
+		skipped: [],
+	}),
 );
-const mockPull = mock(
-	(options: {
-		jiraKey?: string;
-		dryRun?: boolean;
-	}) =>
-		Promise.resolve({
-			success: true,
-			pulled: ["task-1"],
-			failed: [],
-			skipped: [],
-		}),
+const mockPull = mock((options: PullOptions) =>
+	Promise.resolve({
+		success: true,
+		pulled: ["task-1"],
+		failed: [],
+		skipped: [],
+	}),
 );
 
 describe("concurrent edit conflict scenarios", () => {

@@ -30,7 +30,7 @@ export function sanitizeTitle(title: string): string {
 	const original = title;
 
 	// Replace problematic characters with safe equivalents
-	let sanitized = title
+	const sanitized = title
 		// Remove or replace brackets
 		.replace(/\[/g, "(")
 		.replace(/\]/g, ")")

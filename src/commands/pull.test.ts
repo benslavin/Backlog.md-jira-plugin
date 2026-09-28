@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
+import type { Mapping } from "../state/types.ts";
 import type { PullOptions } from "./pull.ts";
 
 // Mock clients and store
@@ -38,21 +39,12 @@ const mockJiraClient = {
 };
 
 const mockStore = {
-	getMapping: mock(
-		(backlogId: string) =>
-			({
-				backlogId: "task-1",
-				jiraKey: "PROJ-1",
-				createdAt: new Date().toISOString(),
-				updatedAt: new Date().toISOString(),
-			}) as {
-				backlogId: string;
-				side: string;
-				hash: string;
-				payload: string;
-				updatedAt: string;
-			},
-	),
+	getMapping: mock((backlogId: string): Mapping | null => ({
+		backlogId: "task-1",
+		jiraKey: "PROJ-1",
+		createdAt: new Date().toISOString(),
+		updatedAt: new Date().toISOString(),
+	})),
 	getAllMappings: mock(() => new Map([["task-1", "PROJ-1"]])),
 	getSnapshots: mock((backlogId: string) => ({
 		backlog: {

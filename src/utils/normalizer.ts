@@ -135,12 +135,12 @@ export function mergeDescriptionWithAc(
 	let fullDescription = cleanDescription + acSection;
 
 	// Add Implementation Plan if present
-	if (implementationPlan && implementationPlan.trim()) {
+	if (implementationPlan?.trim()) {
 		fullDescription += `\n\nImplementation Plan:\n${implementationPlan.trim()}`;
 	}
 
 	// Add Implementation Notes if present
-	if (implementationNotes && implementationNotes.trim()) {
+	if (implementationNotes?.trim()) {
 		fullDescription += `\n\nImplementation Notes:\n${implementationNotes.trim()}`;
 	}
 

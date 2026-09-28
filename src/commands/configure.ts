@@ -18,6 +18,24 @@ interface JiraProjectInfo {
 }
 
 /**
+ * Set or unset an environment variable. Assigning undefined to process.env
+ * stores the string "undefined", so unset values must be deleted instead.
+ */
+function setEnv(name: string, value: string | undefined): void {
+	if (value === undefined) {
+		delete process.env[name];
+	} else {
+		process.env[name] = value;
+	}
+}
+
+function restoreEnv(snapshot: Record<string, string | undefined>): void {
+	for (const [name, value] of Object.entries(snapshot)) {
+		setEnv(name, value);
+	}
+}
+
+/**
  * Interactive wizard to configure Jira connection settings
  */
 export async function configureCommand(
@@ -399,11 +417,11 @@ export async function configureCommand(
 		if (instanceType === "cloud") {
 			process.env.JIRA_EMAIL = jiraEmail;
 			process.env.JIRA_API_TOKEN = jiraApiToken;
-			process.env.JIRA_PERSONAL_TOKEN = undefined;
+			setEnv("JIRA_PERSONAL_TOKEN", undefined);
 		} else {
 			process.env.JIRA_PERSONAL_TOKEN = jiraPersonalToken;
-			process.env.JIRA_EMAIL = undefined;
-			process.env.JIRA_API_TOKEN = undefined;
+			setEnv("JIRA_EMAIL", undefined);
+			setEnv("JIRA_API_TOKEN", undefined);
 		}
 
 		// Apply MCP environment variables for testing
@@ -446,7 +464,7 @@ export async function configureCommand(
 					chalk.red("✗ Connection failed. Please check your credentials.\n"),
 				);
 				// Restore original environment
-				Object.assign(process.env, originalEnv);
+				restoreEnv(originalEnv);
 				process.exit(1);
 			}
 		} catch (error) {
@@ -457,7 +475,7 @@ export async function configureCommand(
 				),
 			);
 			// Restore original environment
-			Object.assign(process.env, originalEnv);
+			restoreEnv(originalEnv);
 			process.exit(1);
 		}
 
@@ -744,7 +762,7 @@ export async function configureCommand(
 		) {
 			console.log(chalk.yellow("\n✗ Configuration cancelled.\n"));
 			// Restore original environment
-			Object.assign(process.env, originalEnv);
+			restoreEnv(originalEnv);
 			process.exit(0);
 		}
 

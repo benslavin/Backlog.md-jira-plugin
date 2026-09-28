@@ -1,7 +1,11 @@
 import type { Command } from "commander";
 import { BacklogClient } from "../integrations/backlog.ts";
 import { FrontmatterStore } from "../state/store.ts";
-import { formatTaskWithJira } from "../ui/display-adapter.ts";
+import {
+	type JiraMetadata,
+	type TaskWithJira,
+	formatTaskWithJira,
+} from "../ui/display-adapter.ts";
 import { logger } from "../utils/logger.ts";
 
 // Import core formatter from backlog.md
@@ -9,13 +13,6 @@ import { logger } from "../utils/logger.ts";
 // For now, we'll use a placeholder that would be replaced with the actual import
 import type { BacklogTask as Task } from "../integrations/backlog.ts";
 type CoreFormatter = (task: Task, content: string, filePath?: string) => string;
-
-interface TaskWithJira extends Task {
-	jiraKey?: string;
-	jiraUrl?: string;
-	jiraLastSync?: string;
-	jiraSyncState?: string;
-}
 
 /**
  * View a task with Jira metadata
@@ -43,7 +40,8 @@ async function viewTask(
 				jiraKey: mapping.jiraKey,
 				jiraUrl: `https://your-domain.atlassian.net/browse/${mapping.jiraKey}`,
 				jiraLastSync: syncState?.lastSyncAt || "Never",
-				jiraSyncState: syncState?.conflictState || "Unknown",
+				jiraSyncState: (syncState?.conflictState ||
+					"Unknown") as JiraMetadata["jiraSyncState"],
 			};
 		}
 

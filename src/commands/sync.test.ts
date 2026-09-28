@@ -1,4 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
+import type { Mapping } from "../state/types.ts";
+import type { PullOptions } from "./pull.ts";
+import type { PushOptions } from "./push.ts";
 import type { ConflictStrategy, SyncOptions } from "./sync.ts";
 
 // Mock modules
@@ -41,21 +44,12 @@ const mockJiraClient = {
 };
 
 const mockStore = {
-	getMapping: mock(
-		(backlogId: string) =>
-			({
-				backlogId: "task-1",
-				jiraKey: "PROJ-1",
-				createdAt: new Date().toISOString(),
-				updatedAt: new Date().toISOString(),
-			}) as {
-				backlogId: string;
-				side: string;
-				hash: string;
-				payload: string;
-				updatedAt: string;
-			},
-	),
+	getMapping: mock((backlogId: string): Mapping | null => ({
+		backlogId: "task-1",
+		jiraKey: "PROJ-1",
+		createdAt: new Date().toISOString(),
+		updatedAt: new Date().toISOString(),
+	})),
 	getAllMappings: mock(() => new Map([["task-1", "PROJ-1"]])),
 	getSnapshots: mock((backlogId: string) => ({
 		backlog: {
@@ -98,31 +92,21 @@ const mockStore = {
 	close: mock(() => {}),
 };
 
-const mockPush = mock(
-	(options: {
-		taskId?: string;
-		project?: string;
-		issueType?: string;
-		dryRun?: boolean;
-	}) =>
-		Promise.resolve({
-			success: true,
-			pushed: ["task-1"],
-			failed: [],
-			skipped: [],
-		}),
+const mockPush = mock((options: PushOptions) =>
+	Promise.resolve({
+		success: true,
+		pushed: ["task-1"],
+		failed: [],
+		skipped: [],
+	}),
 );
-const mockPull = mock(
-	(options: {
-		jiraKey?: string;
-		dryRun?: boolean;
-	}) =>
-		Promise.resolve({
-			success: true,
-			pulled: ["task-1"],
-			failed: [],
-			skipped: [],
-		}),
+const mockPull = mock((options: PullOptions) =>
+	Promise.resolve({
+		success: true,
+		pulled: ["task-1"],
+		failed: [],
+		skipped: [],
+	}),
 );
 
 describe("sync command", () => {

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "bun:test";
 import { parseFrontmatter } from "./frontmatter.ts";
 
 describe("parseFrontmatter", () => {
@@ -20,7 +20,7 @@ Task body content`;
 		});
 
 		it("should handle empty frontmatter", () => {
-			const content = `Task without frontmatter`;
+			const content = "Task without frontmatter";
 			const { frontmatter, body } = parseFrontmatter(content);
 			expect(frontmatter).toEqual({});
 			expect(body).toBe(content);

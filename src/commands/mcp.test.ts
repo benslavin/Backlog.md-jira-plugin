@@ -51,7 +51,7 @@ describe("MCP Command Unit Tests", () => {
 			// For now, we'll test the public interface
 
 			// Remove JIRA_URL
-			process.env.JIRA_URL = undefined;
+			delete process.env.JIRA_URL;
 
 			// Since we can't import the internal function easily, we'll test via the command
 			// but expect it to throw during validation
@@ -66,9 +66,9 @@ describe("MCP Command Unit Tests", () => {
 
 		test("should validate authentication credentials are present", () => {
 			process.env.JIRA_URL = "https://test.atlassian.net";
-			process.env.JIRA_EMAIL = undefined;
-			process.env.JIRA_API_TOKEN = undefined;
-			process.env.JIRA_PERSONAL_TOKEN = undefined;
+			delete process.env.JIRA_EMAIL;
+			delete process.env.JIRA_API_TOKEN;
+			delete process.env.JIRA_PERSONAL_TOKEN;
 
 			expect(() => {
 				const jiraUrl = process.env.JIRA_URL;
@@ -98,7 +98,7 @@ describe("MCP Command Unit Tests", () => {
 			process.env.JIRA_URL = "https://test.atlassian.net";
 			process.env.JIRA_EMAIL = "test@example.com";
 			process.env.JIRA_API_TOKEN = "test-token";
-			process.env.JIRA_PERSONAL_TOKEN = undefined;
+			delete process.env.JIRA_PERSONAL_TOKEN;
 
 			expect(() => {
 				const jiraUrl = process.env.JIRA_URL;
@@ -126,8 +126,8 @@ describe("MCP Command Unit Tests", () => {
 		test("should accept Personal Access Token authentication", () => {
 			process.env.JIRA_URL = "https://jira.company.com";
 			process.env.JIRA_PERSONAL_TOKEN = "test-pat";
-			process.env.JIRA_EMAIL = undefined;
-			process.env.JIRA_API_TOKEN = undefined;
+			delete process.env.JIRA_EMAIL;
+			delete process.env.JIRA_API_TOKEN;
 
 			expect(() => {
 				const jiraUrl = process.env.JIRA_URL;
@@ -302,7 +302,7 @@ describe("MCP Command Unit Tests", () => {
 			const originalEnv = { EXISTING_VAR: "value" };
 
 			// Simulate DNS environment variable preparation
-			const result = { ...originalEnv };
+			const result: Record<string, string> = { ...originalEnv };
 
 			if (dnsServers.length > 0) {
 				result.DNS_SERVERS = dnsServers.join(",");

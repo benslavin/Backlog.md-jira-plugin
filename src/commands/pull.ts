@@ -14,7 +14,6 @@ import {
 import { getTaskFilePath, updateJiraMetadata } from "../utils/frontmatter.ts";
 import { getJiraClientOptions } from "../utils/jira-config.ts";
 import { logger } from "../utils/logger.ts";
-import { sanitizeTitle } from "../utils/title-sanitizer.ts";
 import {
 	computeHash,
 	normalizeBacklogTask,
@@ -24,6 +23,7 @@ import {
 import { mapJiraPriorityToBacklog } from "../utils/priority-mapping.ts";
 import { mapJiraStatusToBacklog } from "../utils/status-mapping.ts";
 import { classifySyncState } from "../utils/sync-state.ts";
+import { sanitizeTitle } from "../utils/title-sanitizer.ts";
 
 export interface PullOptions {
 	taskIds?: string[];

@@ -257,7 +257,7 @@ function buildJiraIssueFromBacklogTask(
 
 	// Priority (map from Backlog to Jira)
 	const priority = task.priority
-		? mapBacklogPriorityToJira(task.priority, projectKey)
+		? mapBacklogPriorityToJira(task.priority)
 		: undefined;
 
 	// Labels

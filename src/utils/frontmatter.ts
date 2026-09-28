@@ -72,8 +72,8 @@ export function parseFrontmatter(content: string): {
 			if (currentValue) {
 				currentValue +=
 					multilineMode === "literal"
-						? "\n" + indentedLine
-						: " " + indentedLine;
+						? `\n${indentedLine}`
+						: ` ${indentedLine}`;
 			} else {
 				currentValue = indentedLine;
 			}
