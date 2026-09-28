@@ -152,7 +152,14 @@ export class BacklogClient {
 			status?: string;
 			assignee?: string;
 			labels?: string[];
+			clearLabels?: boolean;
 			priority?: string;
+			milestone?: string;
+			clearMilestone?: boolean;
+			dependencies?: string[];
+			clearDependencies?: boolean;
+			references?: string[];
+			clearReferences?: boolean;
 			notes?: string;
 			appendNotes?: string;
 			plan?: string;
@@ -179,8 +186,28 @@ export class BacklogClient {
 		if (updates.labels) {
 			args.push("-l", updates.labels.join(","));
 		}
+		if (updates.clearLabels) {
+			args.push("--clear-labels");
+		}
 		if (updates.priority) {
 			args.push("--priority", updates.priority);
+		}
+		if (updates.milestone) {
+			args.push("--milestone", updates.milestone);
+		} else if (updates.clearMilestone) {
+			args.push("--clear-milestone");
+		}
+		if (updates.dependencies && updates.dependencies.length > 0) {
+			args.push("--dep", updates.dependencies.join(","));
+		} else if (updates.clearDependencies) {
+			args.push("--clear-deps");
+		}
+		if (updates.references && updates.references.length > 0) {
+			for (const ref of updates.references) {
+				args.push("--ref", ref);
+			}
+		} else if (updates.clearReferences) {
+			args.push("--clear-refs");
 		}
 		if (updates.notes) {
 			args.push("--notes", this.escapeMultiline(updates.notes));

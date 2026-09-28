@@ -265,8 +265,10 @@ async function syncTask(
 	const task = await backlog.getTask(taskId);
 	const issue = await jira.getIssue(mapping.jiraKey);
 
-	const backlogHash = computeHash(normalizeBacklogTask(task));
-	const jiraHash = computeHash(normalizeJiraIssue(issue));
+	const backlogPayload = normalizeBacklogTask(task);
+	const jiraPayload = normalizeJiraIssue(issue);
+	const backlogHash = computeHash(backlogPayload);
+	const jiraHash = computeHash(jiraPayload);
 
 	// Get snapshots and classify state
 	const snapshots = store.getSnapshots(taskId);
@@ -275,6 +277,7 @@ async function syncTask(
 		jiraHash,
 		snapshots.backlog,
 		snapshots.jira,
+		{ backlog: backlogPayload, jira: jiraPayload },
 	);
 
 	logger.debug({ taskId, state: state.state }, "Sync state classified");
@@ -322,13 +325,8 @@ async function syncTask(
 			logger.info({ taskId }, "No baseline snapshot, creating initial sync");
 			if (!dryRun) {
 				// Store current state as baseline
-				store.setSnapshot(
-					taskId,
-					"backlog",
-					backlogHash,
-					normalizeBacklogTask(task),
-				);
-				store.setSnapshot(taskId, "jira", jiraHash, normalizeJiraIssue(issue));
+				store.setSnapshot(taskId, "backlog", backlogHash, backlogPayload);
+				store.setSnapshot(taskId, "jira", jiraHash, jiraPayload);
 				store.updateSyncState(taskId, {
 					lastSyncAt: new Date().toISOString(),
 				});
@@ -614,11 +612,13 @@ async function applyFieldResolutions(
 	// Update snapshots after resolution
 	const task = await backlog.getTask(taskId);
 	const issue = await jira.getIssue(jiraKey);
-	const backlogHash = computeHash(normalizeBacklogTask(task));
-	const jiraHash = computeHash(normalizeJiraIssue(issue));
+	const backlogPayload = normalizeBacklogTask(task);
+	const jiraPayload = normalizeJiraIssue(issue);
+	const backlogHash = computeHash(backlogPayload);
+	const jiraHash = computeHash(jiraPayload);
 
-	store.setSnapshot(taskId, "backlog", backlogHash, normalizeBacklogTask(task));
-	store.setSnapshot(taskId, "jira", jiraHash, normalizeJiraIssue(issue));
+	store.setSnapshot(taskId, "backlog", backlogHash, backlogPayload);
+	store.setSnapshot(taskId, "jira", jiraHash, jiraPayload);
 	store.updateSyncState(taskId, {
 		lastSyncAt: new Date().toISOString(),
 		conflictState: null,

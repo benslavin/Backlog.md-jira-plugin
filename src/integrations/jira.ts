@@ -1,5 +1,9 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import {
+	getIssueFieldsParam,
+	loadFieldMappings,
+} from "../utils/field-mapping.ts";
 import { logger } from "../utils/logger.ts";
 
 export interface JiraIssue {
@@ -627,6 +631,66 @@ export class JiraClient {
 	}
 
 	/**
+	 * Fields to request so mapped custom fields are present on fetched issues.
+	 * Returns undefined when no field mappings are configured (server defaults).
+	 */
+	private getMappedIssueFields(): string | undefined {
+		try {
+			return getIssueFieldsParam(loadFieldMappings());
+		} catch (error) {
+			// Invalid mappings are reported when they are applied
+			logger.debug({ error }, "Ignoring invalid fieldMappings for getIssue");
+			return undefined;
+		}
+	}
+
+	/**
+	 * Search Jira fields (system and custom) by keyword
+	 * An empty keyword lists all fields
+	 */
+	async searchFields(
+		keyword = "",
+		limit = 500,
+	): Promise<
+		Array<{
+			id: string;
+			name: string;
+			custom?: boolean;
+			schema?: {
+				type?: string;
+				items?: string;
+				system?: string;
+				custom?: string;
+			};
+		}>
+	> {
+		try {
+			const result = await this.callMcpTool("jira_search_fields", {
+				keyword,
+				limit,
+			});
+			const fields = Array.isArray(result)
+				? result
+				: ((result as { fields?: unknown[] })?.fields ?? []);
+			logger.debug({ keyword, count: fields.length }, "Searched Jira fields");
+			return fields as Array<{
+				id: string;
+				name: string;
+				custom?: boolean;
+				schema?: {
+					type?: string;
+					items?: string;
+					system?: string;
+					custom?: string;
+				};
+			}>;
+		} catch (error) {
+			logger.error({ error, keyword }, "Failed to search Jira fields");
+			throw error;
+		}
+	}
+
+	/**
 	 * Search for Jira issues using JQL
 	 */
 	async searchIssues(
@@ -748,8 +812,9 @@ export class JiraClient {
 			};
 			logger.info({ input }, "Built input object");
 
-			if (options?.fields) {
-				input.fields = options.fields;
+			const fields = options?.fields ?? this.getMappedIssueFields();
+			if (fields) {
+				input.fields = fields;
 			}
 			if (options?.expand) {
 				input.expand = options.expand;

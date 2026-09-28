@@ -32,6 +32,7 @@ export function parseFrontmatter(content: string): {
 	let currentKey: string | null = null;
 	let currentValue = "";
 	let multilineMode: "none" | "folded" | "literal" = "none";
+	let currentList: string[] | null = null;
 
 	for (let i = 0; i < lines.length; i++) {
 		const line = lines[i];
@@ -39,14 +40,26 @@ export function parseFrontmatter(content: string): {
 		// Check for new key-value pair
 		const keyMatch = line.match(/^([^:]+):\s*(.*)$/);
 
+		// Block sequence item belonging to the current key (e.g. "  - item")
+		const listItemMatch = line.match(/^\s*-\s+(.*)$/);
+		if (
+			currentKey &&
+			multilineMode === "none" &&
+			listItemMatch &&
+			(currentList || currentValue === "")
+		) {
+			currentList = currentList ?? [];
+			currentList.push(String(parseYamlValue(listItemMatch[1].trim(), "none")));
+			continue;
+		}
+
 		if (keyMatch && !line.startsWith(" ") && !line.startsWith("\t")) {
 			// Save previous key-value if exists
 			if (currentKey) {
-				frontmatter[currentKey] = parseYamlValue(
-					currentValue.trim(),
-					multilineMode,
-				);
+				frontmatter[currentKey] =
+					currentList ?? parseYamlValue(currentValue.trim(), multilineMode);
 			}
+			currentList = null;
 
 			currentKey = keyMatch[1].trim();
 			const valueStart = keyMatch[2].trim();
@@ -82,10 +95,8 @@ export function parseFrontmatter(content: string): {
 
 	// Save last key-value pair
 	if (currentKey) {
-		frontmatter[currentKey] = parseYamlValue(
-			currentValue.trim(),
-			multilineMode,
-		);
+		frontmatter[currentKey] =
+			currentList ?? parseYamlValue(currentValue.trim(), multilineMode);
 	}
 
 	return { frontmatter, body };
@@ -110,21 +121,57 @@ function parseYamlValue(
 	// Handle arrays: [item1, item2]
 	const arrayMatch = value.match(/^\[(.*)\]$/);
 	if (arrayMatch) {
-		return arrayMatch[1]
-			.split(",")
-			.map((v) => v.trim())
+		return splitFlowSequence(arrayMatch[1])
+			.map((v) => unquoteYamlScalar(v.trim()))
 			.filter((v) => v);
 	}
 
-	// Handle quoted strings (single or double quotes)
-	if (
-		(value.startsWith('"') && value.endsWith('"')) ||
-		(value.startsWith("'") && value.endsWith("'"))
-	) {
-		return value.slice(1, -1);
-	}
+	return unquoteYamlScalar(value);
+}
 
+/**
+ * Remove YAML quotes from a scalar, handling escaped quotes
+ */
+function unquoteYamlScalar(value: string): string {
+	if (value.length >= 2 && value.startsWith('"') && value.endsWith('"')) {
+		return value.slice(1, -1).replace(/\\(["\\])/g, "$1");
+	}
+	if (value.length >= 2 && value.startsWith("'") && value.endsWith("'")) {
+		return value.slice(1, -1).replace(/''/g, "'");
+	}
 	return value;
+}
+
+/**
+ * Split the inside of a flow sequence on commas that are not inside quotes
+ */
+function splitFlowSequence(inner: string): string[] {
+	const items: string[] = [];
+	let current = "";
+	let quote: '"' | "'" | null = null;
+
+	for (let i = 0; i < inner.length; i++) {
+		const ch = inner[i];
+		if (quote) {
+			current += ch;
+			if (ch === "\\" && quote === '"' && i + 1 < inner.length) {
+				i++;
+				current += inner[i];
+			} else if (ch === quote) {
+				quote = null;
+			}
+		} else if (ch === '"' || ch === "'") {
+			quote = ch;
+			current += ch;
+		} else if (ch === ",") {
+			items.push(current);
+			current = "";
+		} else {
+			current += ch;
+		}
+	}
+	items.push(current);
+	return items;
 }
 
 /**
@@ -136,7 +183,15 @@ function serializeFrontmatter(frontmatter: Record<string, unknown>): string {
 
 	for (const [key, value] of Object.entries(frontmatter)) {
 		if (Array.isArray(value)) {
-			lines.push(`${key}: [${value.join(", ")}]`);
+			if (value.length === 0) {
+				lines.push(`${key}: []`);
+			} else {
+				// Block sequence style, matching how Backlog.md writes lists
+				lines.push(`${key}:`);
+				for (const item of value) {
+					lines.push(`  - ${serializeYamlValue(item)}`);
+				}
+			}
 		} else if (value !== undefined && value !== null) {
 			const serializedValue = serializeYamlValue(value);
 			lines.push(`${key}: ${serializedValue}`);
@@ -160,8 +215,8 @@ function serializeYamlValue(value: unknown): string {
 		/[:\[\]{}#&*!|>'"%@`]|^[-?]/.test(value) || value.trim() !== value;
 
 	if (needsQuoting) {
-		// Use double quotes and escape any internal double quotes
-		const escaped = value.replace(/"/g, '\\"');
+		// Use double quotes and escape any internal backslashes and double quotes
+		const escaped = value.replace(/["\\]/g, "\\$&");
 		return `"${escaped}"`;
 	}
 
@@ -225,6 +280,35 @@ export function updateJiraMetadata(
 }
 
 /**
+ * Set or remove plugin-owned frontmatter fields in a task file
+ * A null value removes the key; other keys are preserved.
+ */
+export function updateFrontmatterFields(
+	filePath: string,
+	fields: Record<string, string | string[] | null>,
+): void {
+	try {
+		const content = readFileSync(filePath, "utf-8");
+		const { frontmatter, body } = parseFrontmatter(content);
+
+		for (const [key, value] of Object.entries(fields)) {
+			if (value === null) {
+				delete frontmatter[key];
+			} else {
+				frontmatter[key] = value;
+			}
+		}
+
+		const newFrontmatter = serializeFrontmatter(frontmatter);
+		writeFileSync(filePath, `---\n${newFrontmatter}\n---\n${body}`, "utf-8");
+		logger.debug({ filePath, fields }, "Updated frontmatter fields");
+	} catch (error) {
+		logger.error({ error, filePath }, "Failed to update frontmatter fields");
+		throw error;
+	}
+}
+
+/**
  * Get Jira metadata from a task file
  */
 export function getJiraMetadata(filePath: string): JiraMetadata {
@@ -258,9 +342,10 @@ export function getTaskFilePath(taskId: string): string {
 	const tasksDir = join(process.cwd(), "backlog", "tasks");
 	const files = readdirSync(tasksDir);
 
-	const prefix = `${taskId} - `;
+	// Backlog.md may report IDs in upper case (TASK-1) while files are lower case
+	const prefix = `${taskId} - `.toLowerCase();
 	const file = files.find(
-		(f: string) => f.startsWith(prefix) && f.endsWith(".md"),
+		(f: string) => f.toLowerCase().startsWith(prefix) && f.endsWith(".md"),
 	);
 
 	if (!file) {

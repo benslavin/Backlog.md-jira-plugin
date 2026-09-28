@@ -154,8 +154,10 @@ async function getTaskIds(
 			const task = await backlog.getTask(taskId);
 			const issue = await jira.getIssue(jiraKey);
 
-			const backlogHash = computeHash(normalizeBacklogTask(task));
-			const jiraHash = computeHash(normalizeJiraIssue(issue));
+			const backlogPayload = normalizeBacklogTask(task);
+			const jiraPayload = normalizeJiraIssue(issue);
+			const backlogHash = computeHash(backlogPayload);
+			const jiraHash = computeHash(jiraPayload);
 
 			const snapshots = store.getSnapshots(taskId);
 			const state = classifySyncState(
@@ -163,6 +165,7 @@ async function getTaskIds(
 				jiraHash,
 				snapshots.backlog,
 				snapshots.jira,
+				{ backlog: backlogPayload, jira: jiraPayload },
 			);
 
 			if (state.state === "NeedsPush") {
@@ -196,7 +199,8 @@ async function pushTask(
 
 	// Get current task
 	const task = await backlog.getTask(taskId);
-	const backlogHash = computeHash(normalizeBacklogTask(task));
+	const backlogPayload = normalizeBacklogTask(task);
+	const backlogHash = computeHash(backlogPayload);
 
 	// Check if task is already mapped
 	const mapping = store.getMapping(taskId);
@@ -204,7 +208,8 @@ async function pushTask(
 	if (mapping) {
 		// Update existing issue
 		const issue = await jira.getIssue(mapping.jiraKey);
-		const jiraHash = computeHash(normalizeJiraIssue(issue));
+		const jiraPayload = normalizeJiraIssue(issue);
+		const jiraHash = computeHash(jiraPayload);
 
 		// Check sync state unless force is enabled
 		if (!force) {
@@ -214,6 +219,7 @@ async function pushTask(
 				jiraHash,
 				snapshots.backlog,
 				snapshots.jira,
+				{ backlog: backlogPayload, jira: jiraPayload },
 			);
 
 			if (state.state === "Conflict") {

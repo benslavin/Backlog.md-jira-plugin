@@ -11,7 +11,21 @@ import {
 	autoDiscoverAndSaveMapping,
 	mapJiraUserToBacklog,
 } from "../utils/assignee-mapping.ts";
-import { getTaskFilePath, updateJiraMetadata } from "../utils/frontmatter.ts";
+import {
+	type FieldMapping,
+	type MappedCliUpdates,
+	buildMappedFieldUpdates,
+	getPullMappings,
+	hasMappedFieldUpdates,
+	isCoreOverrideTarget,
+	loadFieldMappings,
+	readTaskFrontmatter,
+} from "../utils/field-mapping.ts";
+import {
+	getTaskFilePath,
+	updateFrontmatterFields,
+	updateJiraMetadata,
+} from "../utils/frontmatter.ts";
 import { getJiraClientOptions } from "../utils/jira-config.ts";
 import { logger } from "../utils/logger.ts";
 import {
@@ -56,6 +70,15 @@ export async function pull(options: PullOptions = {}): Promise<PullResult> {
 
 	logger.info({ options }, "Starting pull operation");
 
+	// Validate field mappings up front so config errors are reported clearly
+	let fieldMappings: FieldMapping[];
+	try {
+		fieldMappings = loadFieldMappings();
+	} catch (error) {
+		logger.level = originalLevel;
+		throw error;
+	}
+
 	const store = new FrontmatterStore();
 	const backlog = new BacklogClient();
 	const jira = new JiraClient(getJiraClientOptions());
@@ -94,6 +117,7 @@ export async function pull(options: PullOptions = {}): Promise<PullResult> {
 							store,
 							backlog,
 							jira,
+							fieldMappings,
 							dryRun: options.dryRun || false,
 						});
 
@@ -127,6 +151,7 @@ export async function pull(options: PullOptions = {}): Promise<PullResult> {
 							store,
 							backlog,
 							jira,
+							fieldMappings,
 							force: options.force || false,
 							dryRun: options.dryRun || false,
 						});
@@ -199,8 +224,10 @@ async function getTaskIds(
 			const task = await backlog.getTask(taskId);
 			const issue = await jira.getIssue(jiraKey);
 
-			const backlogHash = computeHash(normalizeBacklogTask(task));
-			const jiraHash = computeHash(normalizeJiraIssue(issue));
+			const backlogPayload = normalizeBacklogTask(task);
+			const jiraPayload = normalizeJiraIssue(issue);
+			const backlogHash = computeHash(backlogPayload);
+			const jiraHash = computeHash(jiraPayload);
 
 			const snapshots = store.getSnapshots(taskId);
 			const state = classifySyncState(
@@ -208,6 +235,7 @@ async function getTaskIds(
 				jiraHash,
 				snapshots.backlog,
 				snapshots.jira,
+				{ backlog: backlogPayload, jira: jiraPayload },
 			);
 
 			if (state.state === "NeedsPull") {
@@ -330,11 +358,12 @@ async function pullTask(
 		store: FrontmatterStore;
 		backlog: BacklogClient;
 		jira: JiraClient;
+		fieldMappings: FieldMapping[];
 		force: boolean;
 		dryRun: boolean;
 	},
 ): Promise<void> {
-	const { store, backlog, jira, force, dryRun } = context;
+	const { store, backlog, jira, fieldMappings, force, dryRun } = context;
 
 	// Get mapping
 	const mapping = store.getMapping(taskId);
@@ -351,8 +380,10 @@ async function pullTask(
 	);
 	const issue = await jira.getIssue(mapping.jiraKey);
 
-	const backlogHash = computeHash(normalizeBacklogTask(task));
-	const jiraHash = computeHash(normalizeJiraIssue(issue));
+	const backlogPayload = normalizeBacklogTask(task);
+	const jiraPayload = normalizeJiraIssue(issue);
+	const backlogHash = computeHash(backlogPayload);
+	const jiraHash = computeHash(jiraPayload);
 
 	// Check sync state unless force is enabled
 	if (!force) {
@@ -362,6 +393,7 @@ async function pullTask(
 			jiraHash,
 			snapshots.backlog,
 			snapshots.jira,
+			{ backlog: backlogPayload, jira: jiraPayload },
 		);
 
 		if (state.state === "Conflict") {
@@ -408,15 +440,28 @@ async function pullTask(
 		}
 	}
 
-	const updates = buildBacklogUpdates(issue, task, projectKey);
+	const updates = buildBacklogUpdates(issue, task, projectKey, fieldMappings);
+	const mappedUpdates = buildMappedFieldUpdates(
+		issue,
+		readTaskFrontmatter(taskId),
+		fieldMappings,
+	);
+	Object.assign(updates, mappedUpdates.cli);
 
 	if (dryRun) {
-		logger.info({ taskId, updates }, "DRY RUN: Would update Backlog task");
+		logger.info(
+			{ taskId, updates, frontmatter: mappedUpdates.frontmatter },
+			"DRY RUN: Would update Backlog task",
+		);
 	} else {
 		// Apply updates via Backlog CLI
 		if (Object.keys(updates).length > 0) {
 			await backlog.updateTask(taskId, updates);
 		}
+
+		// Plugin-owned frontmatter fields are written after the CLI edit,
+		// which may rewrite the task file
+		applyMappedFrontmatter(taskId, issue, fieldMappings);
 
 		// Update snapshots with freshly updated data
 		const updatedTask = await backlog.getTask(taskId);
@@ -469,11 +514,12 @@ async function pullTask(
  * Build Backlog CLI updates from Jira issue
  * Returns updates compatible with BacklogClient.updateTask()
  */
-function buildBacklogUpdates(
+export function buildBacklogUpdates(
 	issue: JiraIssue,
 	currentTask: BacklogTask,
 	projectKey?: string,
-): {
+	fieldMappings: FieldMapping[] = [],
+): MappedCliUpdates & {
 	title?: string;
 	description?: string;
 	status?: string;
@@ -486,6 +532,13 @@ function buildBacklogUpdates(
 	uncheckAc?: number[];
 } {
 	const updates: Record<string, unknown> = {};
+
+	// Core fields replaced by a field mapping are handled by the mapping
+	const overridden = new Set(
+		getPullMappings(fieldMappings)
+			.map((m) => m.backlog)
+			.filter(isCoreOverrideTarget),
+	);
 
 	// Summary -> Title (sanitized for YAML safety)
 	const sanitizedTitle = sanitizeTitle(issue.summary);
@@ -547,6 +600,7 @@ function buildBacklogUpdates(
 
 	// Labels
 	if (
+		!overridden.has("labels") &&
 		issue.labels &&
 		JSON.stringify(issue.labels) !== JSON.stringify(currentTask.labels)
 	) {
@@ -554,7 +608,7 @@ function buildBacklogUpdates(
 	}
 
 	// Priority (needs mapping from Jira priority to Backlog priority)
-	if (issue.priority) {
+	if (issue.priority && !overridden.has("priority")) {
 		const mappedPriority = mapJiraPriorityToBacklog(issue.priority);
 		if (mappedPriority && mappedPriority !== currentTask.priority) {
 			updates.priority = mappedPriority;
@@ -586,6 +640,32 @@ function buildBacklogUpdates(
 	}
 
 	return updates;
+}
+
+/**
+ * Write mapped Jira values to plugin-owned frontmatter:<key> fields.
+ * Compares against the file as it is now, so values dropped by an earlier
+ * CLI edit are restored.
+ */
+function applyMappedFrontmatter(
+	taskId: string,
+	issue: JiraIssue,
+	fieldMappings: FieldMapping[],
+): void {
+	if (fieldMappings.length === 0) return;
+
+	const { frontmatter } = buildMappedFieldUpdates(
+		issue,
+		readTaskFrontmatter(taskId),
+		fieldMappings,
+	);
+	if (Object.keys(frontmatter).length > 0) {
+		updateFrontmatterFields(getTaskFilePath(taskId), frontmatter);
+		logger.debug(
+			{ taskId, fields: Object.keys(frontmatter) },
+			"Applied mapped frontmatter fields",
+		);
+	}
 }
 
 /**
@@ -668,10 +748,11 @@ async function importJiraIssue(
 		store: FrontmatterStore;
 		backlog: BacklogClient;
 		jira: JiraClient;
+		fieldMappings: FieldMapping[];
 		dryRun: boolean;
 	},
 ): Promise<string> {
-	const { store, backlog, jira, dryRun } = context;
+	const { store, backlog, jira, fieldMappings, dryRun } = context;
 
 	// Get Jira issue
 	const issue = await jira.getIssue(jiraKey);
@@ -774,6 +855,20 @@ async function importJiraIssue(
 			{ taskId, checkedIndices },
 			"Updated acceptance criteria checked states",
 		);
+	}
+
+	// Apply mapped fields (native fields via CLI, then frontmatter fields)
+	const mappedUpdates = buildMappedFieldUpdates(
+		issue,
+		readTaskFrontmatter(taskId),
+		fieldMappings,
+	);
+	if (hasMappedFieldUpdates(mappedUpdates)) {
+		if (Object.keys(mappedUpdates.cli).length > 0) {
+			await backlog.updateTask(taskId, mappedUpdates.cli);
+		}
+		applyMappedFrontmatter(taskId, issue, fieldMappings);
+		logger.debug({ taskId, jiraKey }, "Applied mapped fields to imported task");
 	}
 
 	// Create mapping

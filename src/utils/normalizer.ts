@@ -1,6 +1,16 @@
 import crypto from "node:crypto";
 import type { BacklogTask } from "../integrations/backlog.ts";
 import type { JiraIssue } from "../integrations/jira.ts";
+import {
+	type FieldMapping,
+	canonicalMappedValue,
+	getBacklogTargetValue,
+	getMappedJiraValue,
+	getPullMappings,
+	isCoreOverrideTarget,
+	loadFieldMappings,
+	readTaskFrontmatter,
+} from "./field-mapping.ts";
 
 /**
  * Normalized payload for comparison between Backlog and Jira
@@ -15,13 +25,36 @@ export interface NormalizedPayload {
 	assignee?: string;
 	// AC is Backlog-specific but we normalize it for comparison
 	acceptanceCriteria: Array<{ text: string; checked: boolean }>;
+	// Values of user-defined field mappings, keyed by Backlog target, in
+	// canonical Backlog representation. Omitted when no mappings apply so
+	// hashes for users without fieldMappings are unchanged.
+	mappedFields?: Record<string, string>;
+}
+
+export interface NormalizeOptions {
+	/** Field mappings to apply; loaded from config.json when omitted */
+	fieldMappings?: FieldMapping[];
+	/** Task frontmatter; read from the task file when omitted and needed */
+	frontmatter?: Record<string, unknown>;
+}
+
+/**
+ * Pull mappings stored in the mappedFields section (priority/labels
+ * mappings replace the core field instead)
+ */
+function getMappedFieldMappings(options?: NormalizeOptions): FieldMapping[] {
+	const mappings = options?.fieldMappings ?? loadFieldMappings();
+	return getPullMappings(mappings);
 }
 
 /**
  * Normalize a Backlog task to a comparable payload
  */
-export function normalizeBacklogTask(task: BacklogTask): NormalizedPayload {
-	return {
+export function normalizeBacklogTask(
+	task: BacklogTask,
+	options?: NormalizeOptions,
+): NormalizedPayload {
+	const payload: NormalizedPayload = {
 		title: task.title.trim(),
 		description: (task.description || "").trim(),
 		status: normalizeStatus(task.status, "backlog"),
@@ -33,13 +66,32 @@ export function normalizeBacklogTask(task: BacklogTask): NormalizedPayload {
 			checked: ac.checked,
 		})),
 	};
+
+	const mappings = getMappedFieldMappings(options).filter(
+		(m) => !isCoreOverrideTarget(m.backlog),
+	);
+	if (mappings.length > 0) {
+		const frontmatter = options?.frontmatter ?? readTaskFrontmatter(task.id);
+		payload.mappedFields = {};
+		for (const mapping of mappings) {
+			payload.mappedFields[mapping.backlog] = canonicalMappedValue(
+				getBacklogTargetValue(frontmatter, mapping.backlog),
+				mapping.backlog,
+			);
+		}
+	}
+
+	return payload;
 }
 
 /**
  * Normalize a Jira issue to a comparable payload
  */
-export function normalizeJiraIssue(issue: JiraIssue): NormalizedPayload {
-	return {
+export function normalizeJiraIssue(
+	issue: JiraIssue,
+	options?: Pick<NormalizeOptions, "fieldMappings">,
+): NormalizedPayload {
+	const payload: NormalizedPayload = {
 		title: issue.summary.trim(),
 		description: (issue.description || "").trim(),
 		status: normalizeStatus(issue.status, "jira"),
@@ -49,6 +101,28 @@ export function normalizeJiraIssue(issue: JiraIssue): NormalizedPayload {
 		// Jira doesn't have AC, so we extract from description if formatted
 		acceptanceCriteria: extractAcceptanceCriteria(issue.description || ""),
 	};
+
+	for (const mapping of getMappedFieldMappings(options)) {
+		const value = getMappedJiraValue(issue, mapping);
+		if (mapping.backlog === "priority") {
+			// Mapped priority replaces the built-in Jira priority as the source
+			payload.priority =
+				typeof value === "string" ? value.toLowerCase() : undefined;
+		} else if (mapping.backlog === "labels") {
+			// Mapped labels replace the built-in Jira labels as the source
+			payload.labels = (Array.isArray(value) ? value : [])
+				.map((l) => l.toLowerCase())
+				.sort();
+		} else {
+			payload.mappedFields = payload.mappedFields ?? {};
+			payload.mappedFields[mapping.backlog] = canonicalMappedValue(
+				value,
+				mapping.backlog,
+			);
+		}
+	}
+
+	return payload;
 }
 
 /**
@@ -199,6 +273,17 @@ export function computeHash(payload: NormalizedPayload): string {
 		title: payload.title,
 	};
 
+	// Only include mapped fields when present, so hashes for users without
+	// fieldMappings stay identical to earlier versions
+	const mappedKeys = Object.keys(payload.mappedFields ?? {}).sort();
+	if (mappedKeys.length > 0) {
+		const mappedFields: Record<string, string> = {};
+		for (const key of mappedKeys) {
+			mappedFields[key] = (payload.mappedFields as Record<string, string>)[key];
+		}
+		(stable as Record<string, unknown>).mappedFields = mappedFields;
+	}
+
 	const json = JSON.stringify(stable);
 	return crypto.createHash("sha256").update(json).digest("hex");
 }
@@ -228,6 +313,16 @@ export function comparePayloads(
 		JSON.stringify(b.acceptanceCriteria)
 	) {
 		changes.push("acceptanceCriteria");
+	}
+
+	const mappedKeys = new Set([
+		...Object.keys(a.mappedFields ?? {}),
+		...Object.keys(b.mappedFields ?? {}),
+	]);
+	for (const key of [...mappedKeys].sort()) {
+		if ((a.mappedFields?.[key] ?? "") !== (b.mappedFields?.[key] ?? "")) {
+			changes.push(key);
+		}
 	}
 
 	return changes;

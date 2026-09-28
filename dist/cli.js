@@ -14244,8 +14244,8 @@ var package_default = {
 };
 
 // src/commands/configure.ts
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync as existsSync2, mkdirSync, readFileSync as readFileSync4, writeFileSync as writeFileSync3 } from "node:fs";
+import { join as join3 } from "node:path";
 
 // node_modules/chalk/source/vendor/ansi-styles/index.js
 var ANSI_BACKGROUND_OFFSET = 10;
@@ -23233,6 +23233,14 @@ class StdioClientTransport {
   }
 }
 
+// src/utils/field-mapping.ts
+import { existsSync, readFileSync as readFileSync3 } from "node:fs";
+import { join as join2 } from "node:path";
+
+// src/utils/assignee-mapping.ts
+import { readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+
 // src/utils/logger.ts
 import pino from "pino";
 var isDevelopment = true;
@@ -23254,6 +23262,847 @@ function setLogLevel(level) {
 }
 function getLogLevel() {
   return logger.level;
+}
+
+// src/utils/assignee-mapping.ts
+function loadAssigneeMapping() {
+  try {
+    const configPath = join(process.cwd(), ".backlog-jira", "config.json");
+    const content = readFileSync(configPath, "utf-8");
+    const config = JSON.parse(content);
+    const backlogToJira = config.backlog?.assigneeMapping || {};
+    const autoMapped = config.backlog?.autoMappedAssignees || {};
+    const jiraToBacklog = {};
+    for (const [backlogUser, jiraUser] of Object.entries(backlogToJira)) {
+      if (typeof jiraUser === "string") {
+        jiraToBacklog[jiraUser.toLowerCase()] = backlogUser;
+      }
+    }
+    for (const [backlogUser, jiraUser] of Object.entries(autoMapped)) {
+      if (typeof jiraUser === "string") {
+        const jiraLower = jiraUser.toLowerCase();
+        if (!jiraToBacklog[jiraLower]) {
+          jiraToBacklog[jiraLower] = backlogUser;
+        }
+      }
+    }
+    return {
+      backlogToJira,
+      jiraToBacklog,
+      autoMapped
+    };
+  } catch (error) {
+    logger.warn({ error }, "Failed to load assignee mapping config, using empty mappings");
+    return {
+      backlogToJira: {},
+      jiraToBacklog: {},
+      autoMapped: {}
+    };
+  }
+}
+function mapBacklogAssigneeToJira(backlogAssignee) {
+  const mapping = loadAssigneeMapping();
+  const cleanAssignee = backlogAssignee.startsWith("@") ? backlogAssignee.substring(1) : backlogAssignee;
+  const explicitMapping = mapping.backlogToJira[cleanAssignee];
+  if (explicitMapping) {
+    return explicitMapping;
+  }
+  const autoMapping = mapping.autoMapped?.[cleanAssignee];
+  if (autoMapping) {
+    return autoMapping;
+  }
+  return null;
+}
+function mapJiraUserToBacklog(jiraUser) {
+  const mapping = loadAssigneeMapping();
+  const jiraLower = jiraUser.toLowerCase();
+  const backlogUser = mapping.jiraToBacklog[jiraLower];
+  if (backlogUser) {
+    return backlogUser.startsWith("@") ? backlogUser : `@${backlogUser}`;
+  }
+  return null;
+}
+function getAssigneeMappingDescription() {
+  const mapping = loadAssigneeMapping();
+  const lines = [
+    "Assignee Mapping Configuration:",
+    "",
+    "Explicit Mappings (Backlog → Jira):"
+  ];
+  const explicitCount = Object.keys(mapping.backlogToJira).length;
+  if (explicitCount === 0) {
+    lines.push("  (none configured)");
+  } else {
+    for (const [backlogUser, jiraUser] of Object.entries(mapping.backlogToJira)) {
+      lines.push(`  @${backlogUser} → ${jiraUser}`);
+    }
+  }
+  lines.push("");
+  lines.push("Automatic Mappings (discovered from sync):");
+  const autoCount = Object.keys(mapping.autoMapped || {}).length;
+  if (autoCount === 0) {
+    lines.push("  (none discovered yet)");
+  } else {
+    for (const [backlogUser, jiraUser] of Object.entries(mapping.autoMapped || {})) {
+      lines.push(`  @${backlogUser} → ${jiraUser}`);
+    }
+  }
+  return lines.join(`
+`);
+}
+function calculateSimilarity(str1, str2) {
+  const s1 = str1.toLowerCase();
+  const s2 = str2.toLowerCase();
+  const len1 = s1.length;
+  const len2 = s2.length;
+  const matrix = [];
+  for (let i = 0;i <= len1; i++) {
+    matrix[i] = [i];
+  }
+  for (let j = 0;j <= len2; j++) {
+    matrix[0][j] = j;
+  }
+  for (let i = 1;i <= len1; i++) {
+    for (let j = 1;j <= len2; j++) {
+      const cost = s1[i - 1] === s2[j - 1] ? 0 : 1;
+      matrix[i][j] = Math.min(matrix[i - 1][j] + 1, matrix[i][j - 1] + 1, matrix[i - 1][j - 1] + cost);
+    }
+  }
+  const distance = matrix[len1][len2];
+  const maxLen = Math.max(len1, len2);
+  return maxLen === 0 ? 1 : 1 - distance / maxLen;
+}
+function findBestAssigneeMatch(jiraDisplayName, backlogAssignees, minSimilarity = 0.6) {
+  if (!jiraDisplayName || backlogAssignees.length === 0) {
+    return null;
+  }
+  let bestMatch = null;
+  for (const backlogAssignee of backlogAssignees) {
+    const cleanAssignee = backlogAssignee.startsWith("@") ? backlogAssignee.substring(1) : backlogAssignee;
+    const score = calculateSimilarity(jiraDisplayName, cleanAssignee);
+    if (score >= minSimilarity && (!bestMatch || score > bestMatch.score)) {
+      bestMatch = { assignee: backlogAssignee, score };
+    }
+  }
+  return bestMatch;
+}
+function saveAutoDiscoveredMapping(backlogAssignee, jiraUser) {
+  try {
+    const configPath = join(process.cwd(), ".backlog-jira", "config.json");
+    const content = readFileSync(configPath, "utf-8");
+    const config = JSON.parse(content);
+    if (!config.backlog) {
+      config.backlog = {};
+    }
+    if (!config.backlog.autoMappedAssignees) {
+      config.backlog.autoMappedAssignees = {};
+    }
+    const cleanBacklogAssignee = backlogAssignee.startsWith("@") ? backlogAssignee.substring(1) : backlogAssignee;
+    const hasExplicitMapping = config.backlog.assigneeMapping?.[cleanBacklogAssignee];
+    if (hasExplicitMapping) {
+      logger.debug({ backlogAssignee: cleanBacklogAssignee, jiraUser }, "Skipping auto-mapping - explicit mapping already exists");
+      return;
+    }
+    config.backlog.autoMappedAssignees[cleanBacklogAssignee] = jiraUser;
+    writeFileSync(configPath, JSON.stringify(config, null, 2), "utf-8");
+    logger.info({ backlogAssignee: cleanBacklogAssignee, jiraUser }, "Auto-discovered assignee mapping saved to config.json");
+  } catch (error) {
+    logger.error({ error, backlogAssignee, jiraUser }, "Failed to save auto-discovered mapping");
+  }
+}
+function autoDiscoverAndSaveMapping(jiraDisplayName, backlogAssignees) {
+  const match = findBestAssigneeMatch(jiraDisplayName, backlogAssignees);
+  if (match) {
+    logger.info({
+      jiraDisplayName,
+      backlogAssignee: match.assignee,
+      similarityScore: match.score.toFixed(2)
+    }, "Auto-discovered assignee mapping based on name similarity");
+    saveAutoDiscoveredMapping(match.assignee, jiraDisplayName);
+    return match.assignee;
+  }
+  return null;
+}
+
+// src/utils/frontmatter.ts
+import { readFileSync as readFileSync2, writeFileSync as writeFileSync2 } from "node:fs";
+function parseFrontmatter(content) {
+  const frontmatterMatch = content.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
+  if (!frontmatterMatch) {
+    return { frontmatter: {}, body: content };
+  }
+  const frontmatterYaml = frontmatterMatch[1];
+  const body = frontmatterMatch[2];
+  const frontmatter = {};
+  const lines = frontmatterYaml.split(`
+`);
+  let currentKey = null;
+  let currentValue = "";
+  let multilineMode = "none";
+  let currentList = null;
+  for (let i = 0;i < lines.length; i++) {
+    const line = lines[i];
+    const keyMatch = line.match(/^([^:]+):\s*(.*)$/);
+    const listItemMatch = line.match(/^\s*-\s+(.*)$/);
+    if (currentKey && multilineMode === "none" && listItemMatch && (currentList || currentValue === "")) {
+      currentList = currentList ?? [];
+      currentList.push(String(parseYamlValue(listItemMatch[1].trim(), "none")));
+      continue;
+    }
+    if (keyMatch && !line.startsWith(" ") && !line.startsWith("\t")) {
+      if (currentKey) {
+        frontmatter[currentKey] = currentList ?? parseYamlValue(currentValue.trim(), multilineMode);
+      }
+      currentList = null;
+      currentKey = keyMatch[1].trim();
+      const valueStart = keyMatch[2].trim();
+      if (valueStart === ">" || valueStart === ">-") {
+        multilineMode = "folded";
+        currentValue = "";
+      } else if (valueStart === "|" || valueStart === "|-") {
+        multilineMode = "literal";
+        currentValue = "";
+      } else {
+        multilineMode = "none";
+        currentValue = valueStart;
+      }
+    } else if (currentKey && multilineMode !== "none" && (line.startsWith(" ") || line.startsWith("\t"))) {
+      const indentedLine = line.replace(/^[ \t]+/, "");
+      if (currentValue) {
+        currentValue += multilineMode === "literal" ? `
+${indentedLine}` : ` ${indentedLine}`;
+      } else {
+        currentValue = indentedLine;
+      }
+    }
+  }
+  if (currentKey) {
+    frontmatter[currentKey] = currentList ?? parseYamlValue(currentValue.trim(), multilineMode);
+  }
+  return { frontmatter, body };
+}
+function parseYamlValue(value, multilineMode) {
+  if (!value) {
+    return "";
+  }
+  if (multilineMode !== "none") {
+    return value;
+  }
+  const arrayMatch = value.match(/^\[(.*)\]$/);
+  if (arrayMatch) {
+    return splitFlowSequence(arrayMatch[1]).map((v) => unquoteYamlScalar(v.trim())).filter((v) => v);
+  }
+  return unquoteYamlScalar(value);
+}
+function unquoteYamlScalar(value) {
+  if (value.length >= 2 && value.startsWith('"') && value.endsWith('"')) {
+    return value.slice(1, -1).replace(/\\(["\\])/g, "$1");
+  }
+  if (value.length >= 2 && value.startsWith("'") && value.endsWith("'")) {
+    return value.slice(1, -1).replace(/''/g, "'");
+  }
+  return value;
+}
+function splitFlowSequence(inner) {
+  const items = [];
+  let current = "";
+  let quote = null;
+  for (let i = 0;i < inner.length; i++) {
+    const ch = inner[i];
+    if (quote) {
+      current += ch;
+      if (ch === "\\" && quote === '"' && i + 1 < inner.length) {
+        i++;
+        current += inner[i];
+      } else if (ch === quote) {
+        quote = null;
+      }
+    } else if (ch === '"' || ch === "'") {
+      quote = ch;
+      current += ch;
+    } else if (ch === ",") {
+      items.push(current);
+      current = "";
+    } else {
+      current += ch;
+    }
+  }
+  items.push(current);
+  return items;
+}
+function serializeFrontmatter(frontmatter) {
+  const lines = [];
+  for (const [key, value] of Object.entries(frontmatter)) {
+    if (Array.isArray(value)) {
+      if (value.length === 0) {
+        lines.push(`${key}: []`);
+      } else {
+        lines.push(`${key}:`);
+        for (const item of value) {
+          lines.push(`  - ${serializeYamlValue(item)}`);
+        }
+      }
+    } else if (value !== undefined && value !== null) {
+      const serializedValue = serializeYamlValue(value);
+      lines.push(`${key}: ${serializedValue}`);
+    }
+  }
+  return lines.join(`
+`);
+}
+function serializeYamlValue(value) {
+  if (typeof value !== "string") {
+    return String(value);
+  }
+  const needsQuoting = /[:\[\]{}#&*!|>'"%@`]|^[-?]/.test(value) || value.trim() !== value;
+  if (needsQuoting) {
+    const escaped = value.replace(/["\\]/g, "\\$&");
+    return `"${escaped}"`;
+  }
+  return value;
+}
+function updateJiraMetadata(filePath, metadata) {
+  try {
+    const content = readFileSync2(filePath, "utf-8");
+    const { frontmatter, body } = parseFrontmatter(content);
+    if ("jiraKey" in metadata) {
+      if (metadata.jiraKey === undefined) {
+        delete frontmatter.jira_key;
+      } else {
+        frontmatter.jira_key = metadata.jiraKey;
+      }
+    }
+    if ("jiraLastSync" in metadata) {
+      if (metadata.jiraLastSync === undefined) {
+        delete frontmatter.jira_last_sync;
+      } else {
+        frontmatter.jira_last_sync = metadata.jiraLastSync;
+      }
+    }
+    if ("jiraSyncState" in metadata) {
+      if (metadata.jiraSyncState === undefined) {
+        delete frontmatter.jira_sync_state;
+      } else {
+        frontmatter.jira_sync_state = metadata.jiraSyncState;
+      }
+    }
+    if ("jiraUrl" in metadata) {
+      if (metadata.jiraUrl === undefined) {
+        delete frontmatter.jira_url;
+      } else {
+        frontmatter.jira_url = metadata.jiraUrl;
+      }
+    }
+    const newFrontmatter = serializeFrontmatter(frontmatter);
+    const newContent = `---
+${newFrontmatter}
+---
+${body}`;
+    writeFileSync2(filePath, newContent, "utf-8");
+    logger.debug({ filePath, metadata }, "Updated Jira metadata in frontmatter");
+  } catch (error) {
+    logger.error({ error, filePath }, "Failed to update Jira metadata");
+    throw error;
+  }
+}
+function updateFrontmatterFields(filePath, fields) {
+  try {
+    const content = readFileSync2(filePath, "utf-8");
+    const { frontmatter, body } = parseFrontmatter(content);
+    for (const [key, value] of Object.entries(fields)) {
+      if (value === null) {
+        delete frontmatter[key];
+      } else {
+        frontmatter[key] = value;
+      }
+    }
+    const newFrontmatter = serializeFrontmatter(frontmatter);
+    writeFileSync2(filePath, `---
+${newFrontmatter}
+---
+${body}`, "utf-8");
+    logger.debug({ filePath, fields }, "Updated frontmatter fields");
+  } catch (error) {
+    logger.error({ error, filePath }, "Failed to update frontmatter fields");
+    throw error;
+  }
+}
+function getJiraMetadata(filePath) {
+  try {
+    const content = readFileSync2(filePath, "utf-8");
+    const { frontmatter } = parseFrontmatter(content);
+    return {
+      jiraKey: frontmatter.jira_key,
+      jiraLastSync: frontmatter.jira_last_sync,
+      jiraSyncState: frontmatter.jira_sync_state,
+      jiraUrl: frontmatter.jira_url
+    };
+  } catch (error) {
+    logger.error({ error, filePath }, "Failed to get Jira metadata");
+    throw error;
+  }
+}
+function getTaskFilePath(taskId) {
+  const { readdirSync } = __require("node:fs");
+  const { join } = __require("node:path");
+  const tasksDir = join(process.cwd(), "backlog", "tasks");
+  const files = readdirSync(tasksDir);
+  const prefix = `${taskId} - `.toLowerCase();
+  const file = files.find((f) => f.toLowerCase().startsWith(prefix) && f.endsWith(".md"));
+  if (!file) {
+    throw new Error(`Task file not found for ${taskId}`);
+  }
+  return join(tasksDir, file);
+}
+
+// src/utils/field-mapping.ts
+var FIELD_MAPPING_TYPES = [
+  "string",
+  "number",
+  "date",
+  "option",
+  "multi-option",
+  "user",
+  "version",
+  "array"
+];
+var FIELD_MAPPING_DIRECTIONS = ["pull", "push", "both"];
+var NATIVE_BACKLOG_TARGETS = [
+  "milestone",
+  "dependencies",
+  "references",
+  "priority",
+  "labels"
+];
+var CORE_OVERRIDE_TARGETS = new Set([
+  "priority",
+  "labels"
+]);
+var ARRAY_NATIVE_TARGETS = new Set([
+  "dependencies",
+  "references",
+  "labels"
+]);
+var FRONTMATTER_PREFIX = "frontmatter:";
+var RESERVED_FRONTMATTER_KEYS = new Set([
+  "id",
+  "title",
+  "status",
+  "assignee",
+  "reporter",
+  "created_date",
+  "updated_date",
+  "created",
+  "updated",
+  "labels",
+  "milestone",
+  "dependencies",
+  "references",
+  "documentation",
+  "parent",
+  "parent_task_id",
+  "subtasks",
+  "priority",
+  "ordinal",
+  "type",
+  "project",
+  "due_date",
+  "modified_files",
+  "onStatusChange",
+  "final_summary"
+]);
+
+class FieldMappingConfigError extends Error {
+  errors;
+  constructor(errors) {
+    super(`Invalid fieldMappings in .backlog-jira/config.json:
+${errors.map((e) => `  - ${e}`).join(`
+`)}`);
+    this.errors = errors;
+    this.name = "FieldMappingConfigError";
+  }
+}
+var FRONTMATTER_KEY_PATTERN = /^[A-Za-z_][A-Za-z0-9_-]*$/;
+var JIRA_FIELD_PATTERN = /^(customfield_\d+|[A-Za-z][A-Za-z0-9_]*)$/;
+function validateBacklogTarget(target) {
+  if (target.startsWith(FRONTMATTER_PREFIX)) {
+    const key = target.slice(FRONTMATTER_PREFIX.length);
+    if (!FRONTMATTER_KEY_PATTERN.test(key)) {
+      return `"${target}" is not a valid frontmatter key (use letters, digits, "_" or "-")`;
+    }
+    if (RESERVED_FRONTMATTER_KEYS.has(key)) {
+      return `"${target}" collides with the Backlog core field "${key}"; map to the native target "${key}" or choose another key`;
+    }
+    if (key.toLowerCase().startsWith("jira_")) {
+      return `"${target}" collides with plugin-owned jira_* metadata keys`;
+    }
+    return null;
+  }
+  if (NATIVE_BACKLOG_TARGETS.includes(target)) {
+    return null;
+  }
+  return `unknown backlog target "${target}" (expected one of ${NATIVE_BACKLOG_TARGETS.join(", ")} or frontmatter:<key>)`;
+}
+function validateFieldMappings(raw) {
+  const mappings = [];
+  const errors = [];
+  if (raw === undefined || raw === null) {
+    return { mappings, errors };
+  }
+  if (!Array.isArray(raw)) {
+    return { mappings, errors: ["fieldMappings must be an array"] };
+  }
+  const seenTargets = new Set;
+  raw.forEach((entry, index) => {
+    const label = `fieldMappings[${index}]`;
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+      errors.push(`${label}: must be an object`);
+      return;
+    }
+    const e = entry;
+    const entryErrors = [];
+    if (typeof e.backlog !== "string" || !e.backlog.trim()) {
+      entryErrors.push(`${label}: "backlog" is required`);
+    } else {
+      const targetError = validateBacklogTarget(e.backlog.trim());
+      if (targetError) {
+        entryErrors.push(`${label}: ${targetError}`);
+      } else if (seenTargets.has(e.backlog.trim())) {
+        entryErrors.push(`${label}: backlog target "${e.backlog.trim()}" is mapped more than once`);
+      }
+    }
+    if (typeof e.jira !== "string" || !e.jira.trim()) {
+      entryErrors.push(`${label}: "jira" is required`);
+    } else if (!JIRA_FIELD_PATTERN.test(e.jira.trim())) {
+      entryErrors.push(`${label}: "${e.jira}" is not a valid Jira field ID (use customfield_NNNNN or a system field name)`);
+    }
+    if (typeof e.type !== "string" || !FIELD_MAPPING_TYPES.includes(e.type)) {
+      entryErrors.push(`${label}: "type" must be one of ${FIELD_MAPPING_TYPES.join(", ")}`);
+    }
+    if (e.direction !== undefined && (typeof e.direction !== "string" || !FIELD_MAPPING_DIRECTIONS.includes(e.direction))) {
+      entryErrors.push(`${label}: "direction" must be one of ${FIELD_MAPPING_DIRECTIONS.join(", ")}`);
+    }
+    if (e.valueMap !== undefined) {
+      const valueMap = e.valueMap;
+      if (!valueMap || typeof valueMap !== "object" || Array.isArray(valueMap) || Object.values(valueMap).some((v) => typeof v !== "string")) {
+        entryErrors.push(`${label}: "valueMap" must be an object of string values`);
+      }
+    }
+    if (entryErrors.length > 0) {
+      errors.push(...entryErrors);
+      return;
+    }
+    const backlog = e.backlog.trim();
+    seenTargets.add(backlog);
+    mappings.push({
+      backlog,
+      jira: e.jira.trim(),
+      type: e.type,
+      direction: e.direction ?? "pull",
+      ...e.valueMap ? { valueMap: e.valueMap } : undefined
+    });
+  });
+  return { mappings, errors };
+}
+function loadFieldMappings(cwd = process.cwd()) {
+  const configPath = join2(cwd, ".backlog-jira", "config.json");
+  if (!existsSync(configPath)) {
+    return [];
+  }
+  let config;
+  try {
+    config = JSON.parse(readFileSync3(configPath, "utf-8"));
+  } catch (error) {
+    logger.warn({ error }, "Failed to read config.json for field mappings");
+    return [];
+  }
+  const { mappings, errors } = validateFieldMappings(config.fieldMappings);
+  if (errors.length > 0) {
+    throw new FieldMappingConfigError(errors);
+  }
+  return mappings;
+}
+function getPullMappings(mappings) {
+  return mappings.filter((m) => m.direction !== "push");
+}
+function isCoreOverrideTarget(target) {
+  return CORE_OVERRIDE_TARGETS.has(target);
+}
+function frontmatterKeyForTarget(target) {
+  return target.startsWith(FRONTMATTER_PREFIX) ? target.slice(FRONTMATTER_PREFIX.length) : target;
+}
+function getJiraFieldValue(issue, fieldId) {
+  const raw = issue.fields ?? {};
+  const nested = raw.fields && typeof raw.fields === "object" ? raw.fields : {};
+  const snake = fieldId.replace(/([a-z0-9])([A-Z])/g, "$1_$2").toLowerCase();
+  for (const key of [fieldId, snake]) {
+    if (raw[key] !== undefined)
+      return raw[key];
+    if (nested[key] !== undefined)
+      return nested[key];
+  }
+  return;
+}
+function scalarText(value) {
+  if (value === undefined || value === null)
+    return null;
+  if (typeof value === "string")
+    return value.trim() || null;
+  if (typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
+  if (Array.isArray(value)) {
+    return value.length > 0 ? scalarText(value[0]) : null;
+  }
+  if (typeof value === "object") {
+    const obj = value;
+    for (const key of [
+      "value",
+      "name",
+      "displayName",
+      "display_name",
+      "emailAddress",
+      "email",
+      "key",
+      "accountId",
+      "id"
+    ]) {
+      if (obj[key] !== undefined && obj[key] !== null) {
+        return scalarText(obj[key]);
+      }
+    }
+  }
+  return null;
+}
+function listText(value) {
+  if (value === undefined || value === null)
+    return [];
+  if (!Array.isArray(value) && typeof value === "object" && Array.isArray(value.value)) {
+    return listText(value.value);
+  }
+  const items = Array.isArray(value) ? value : [value];
+  return items.map((item) => scalarText(item)).filter((item) => item !== null);
+}
+function unwrapScalar(value) {
+  if (value && typeof value === "object" && !Array.isArray(value) && "value" in value) {
+    return unwrapScalar(value.value);
+  }
+  return value;
+}
+function applyValueMap(value, valueMap) {
+  if (!valueMap)
+    return value;
+  if (value in valueMap)
+    return valueMap[value];
+  const lower = value.toLowerCase();
+  for (const [from, to] of Object.entries(valueMap)) {
+    if (from.toLowerCase() === lower)
+      return to;
+  }
+  return value;
+}
+function mapJiraUser(user) {
+  const mapped = mapJiraUserToBacklog(user);
+  return mapped ?? user;
+}
+function convertJiraValue(raw, mapping) {
+  const { valueMap } = mapping;
+  let converted;
+  switch (mapping.type) {
+    case "string":
+    case "option":
+      converted = scalarText(raw);
+      break;
+    case "number": {
+      const value = unwrapScalar(raw);
+      if (value === undefined || value === null || value === "") {
+        converted = null;
+        break;
+      }
+      const num = typeof value === "number" ? value : Number(value);
+      converted = Number.isFinite(num) ? String(num) : null;
+      break;
+    }
+    case "date": {
+      const text = scalarText(raw);
+      const match = text?.match(/^(\d{4}-\d{2}-\d{2})/);
+      converted = match ? match[1] : null;
+      break;
+    }
+    case "user": {
+      const text = scalarText(raw);
+      converted = text ? mapJiraUser(text) : null;
+      break;
+    }
+    case "version": {
+      const unwrapped = raw && typeof raw === "object" && !Array.isArray(raw) ? unwrapScalar(raw) : raw;
+      converted = Array.isArray(unwrapped) ? listText(unwrapped) : scalarText(unwrapped);
+      break;
+    }
+    case "multi-option":
+    case "array":
+      converted = typeof raw === "string" ? raw.split(",").map((s) => s.trim()).filter(Boolean) : listText(raw);
+      break;
+  }
+  if (converted === null)
+    return null;
+  if (Array.isArray(converted)) {
+    const mapped = converted.map((v) => applyValueMap(v, valueMap));
+    return mapped.length > 0 ? mapped : null;
+  }
+  return applyValueMap(converted, valueMap);
+}
+function coerceForTarget(value, target) {
+  if (value === null)
+    return null;
+  if (ARRAY_NATIVE_TARGETS.has(target)) {
+    return Array.isArray(value) ? value : [value];
+  }
+  if (target.startsWith(FRONTMATTER_PREFIX)) {
+    return value;
+  }
+  if (Array.isArray(value)) {
+    return value.length > 0 ? value.join(", ") : null;
+  }
+  return value;
+}
+function getMappedJiraValue(issue, mapping) {
+  const raw = getJiraFieldValue(issue, mapping.jira);
+  return coerceForTarget(convertJiraValue(raw, mapping), mapping.backlog);
+}
+function getBacklogTargetValue(frontmatter, target) {
+  const value = frontmatter[frontmatterKeyForTarget(target)];
+  if (value === undefined || value === null)
+    return null;
+  if (Array.isArray(value)) {
+    const items = value.map((v) => String(v).trim()).filter(Boolean);
+    return items.length > 0 ? items : null;
+  }
+  const text = String(value).trim();
+  if (!text || text === "[]")
+    return null;
+  return text;
+}
+function canonicalMappedValue(value, target) {
+  if (value === null)
+    return "";
+  if (Array.isArray(value)) {
+    return JSON.stringify([...value].sort());
+  }
+  return target === "priority" ? value.toLowerCase() : value;
+}
+function readTaskFrontmatter(taskId) {
+  try {
+    const content = readFileSync3(getTaskFilePath(taskId), "utf-8");
+    return parseFrontmatter(content).frontmatter;
+  } catch (error) {
+    logger.debug({ taskId, error }, "Could not read task frontmatter");
+    return {};
+  }
+}
+function buildMappedFieldUpdates(issue, currentFrontmatter, mappings) {
+  const updates = { cli: {}, frontmatter: {} };
+  for (const mapping of getPullMappings(mappings)) {
+    const target = mapping.backlog;
+    const jiraValue = getMappedJiraValue(issue, mapping);
+    const currentValue = getBacklogTargetValue(currentFrontmatter, target);
+    if (canonicalMappedValue(jiraValue, target) === canonicalMappedValue(currentValue, target)) {
+      continue;
+    }
+    if (target.startsWith(FRONTMATTER_PREFIX)) {
+      updates.frontmatter[frontmatterKeyForTarget(target)] = jiraValue;
+      continue;
+    }
+    switch (target) {
+      case "milestone":
+        if (jiraValue === null)
+          updates.cli.clearMilestone = true;
+        else
+          updates.cli.milestone = jiraValue;
+        break;
+      case "dependencies":
+        if (jiraValue === null)
+          updates.cli.clearDependencies = true;
+        else
+          updates.cli.dependencies = jiraValue;
+        break;
+      case "references":
+        if (jiraValue === null)
+          updates.cli.clearReferences = true;
+        else
+          updates.cli.references = jiraValue;
+        break;
+      case "labels":
+        if (jiraValue === null)
+          updates.cli.clearLabels = true;
+        else
+          updates.cli.labels = jiraValue;
+        break;
+      case "priority":
+        if (jiraValue === null) {
+          logger.warn({ jiraField: mapping.jira }, "Mapped priority is empty in Jira; Backlog priority cannot be cleared via CLI, leaving it unchanged");
+        } else {
+          updates.cli.priority = jiraValue.toLowerCase();
+        }
+        break;
+    }
+  }
+  return updates;
+}
+function hasMappedFieldUpdates(updates) {
+  return Object.keys(updates.cli).length > 0 || Object.keys(updates.frontmatter).length > 0;
+}
+function getMappedJiraFieldIds(mappings) {
+  return [...new Set(getPullMappings(mappings).map((m) => m.jira))];
+}
+var DEFAULT_ISSUE_FIELDS = [
+  "summary",
+  "description",
+  "status",
+  "assignee",
+  "reporter",
+  "labels",
+  "priority",
+  "created",
+  "updated",
+  "issuetype"
+];
+function getIssueFieldsParam(mappings) {
+  const extra = getMappedJiraFieldIds(mappings).filter((id) => !DEFAULT_ISSUE_FIELDS.includes(id));
+  if (extra.length === 0)
+    return;
+  return [...DEFAULT_ISSUE_FIELDS, ...extra].join(",");
+}
+function suggestTypeForSchema(schema) {
+  if (!schema?.type)
+    return;
+  switch (schema.type) {
+    case "string":
+      return "string";
+    case "number":
+      return "number";
+    case "date":
+    case "datetime":
+      return "date";
+    case "option":
+    case "option-with-child":
+      return "option";
+    case "user":
+      return "user";
+    case "version":
+      return "version";
+    case "array":
+      switch (schema.items) {
+        case "option":
+          return "multi-option";
+        case "version":
+          return "version";
+        default:
+          return "array";
+      }
+    default:
+      return;
+  }
 }
 
 // src/integrations/jira.ts
@@ -23622,6 +24471,28 @@ Current tool: ${toolName}`;
       throw error;
     }
   }
+  getMappedIssueFields() {
+    try {
+      return getIssueFieldsParam(loadFieldMappings());
+    } catch (error) {
+      logger.debug({ error }, "Ignoring invalid fieldMappings for getIssue");
+      return;
+    }
+  }
+  async searchFields(keyword = "", limit = 500) {
+    try {
+      const result = await this.callMcpTool("jira_search_fields", {
+        keyword,
+        limit
+      });
+      const fields = Array.isArray(result) ? result : result?.fields ?? [];
+      logger.debug({ keyword, count: fields.length }, "Searched Jira fields");
+      return fields;
+    } catch (error) {
+      logger.error({ error, keyword }, "Failed to search Jira fields");
+      throw error;
+    }
+  }
   async searchIssues(jql, options) {
     try {
       const input = {
@@ -23685,8 +24556,9 @@ Current tool: ${toolName}`;
         issue_key: issueKey
       };
       logger.info({ input }, "Built input object");
-      if (options?.fields) {
-        input.fields = options.fields;
+      const fields = options?.fields ?? this.getMappedIssueFields();
+      if (fields) {
+        input.fields = fields;
       }
       if (options?.expand) {
         input.expand = options.expand;
@@ -23987,11 +24859,11 @@ async function configureCommand(options = {}) {
 `));
     console.log(source_default.gray(`Let's set up your Jira connection step by step.
 `));
-    const configDir = join(process.cwd(), ".backlog-jira");
-    if (!existsSync(configDir)) {
+    const configDir = join3(process.cwd(), ".backlog-jira");
+    if (!existsSync2(configDir)) {
       console.log(source_default.yellow(`Creating .backlog-jira/ directory...
 `));
-      mkdirSync(join(configDir, "logs"), { recursive: true });
+      mkdirSync(join3(configDir, "logs"), { recursive: true });
     }
     console.log(source_default.bold.green("Step 1: Jira Instance Type"));
     console.log(source_default.gray(`Select your Jira deployment type.
@@ -24593,7 +25465,7 @@ Step 11: Save Configuration`));
       restoreEnv(originalEnv);
       process.exit(0);
     }
-    const configPath = join(configDir, "config.json");
+    const configPath = join3(configDir, "config.json");
     const config = {
       jira: {
         baseUrl: jiraUrl,
@@ -24619,7 +25491,7 @@ Step 11: Save Configuration`));
         config.mcp.envVars = mcpEnvVars;
       }
     }
-    writeFileSync(configPath, JSON.stringify(config, null, 2));
+    writeFileSync3(configPath, JSON.stringify(config, null, 2));
     console.log(source_default.green(`✓ Configuration saved to ${configPath}`));
     const saveToEnvResponse = await import_prompts.default({
       type: "confirm",
@@ -24635,10 +25507,10 @@ Step 11: Save Configuration`));
     }
     const saveToEnv = saveToEnvResponse.saveToEnv;
     if (saveToEnv) {
-      const envPath = join(process.cwd(), ".env");
+      const envPath = join3(process.cwd(), ".env");
       let envContent = "";
-      if (existsSync(envPath)) {
-        const existingContent = readFileSync(envPath, "utf-8");
+      if (existsSync2(envPath)) {
+        const existingContent = readFileSync4(envPath, "utf-8");
         const lines = existingContent.split(`
 `);
         const filteredLines = lines.filter((line) => {
@@ -24674,12 +25546,12 @@ Step 11: Save Configuration`));
 `;
         }
       }
-      writeFileSync(envPath, envContent);
+      writeFileSync3(envPath, envContent);
       console.log(source_default.green(`✓ Credentials saved to ${envPath}`));
-      const gitignorePath = join(process.cwd(), ".gitignore");
+      const gitignorePath = join3(process.cwd(), ".gitignore");
       let gitignoreContent = "";
-      if (existsSync(gitignorePath)) {
-        gitignoreContent = readFileSync(gitignorePath, "utf-8");
+      if (existsSync2(gitignorePath)) {
+        gitignoreContent = readFileSync4(gitignorePath, "utf-8");
       }
       if (!gitignoreContent.includes(".env")) {
         console.log(source_default.yellow(`
@@ -24702,14 +25574,14 @@ Step 11: Save Configuration`));
 `) ? "" : `
 `)}.env
 `;
-          writeFileSync(gitignorePath, newGitignore);
+          writeFileSync3(gitignorePath, newGitignore);
           console.log(source_default.green("✓ Added .env to .gitignore"));
         }
       }
     }
-    const backlogGitignorePath = join(configDir, ".gitignore");
-    if (!existsSync(backlogGitignorePath)) {
-      writeFileSync(backlogGitignorePath, `# Ignore all files in .backlog-jira/
+    const backlogGitignorePath = join3(configDir, ".gitignore");
+    if (!existsSync2(backlogGitignorePath)) {
+      writeFileSync3(backlogGitignorePath, `# Ignore all files in .backlog-jira/
 *
 !.gitignore
 `);
@@ -24822,8 +25694,28 @@ class BacklogClient {
     if (updates.labels) {
       args.push("-l", updates.labels.join(","));
     }
+    if (updates.clearLabels) {
+      args.push("--clear-labels");
+    }
     if (updates.priority) {
       args.push("--priority", updates.priority);
+    }
+    if (updates.milestone) {
+      args.push("--milestone", updates.milestone);
+    } else if (updates.clearMilestone) {
+      args.push("--clear-milestone");
+    }
+    if (updates.dependencies && updates.dependencies.length > 0) {
+      args.push("--dep", updates.dependencies.join(","));
+    } else if (updates.clearDependencies) {
+      args.push("--clear-deps");
+    }
+    if (updates.references && updates.references.length > 0) {
+      for (const ref of updates.references) {
+        args.push("--ref", ref);
+      }
+    } else if (updates.clearReferences) {
+      args.push("--clear-refs");
     }
     if (updates.notes) {
       args.push("--notes", this.escapeMultiline(updates.notes));
@@ -25013,15 +25905,15 @@ class BacklogClient {
 }
 
 // src/utils/jira-config.ts
-import { existsSync as existsSync2, readFileSync as readFileSync2 } from "node:fs";
-import { join as join2 } from "node:path";
+import { existsSync as existsSync3, readFileSync as readFileSync5 } from "node:fs";
+import { join as join4 } from "node:path";
 function getJiraClientOptions() {
   try {
-    const configPath = join2(process.cwd(), ".backlog-jira", "config.json");
-    if (!existsSync2(configPath)) {
+    const configPath = join4(process.cwd(), ".backlog-jira", "config.json");
+    if (!existsSync3(configPath)) {
       return {};
     }
-    const raw = readFileSync2(configPath, "utf-8");
+    const raw = readFileSync5(configPath, "utf-8");
     const config = JSON.parse(raw);
     const options = {};
     if (config.mcp) {
@@ -25095,192 +25987,29 @@ async function connectCommand() {
 }
 
 // src/commands/create-issue.ts
-import { readFileSync as readFileSync5 } from "node:fs";
-import { join as join4 } from "node:path";
+import { readFileSync as readFileSync7 } from "node:fs";
+import { join as join6 } from "node:path";
 
 // src/state/frontmatter-store.ts
 import {
-  existsSync as existsSync3,
+  existsSync as existsSync4,
   mkdirSync as mkdirSync2,
-  readFileSync as readFileSync4,
+  readFileSync as readFileSync6,
   readdirSync,
-  writeFileSync as writeFileSync3
+  writeFileSync as writeFileSync4
 } from "node:fs";
-import { join as join3 } from "node:path";
-
-// src/utils/frontmatter.ts
-import { readFileSync as readFileSync3, writeFileSync as writeFileSync2 } from "node:fs";
-function parseFrontmatter(content) {
-  const frontmatterMatch = content.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
-  if (!frontmatterMatch) {
-    return { frontmatter: {}, body: content };
-  }
-  const frontmatterYaml = frontmatterMatch[1];
-  const body = frontmatterMatch[2];
-  const frontmatter = {};
-  const lines = frontmatterYaml.split(`
-`);
-  let currentKey = null;
-  let currentValue = "";
-  let multilineMode = "none";
-  for (let i = 0;i < lines.length; i++) {
-    const line = lines[i];
-    const keyMatch = line.match(/^([^:]+):\s*(.*)$/);
-    if (keyMatch && !line.startsWith(" ") && !line.startsWith("\t")) {
-      if (currentKey) {
-        frontmatter[currentKey] = parseYamlValue(currentValue.trim(), multilineMode);
-      }
-      currentKey = keyMatch[1].trim();
-      const valueStart = keyMatch[2].trim();
-      if (valueStart === ">" || valueStart === ">-") {
-        multilineMode = "folded";
-        currentValue = "";
-      } else if (valueStart === "|" || valueStart === "|-") {
-        multilineMode = "literal";
-        currentValue = "";
-      } else {
-        multilineMode = "none";
-        currentValue = valueStart;
-      }
-    } else if (currentKey && multilineMode !== "none" && (line.startsWith(" ") || line.startsWith("\t"))) {
-      const indentedLine = line.replace(/^[ \t]+/, "");
-      if (currentValue) {
-        currentValue += multilineMode === "literal" ? `
-${indentedLine}` : ` ${indentedLine}`;
-      } else {
-        currentValue = indentedLine;
-      }
-    }
-  }
-  if (currentKey) {
-    frontmatter[currentKey] = parseYamlValue(currentValue.trim(), multilineMode);
-  }
-  return { frontmatter, body };
-}
-function parseYamlValue(value, multilineMode) {
-  if (!value) {
-    return "";
-  }
-  if (multilineMode !== "none") {
-    return value;
-  }
-  const arrayMatch = value.match(/^\[(.*)\]$/);
-  if (arrayMatch) {
-    return arrayMatch[1].split(",").map((v) => v.trim()).filter((v) => v);
-  }
-  if (value.startsWith('"') && value.endsWith('"') || value.startsWith("'") && value.endsWith("'")) {
-    return value.slice(1, -1);
-  }
-  return value;
-}
-function serializeFrontmatter(frontmatter) {
-  const lines = [];
-  for (const [key, value] of Object.entries(frontmatter)) {
-    if (Array.isArray(value)) {
-      lines.push(`${key}: [${value.join(", ")}]`);
-    } else if (value !== undefined && value !== null) {
-      const serializedValue = serializeYamlValue(value);
-      lines.push(`${key}: ${serializedValue}`);
-    }
-  }
-  return lines.join(`
-`);
-}
-function serializeYamlValue(value) {
-  if (typeof value !== "string") {
-    return String(value);
-  }
-  const needsQuoting = /[:\[\]{}#&*!|>'"%@`]|^[-?]/.test(value) || value.trim() !== value;
-  if (needsQuoting) {
-    const escaped = value.replace(/"/g, "\\\"");
-    return `"${escaped}"`;
-  }
-  return value;
-}
-function updateJiraMetadata(filePath, metadata) {
-  try {
-    const content = readFileSync3(filePath, "utf-8");
-    const { frontmatter, body } = parseFrontmatter(content);
-    if ("jiraKey" in metadata) {
-      if (metadata.jiraKey === undefined) {
-        delete frontmatter.jira_key;
-      } else {
-        frontmatter.jira_key = metadata.jiraKey;
-      }
-    }
-    if ("jiraLastSync" in metadata) {
-      if (metadata.jiraLastSync === undefined) {
-        delete frontmatter.jira_last_sync;
-      } else {
-        frontmatter.jira_last_sync = metadata.jiraLastSync;
-      }
-    }
-    if ("jiraSyncState" in metadata) {
-      if (metadata.jiraSyncState === undefined) {
-        delete frontmatter.jira_sync_state;
-      } else {
-        frontmatter.jira_sync_state = metadata.jiraSyncState;
-      }
-    }
-    if ("jiraUrl" in metadata) {
-      if (metadata.jiraUrl === undefined) {
-        delete frontmatter.jira_url;
-      } else {
-        frontmatter.jira_url = metadata.jiraUrl;
-      }
-    }
-    const newFrontmatter = serializeFrontmatter(frontmatter);
-    const newContent = `---
-${newFrontmatter}
----
-${body}`;
-    writeFileSync2(filePath, newContent, "utf-8");
-    logger.debug({ filePath, metadata }, "Updated Jira metadata in frontmatter");
-  } catch (error) {
-    logger.error({ error, filePath }, "Failed to update Jira metadata");
-    throw error;
-  }
-}
-function getJiraMetadata(filePath) {
-  try {
-    const content = readFileSync3(filePath, "utf-8");
-    const { frontmatter } = parseFrontmatter(content);
-    return {
-      jiraKey: frontmatter.jira_key,
-      jiraLastSync: frontmatter.jira_last_sync,
-      jiraSyncState: frontmatter.jira_sync_state,
-      jiraUrl: frontmatter.jira_url
-    };
-  } catch (error) {
-    logger.error({ error, filePath }, "Failed to get Jira metadata");
-    throw error;
-  }
-}
-function getTaskFilePath(taskId) {
-  const { readdirSync } = __require("node:fs");
-  const { join } = __require("node:path");
-  const tasksDir = join(process.cwd(), "backlog", "tasks");
-  const files = readdirSync(tasksDir);
-  const prefix = `${taskId} - `;
-  const file = files.find((f) => f.startsWith(prefix) && f.endsWith(".md"));
-  if (!file) {
-    throw new Error(`Task file not found for ${taskId}`);
-  }
-  return join(tasksDir, file);
-}
-
-// src/state/frontmatter-store.ts
+import { join as join5 } from "node:path";
 class FrontmatterStore {
   snapshotsDir;
   opsLogPath;
   constructor(configDir) {
-    const baseDir = configDir || join3(process.cwd(), ".backlog-jira");
-    if (!existsSync3(baseDir)) {
+    const baseDir = configDir || join5(process.cwd(), ".backlog-jira");
+    if (!existsSync4(baseDir)) {
       mkdirSync2(baseDir, { recursive: true });
     }
-    this.snapshotsDir = join3(baseDir, "snapshots");
-    this.opsLogPath = join3(baseDir, "ops-log.jsonl");
-    if (!existsSync3(this.snapshotsDir)) {
+    this.snapshotsDir = join5(baseDir, "snapshots");
+    this.opsLogPath = join5(baseDir, "ops-log.jsonl");
+    if (!existsSync4(this.snapshotsDir)) {
       mkdirSync2(this.snapshotsDir, { recursive: true });
     }
     logger.debug({ baseDir, snapshotsDir: this.snapshotsDir }, "FrontmatterStore initialized");
@@ -25302,7 +26031,7 @@ class FrontmatterStore {
       if (!metadata.jiraKey) {
         return null;
       }
-      const content = readFileSync4(filePath, "utf-8");
+      const content = readFileSync6(filePath, "utf-8");
       const { frontmatter } = parseFrontmatter(content);
       return {
         backlogId,
@@ -25316,11 +26045,11 @@ class FrontmatterStore {
   }
   getMappingByJiraKey(jiraKey) {
     try {
-      const tasksDir = join3(process.cwd(), "backlog", "tasks");
+      const tasksDir = join5(process.cwd(), "backlog", "tasks");
       const files = readdirSync(tasksDir).filter((f) => f.endsWith(".md"));
       for (const file of files) {
-        const filePath = join3(tasksDir, file);
-        const content = readFileSync4(filePath, "utf-8");
+        const filePath = join5(tasksDir, file);
+        const content = readFileSync6(filePath, "utf-8");
         const { frontmatter } = parseFrontmatter(content);
         if (frontmatter.jira_key === jiraKey) {
           const match = file.match(/^(task-[\d.]+)\s+-\s+/);
@@ -25343,11 +26072,11 @@ class FrontmatterStore {
   getAllMappings() {
     const mappings = new Map;
     try {
-      const tasksDir = join3(process.cwd(), "backlog", "tasks");
+      const tasksDir = join5(process.cwd(), "backlog", "tasks");
       const files = readdirSync(tasksDir).filter((f) => f.endsWith(".md"));
       for (const file of files) {
-        const filePath = join3(tasksDir, file);
-        const content = readFileSync4(filePath, "utf-8");
+        const filePath = join5(tasksDir, file);
+        const content = readFileSync6(filePath, "utf-8");
         const { frontmatter } = parseFrontmatter(content);
         if (frontmatter.jira_key) {
           const match = file.match(/^(task-[\d.]+)\s+-\s+/);
@@ -25377,7 +26106,7 @@ class FrontmatterStore {
     }
   }
   getSnapshotPath(backlogId, side) {
-    return join3(this.snapshotsDir, `${backlogId}-${side}.json`);
+    return join5(this.snapshotsDir, `${backlogId}-${side}.json`);
   }
   setSnapshot(backlogId, side, hash, payload) {
     const snapshotPath = this.getSnapshotPath(backlogId, side);
@@ -25389,7 +26118,7 @@ class FrontmatterStore {
       updatedAt: new Date().toISOString()
     };
     try {
-      writeFileSync3(snapshotPath, JSON.stringify(snapshot, null, 2), "utf-8");
+      writeFileSync4(snapshotPath, JSON.stringify(snapshot, null, 2), "utf-8");
       logger.debug({ backlogId, side, hash }, "Set snapshot");
     } catch (error) {
       logger.error({ error, backlogId, side }, "Failed to set snapshot");
@@ -25398,11 +26127,11 @@ class FrontmatterStore {
   }
   getSnapshot(backlogId, side) {
     const snapshotPath = this.getSnapshotPath(backlogId, side);
-    if (!existsSync3(snapshotPath)) {
+    if (!existsSync4(snapshotPath)) {
       return null;
     }
     try {
-      const content = readFileSync4(snapshotPath, "utf-8");
+      const content = readFileSync6(snapshotPath, "utf-8");
       return JSON.parse(content);
     } catch (error) {
       logger.error({ error, backlogId, side }, "Failed to get snapshot");
@@ -25458,18 +26187,18 @@ class FrontmatterStore {
     try {
       const line = `${JSON.stringify(logEntry)}
 `;
-      writeFileSync3(this.opsLogPath, line, { flag: "a", encoding: "utf-8" });
+      writeFileSync4(this.opsLogPath, line, { flag: "a", encoding: "utf-8" });
       logger.debug({ op, backlogId, jiraKey, outcome }, "Logged operation");
     } catch (error) {
       logger.error({ error, op }, "Failed to log operation");
     }
   }
   getRecentOps(limit = 100) {
-    if (!existsSync3(this.opsLogPath)) {
+    if (!existsSync4(this.opsLogPath)) {
       return [];
     }
     try {
-      const content = readFileSync4(this.opsLogPath, "utf-8");
+      const content = readFileSync6(this.opsLogPath, "utf-8");
       const lines = content.trim().split(`
 `).filter((l) => l.trim());
       const ops = lines.map((line) => {
@@ -25486,10 +26215,10 @@ class FrontmatterStore {
     }
   }
   testWriteAccess() {
-    const testFile = join3(this.snapshotsDir, ".write-test");
+    const testFile = join5(this.snapshotsDir, ".write-test");
     try {
-      writeFileSync3(testFile, "test", "utf-8");
-      readFileSync4(testFile, "utf-8");
+      writeFileSync4(testFile, "test", "utf-8");
+      readFileSync6(testFile, "utf-8");
       const { unlinkSync } = __require("node:fs");
       unlinkSync(testFile);
     } catch (error) {
@@ -25503,8 +26232,12 @@ class FrontmatterStore {
 }
 // src/utils/normalizer.ts
 import crypto from "node:crypto";
-function normalizeBacklogTask(task) {
-  return {
+function getMappedFieldMappings(options) {
+  const mappings = options?.fieldMappings ?? loadFieldMappings();
+  return getPullMappings(mappings);
+}
+function normalizeBacklogTask(task, options) {
+  const payload = {
     title: task.title.trim(),
     description: (task.description || "").trim(),
     status: normalizeStatus(task.status, "backlog"),
@@ -25516,9 +26249,18 @@ function normalizeBacklogTask(task) {
       checked: ac.checked
     }))
   };
+  const mappings = getMappedFieldMappings(options).filter((m) => !isCoreOverrideTarget(m.backlog));
+  if (mappings.length > 0) {
+    const frontmatter = options?.frontmatter ?? readTaskFrontmatter(task.id);
+    payload.mappedFields = {};
+    for (const mapping of mappings) {
+      payload.mappedFields[mapping.backlog] = canonicalMappedValue(getBacklogTargetValue(frontmatter, mapping.backlog), mapping.backlog);
+    }
+  }
+  return payload;
 }
-function normalizeJiraIssue(issue) {
-  return {
+function normalizeJiraIssue(issue, options) {
+  const payload = {
     title: issue.summary.trim(),
     description: (issue.description || "").trim(),
     status: normalizeStatus(issue.status, "jira"),
@@ -25527,6 +26269,18 @@ function normalizeJiraIssue(issue) {
     assignee: issue.assignee?.trim().toLowerCase(),
     acceptanceCriteria: extractAcceptanceCriteria(issue.description || "")
   };
+  for (const mapping of getMappedFieldMappings(options)) {
+    const value = getMappedJiraValue(issue, mapping);
+    if (mapping.backlog === "priority") {
+      payload.priority = typeof value === "string" ? value.toLowerCase() : undefined;
+    } else if (mapping.backlog === "labels") {
+      payload.labels = (Array.isArray(value) ? value : []).map((l) => l.toLowerCase()).sort();
+    } else {
+      payload.mappedFields = payload.mappedFields ?? {};
+      payload.mappedFields[mapping.backlog] = canonicalMappedValue(value, mapping.backlog);
+    }
+  }
+  return payload;
 }
 function normalizeStatus(status, side) {
   const normalized = status.toLowerCase().trim();
@@ -25617,6 +26371,14 @@ function computeHash(payload) {
     status: payload.status,
     title: payload.title
   };
+  const mappedKeys = Object.keys(payload.mappedFields ?? {}).sort();
+  if (mappedKeys.length > 0) {
+    const mappedFields = {};
+    for (const key of mappedKeys) {
+      mappedFields[key] = payload.mappedFields[key];
+    }
+    stable.mappedFields = mappedFields;
+  }
   const json = JSON.stringify(stable);
   return crypto.createHash("sha256").update(json).digest("hex");
 }
@@ -25637,6 +26399,15 @@ function comparePayloads(a, b) {
   }
   if (JSON.stringify(a.acceptanceCriteria) !== JSON.stringify(b.acceptanceCriteria)) {
     changes.push("acceptanceCriteria");
+  }
+  const mappedKeys = new Set([
+    ...Object.keys(a.mappedFields ?? {}),
+    ...Object.keys(b.mappedFields ?? {})
+  ]);
+  for (const key of [...mappedKeys].sort()) {
+    if ((a.mappedFields?.[key] ?? "") !== (b.mappedFields?.[key] ?? "")) {
+      changes.push(key);
+    }
   }
   return changes;
 }
@@ -25817,9 +26588,9 @@ function buildJiraIssueFromBacklogTask(task, projectKey) {
 }
 function loadConfig(configDir) {
   try {
-    const baseDir = configDir || join4(process.cwd(), ".backlog-jira");
-    const configPath = join4(baseDir, "config.json");
-    const content = readFileSync5(configPath, "utf-8");
+    const baseDir = configDir || join6(process.cwd(), ".backlog-jira");
+    const configPath = join6(baseDir, "config.json");
+    const content = readFileSync7(configPath, "utf-8");
     return JSON.parse(content);
   } catch (error) {
     logger.warn({ error }, "Failed to load config, using defaults");
@@ -25829,9 +26600,9 @@ function loadConfig(configDir) {
 
 // src/commands/doctor.ts
 import { spawn as spawn3 } from "node:child_process";
-import { existsSync as existsSync4 } from "node:fs";
+import { existsSync as existsSync5 } from "node:fs";
 import { readFile } from "node:fs/promises";
-import { join as join5 } from "node:path";
+import { join as join7 } from "node:path";
 async function exec(command, args = []) {
   return new Promise((resolve, reject) => {
     const proc = spawn3(command, args, {
@@ -25877,8 +26648,8 @@ async function checkMCPServer() {
   }
 }
 async function checkDatabasePerms() {
-  const configDir = join5(process.cwd(), ".backlog-jira");
-  if (!existsSync4(configDir)) {
+  const configDir = join7(process.cwd(), ".backlog-jira");
+  if (!existsSync5(configDir)) {
     throw new Error(".backlog-jira/ not found. Run 'backlog-jira init' first.");
   }
   const store = new FrontmatterStore;
@@ -25919,8 +26690,8 @@ async function checkMCPConnectivity() {
   }
 }
 async function checkNodeModules() {
-  const nodeModulesPath = join5(process.cwd(), "node_modules");
-  if (!existsSync4(nodeModulesPath)) {
+  const nodeModulesPath = join7(process.cwd(), "node_modules");
+  if (!existsSync5(nodeModulesPath)) {
     throw new Error("node_modules not found. Install dependencies first (npm, pnpm or bun install).");
   }
   logger.info("  ✓ Dependencies installed");
@@ -25940,8 +26711,8 @@ async function checkDiskSpace() {
   }
 }
 async function checkConfigFile() {
-  const configPath = join5(process.cwd(), ".backlog-jira", "config.json");
-  if (!existsSync4(configPath)) {
+  const configPath = join7(process.cwd(), ".backlog-jira", "config.json");
+  if (!existsSync5(configPath)) {
     throw new Error("Config file not found. Run 'backlog-jira init' first.");
   }
   try {
@@ -26003,12 +26774,12 @@ async function doctorCommand() {
 }
 
 // src/commands/init.ts
-import { existsSync as existsSync6, mkdirSync as mkdirSync3, writeFileSync as writeFileSync5 } from "node:fs";
-import { join as join6 } from "node:path";
+import { existsSync as existsSync7, mkdirSync as mkdirSync3, writeFileSync as writeFileSync6 } from "node:fs";
+import { join as join8 } from "node:path";
 var import_prompts2 = __toESM(require_prompts3(), 1);
 
 // src/utils/agent-instructions.ts
-import { existsSync as existsSync5, readFileSync as readFileSync6, writeFileSync as writeFileSync4 } from "node:fs";
+import { existsSync as existsSync6, readFileSync as readFileSync8, writeFileSync as writeFileSync5 } from "node:fs";
 function getMarkers(filePath) {
   const fileName = filePath.toLowerCase();
   if (fileName.endsWith(".md")) {
@@ -26257,13 +27028,13 @@ export JIRA_API_TOKEN="your-api-token"
 }
 function addAgentInstructions(filePath, mode = "cli") {
   try {
-    if (!existsSync5(filePath)) {
+    if (!existsSync6(filePath)) {
       return {
         success: false,
         message: `File not found: ${filePath}`
       };
     }
-    const currentContent = readFileSync6(filePath, "utf-8");
+    const currentContent = readFileSync8(filePath, "utf-8");
     const guidelinesContent = mode === "cli" ? getCliModeContent() : getMcpModeContent();
     let newContent = currentContent;
     if (hasBacklogJiraGuidelines(currentContent)) {
@@ -26273,7 +27044,7 @@ function addAgentInstructions(filePath, mode = "cli") {
     newContent = `${wrappedContent}
 
 ${newContent.trimStart()}`;
-    writeFileSync4(filePath, newContent, "utf-8");
+    writeFileSync5(filePath, newContent, "utf-8");
     return {
       success: true,
       message: `Successfully added ${mode.toUpperCase()} mode guidelines to ${filePath}`
@@ -26289,12 +27060,12 @@ ${newContent.trimStart()}`;
 // src/commands/init.ts
 async function initCommand(options = {}) {
   const baseDir = options.baseDir || process.cwd();
-  const configDir = join6(baseDir, ".backlog-jira");
-  if (existsSync6(configDir)) {
+  const configDir = join8(baseDir, ".backlog-jira");
+  if (existsSync7(configDir)) {
     logger.warn(".backlog-jira/ already exists. Use 'backlog-jira config' to modify settings.");
     return;
   }
-  mkdirSync3(join6(configDir, "logs"), { recursive: true });
+  mkdirSync3(join8(configDir, "logs"), { recursive: true });
   const config = {
     jira: {
       baseUrl: "",
@@ -26315,12 +27086,12 @@ async function initCommand(options = {}) {
       watchInterval: 60
     }
   };
-  const configPath = join6(configDir, "config.json");
-  writeFileSync5(configPath, JSON.stringify(config, null, 2));
+  const configPath = join8(configDir, "config.json");
+  writeFileSync6(configPath, JSON.stringify(config, null, 2));
   const store = new FrontmatterStore(configDir);
   store.close();
-  const gitignorePath = join6(configDir, ".gitignore");
-  writeFileSync5(gitignorePath, `# Ignore all files in .backlog-jira/
+  const gitignorePath = join8(configDir, ".gitignore");
+  writeFileSync6(gitignorePath, `# Ignore all files in .backlog-jira/
 *
 !.gitignore
 `);
@@ -26328,8 +27099,8 @@ async function initCommand(options = {}) {
   logger.info("");
   logger.info("✓ Initialized .backlog-jira/ configuration");
   logger.info(`  - Config: ${configPath}`);
-  logger.info(`  - Snapshots: ${join6(configDir, "snapshots/")}`);
-  logger.info(`  - Operations log: ${join6(configDir, "ops-log.jsonl")}`);
+  logger.info(`  - Snapshots: ${join8(configDir, "snapshots/")}`);
+  logger.info(`  - Operations log: ${join8(configDir, "ops-log.jsonl")}`);
   logger.info("");
   logger.info("Next steps:");
   logger.info("  1. Edit .backlog-jira/config.json with your Jira project settings");
@@ -26365,7 +27136,7 @@ async function setupAgentInstructions(projectRoot) {
     ".cursorrules",
     ".github/AGENTS.md"
   ];
-  const existingFiles = commonAgentFiles.map((file) => join6(projectRoot, file)).filter((filePath) => existsSync6(filePath));
+  const existingFiles = commonAgentFiles.map((file) => join8(projectRoot, file)).filter((filePath) => existsSync7(filePath));
   if (existingFiles.length === 0) {
     console.log(source_default.yellow("No agent instruction files found in project root (AGENTS.md, CLAUDE.md, etc.)"));
     console.log(source_default.gray("Create an agent instruction file first, then re-run initialization."));
@@ -26446,7 +27217,7 @@ async function offerGitCommit(files, mode) {
   const { exec } = await import("node:child_process");
   const { promisify } = await import("node:util");
   const execAsync = promisify(exec);
-  const projectRoot = files[0] ? join6(files[0], "..") : process.cwd();
+  const projectRoot = files[0] ? join8(files[0], "..") : process.cwd();
   try {
     await execAsync("git rev-parse --git-dir", { cwd: projectRoot });
   } catch {
@@ -26497,174 +27268,10 @@ Added via: backlog-jira init`;
 }
 
 // src/commands/map-assignees.ts
-import { existsSync as existsSync7, readFileSync as readFileSync8, writeFileSync as writeFileSync7 } from "node:fs";
-import { join as join8 } from "node:path";
+import { existsSync as existsSync8, readFileSync as readFileSync9, writeFileSync as writeFileSync7 } from "node:fs";
+import { join as join9 } from "node:path";
 import { stdin as input, stdout as output } from "node:process";
 import * as readline from "node:readline/promises";
-
-// src/utils/assignee-mapping.ts
-import { readFileSync as readFileSync7, writeFileSync as writeFileSync6 } from "node:fs";
-import { join as join7 } from "node:path";
-function loadAssigneeMapping() {
-  try {
-    const configPath = join7(process.cwd(), ".backlog-jira", "config.json");
-    const content = readFileSync7(configPath, "utf-8");
-    const config = JSON.parse(content);
-    const backlogToJira = config.backlog?.assigneeMapping || {};
-    const autoMapped = config.backlog?.autoMappedAssignees || {};
-    const jiraToBacklog = {};
-    for (const [backlogUser, jiraUser] of Object.entries(backlogToJira)) {
-      if (typeof jiraUser === "string") {
-        jiraToBacklog[jiraUser.toLowerCase()] = backlogUser;
-      }
-    }
-    for (const [backlogUser, jiraUser] of Object.entries(autoMapped)) {
-      if (typeof jiraUser === "string") {
-        const jiraLower = jiraUser.toLowerCase();
-        if (!jiraToBacklog[jiraLower]) {
-          jiraToBacklog[jiraLower] = backlogUser;
-        }
-      }
-    }
-    return {
-      backlogToJira,
-      jiraToBacklog,
-      autoMapped
-    };
-  } catch (error) {
-    logger.warn({ error }, "Failed to load assignee mapping config, using empty mappings");
-    return {
-      backlogToJira: {},
-      jiraToBacklog: {},
-      autoMapped: {}
-    };
-  }
-}
-function mapBacklogAssigneeToJira(backlogAssignee) {
-  const mapping = loadAssigneeMapping();
-  const cleanAssignee = backlogAssignee.startsWith("@") ? backlogAssignee.substring(1) : backlogAssignee;
-  const explicitMapping = mapping.backlogToJira[cleanAssignee];
-  if (explicitMapping) {
-    return explicitMapping;
-  }
-  const autoMapping = mapping.autoMapped?.[cleanAssignee];
-  if (autoMapping) {
-    return autoMapping;
-  }
-  return null;
-}
-function mapJiraUserToBacklog(jiraUser) {
-  const mapping = loadAssigneeMapping();
-  const jiraLower = jiraUser.toLowerCase();
-  const backlogUser = mapping.jiraToBacklog[jiraLower];
-  if (backlogUser) {
-    return backlogUser.startsWith("@") ? backlogUser : `@${backlogUser}`;
-  }
-  return null;
-}
-function getAssigneeMappingDescription() {
-  const mapping = loadAssigneeMapping();
-  const lines = [
-    "Assignee Mapping Configuration:",
-    "",
-    "Explicit Mappings (Backlog → Jira):"
-  ];
-  const explicitCount = Object.keys(mapping.backlogToJira).length;
-  if (explicitCount === 0) {
-    lines.push("  (none configured)");
-  } else {
-    for (const [backlogUser, jiraUser] of Object.entries(mapping.backlogToJira)) {
-      lines.push(`  @${backlogUser} → ${jiraUser}`);
-    }
-  }
-  lines.push("");
-  lines.push("Automatic Mappings (discovered from sync):");
-  const autoCount = Object.keys(mapping.autoMapped || {}).length;
-  if (autoCount === 0) {
-    lines.push("  (none discovered yet)");
-  } else {
-    for (const [backlogUser, jiraUser] of Object.entries(mapping.autoMapped || {})) {
-      lines.push(`  @${backlogUser} → ${jiraUser}`);
-    }
-  }
-  return lines.join(`
-`);
-}
-function calculateSimilarity(str1, str2) {
-  const s1 = str1.toLowerCase();
-  const s2 = str2.toLowerCase();
-  const len1 = s1.length;
-  const len2 = s2.length;
-  const matrix = [];
-  for (let i = 0;i <= len1; i++) {
-    matrix[i] = [i];
-  }
-  for (let j = 0;j <= len2; j++) {
-    matrix[0][j] = j;
-  }
-  for (let i = 1;i <= len1; i++) {
-    for (let j = 1;j <= len2; j++) {
-      const cost = s1[i - 1] === s2[j - 1] ? 0 : 1;
-      matrix[i][j] = Math.min(matrix[i - 1][j] + 1, matrix[i][j - 1] + 1, matrix[i - 1][j - 1] + cost);
-    }
-  }
-  const distance = matrix[len1][len2];
-  const maxLen = Math.max(len1, len2);
-  return maxLen === 0 ? 1 : 1 - distance / maxLen;
-}
-function findBestAssigneeMatch(jiraDisplayName, backlogAssignees, minSimilarity = 0.6) {
-  if (!jiraDisplayName || backlogAssignees.length === 0) {
-    return null;
-  }
-  let bestMatch = null;
-  for (const backlogAssignee of backlogAssignees) {
-    const cleanAssignee = backlogAssignee.startsWith("@") ? backlogAssignee.substring(1) : backlogAssignee;
-    const score = calculateSimilarity(jiraDisplayName, cleanAssignee);
-    if (score >= minSimilarity && (!bestMatch || score > bestMatch.score)) {
-      bestMatch = { assignee: backlogAssignee, score };
-    }
-  }
-  return bestMatch;
-}
-function saveAutoDiscoveredMapping(backlogAssignee, jiraUser) {
-  try {
-    const configPath = join7(process.cwd(), ".backlog-jira", "config.json");
-    const content = readFileSync7(configPath, "utf-8");
-    const config = JSON.parse(content);
-    if (!config.backlog) {
-      config.backlog = {};
-    }
-    if (!config.backlog.autoMappedAssignees) {
-      config.backlog.autoMappedAssignees = {};
-    }
-    const cleanBacklogAssignee = backlogAssignee.startsWith("@") ? backlogAssignee.substring(1) : backlogAssignee;
-    const hasExplicitMapping = config.backlog.assigneeMapping?.[cleanBacklogAssignee];
-    if (hasExplicitMapping) {
-      logger.debug({ backlogAssignee: cleanBacklogAssignee, jiraUser }, "Skipping auto-mapping - explicit mapping already exists");
-      return;
-    }
-    config.backlog.autoMappedAssignees[cleanBacklogAssignee] = jiraUser;
-    writeFileSync6(configPath, JSON.stringify(config, null, 2), "utf-8");
-    logger.info({ backlogAssignee: cleanBacklogAssignee, jiraUser }, "Auto-discovered assignee mapping saved to config.json");
-  } catch (error) {
-    logger.error({ error, backlogAssignee, jiraUser }, "Failed to save auto-discovered mapping");
-  }
-}
-function autoDiscoverAndSaveMapping(jiraDisplayName, backlogAssignees) {
-  const match = findBestAssigneeMatch(jiraDisplayName, backlogAssignees);
-  if (match) {
-    logger.info({
-      jiraDisplayName,
-      backlogAssignee: match.assignee,
-      similarityScore: match.score.toFixed(2)
-    }, "Auto-discovered assignee mapping based on name similarity");
-    saveAutoDiscoveredMapping(match.assignee, jiraDisplayName);
-    return match.assignee;
-  }
-  return null;
-}
-
-// src/commands/map-assignees.ts
 async function showMappings() {
   console.log(source_default.bold.cyan(`
 \uD83D\uDCCB Current Assignee Mappings
@@ -26673,13 +27280,13 @@ async function showMappings() {
   console.log();
 }
 async function addMapping(backlogUser, jiraUser, options = {}) {
-  const configPath = join8(process.cwd(), ".backlog-jira", "config.json");
-  if (!existsSync7(configPath)) {
+  const configPath = join9(process.cwd(), ".backlog-jira", "config.json");
+  if (!existsSync8(configPath)) {
     console.error(source_default.red("❌ Configuration not found"));
     console.log(source_default.gray("   Run 'backlog-jira init' first"));
     process.exit(1);
   }
-  const content = readFileSync8(configPath, "utf-8");
+  const content = readFileSync9(configPath, "utf-8");
   const config = JSON.parse(content);
   if (!config.backlog) {
     config.backlog = {};
@@ -26700,13 +27307,13 @@ async function addMapping(backlogUser, jiraUser, options = {}) {
   logger.info({ backlogUser: cleanBacklogUser, jiraUser }, "Added assignee mapping");
 }
 async function removeMapping(backlogUser) {
-  const configPath = join8(process.cwd(), ".backlog-jira", "config.json");
-  if (!existsSync7(configPath)) {
+  const configPath = join9(process.cwd(), ".backlog-jira", "config.json");
+  if (!existsSync8(configPath)) {
     console.error(source_default.red("❌ Configuration not found"));
     console.log(source_default.gray("   Run 'backlog-jira init' first"));
     process.exit(1);
   }
-  const content = readFileSync8(configPath, "utf-8");
+  const content = readFileSync9(configPath, "utf-8");
   const config = JSON.parse(content);
   const cleanBacklogUser = backlogUser.startsWith("@") ? backlogUser.substring(1) : backlogUser;
   const explicitMapping = config.backlog?.assigneeMapping?.[cleanBacklogUser];
@@ -26729,13 +27336,13 @@ async function removeMapping(backlogUser) {
   logger.info({ backlogUser: cleanBacklogUser, jiraUser }, "Removed assignee mapping");
 }
 async function promoteMapping(backlogUser) {
-  const configPath = join8(process.cwd(), ".backlog-jira", "config.json");
-  if (!existsSync7(configPath)) {
+  const configPath = join9(process.cwd(), ".backlog-jira", "config.json");
+  if (!existsSync8(configPath)) {
     console.error(source_default.red("❌ Configuration not found"));
     console.log(source_default.gray("   Run 'backlog-jira init' first"));
     process.exit(1);
   }
-  const content = readFileSync8(configPath, "utf-8");
+  const content = readFileSync9(configPath, "utf-8");
   const config = JSON.parse(content);
   const cleanBacklogUser = backlogUser.startsWith("@") ? backlogUser.substring(1) : backlogUser;
   const autoMapping = config.backlog?.autoMappedAssignees?.[cleanBacklogUser];
@@ -26859,6 +27466,152 @@ function registerMapAssigneesCommand(program) {
       process.exit(1);
     }
   });
+}
+
+// src/commands/map-fields.ts
+import { existsSync as existsSync9, readFileSync as readFileSync10, writeFileSync as writeFileSync8 } from "node:fs";
+import { join as join10 } from "node:path";
+function getConfigPath() {
+  return join10(process.cwd(), ".backlog-jira", "config.json");
+}
+function readConfig() {
+  const configPath = getConfigPath();
+  if (!existsSync9(configPath)) {
+    throw new Error("Configuration not found. Run 'backlog-jira init' first.");
+  }
+  return JSON.parse(readFileSync10(configPath, "utf-8"));
+}
+function writeConfig(config) {
+  writeFileSync8(getConfigPath(), `${JSON.stringify(config, null, 2)}
+`);
+}
+function parseValueMapEntries(entries = []) {
+  if (entries.length === 0)
+    return;
+  const valueMap = {};
+  for (const entry of entries) {
+    const separator = entry.indexOf("=");
+    if (separator <= 0) {
+      throw new Error(`Invalid --value-map entry "${entry}" (expected "Jira value=Backlog value")`);
+    }
+    valueMap[entry.slice(0, separator).trim()] = entry.slice(separator + 1).trim();
+  }
+  return valueMap;
+}
+function addFieldMapping(config, mapping, options = {}) {
+  const existing = Array.isArray(config.fieldMappings) ? [...config.fieldMappings] : [];
+  const index = existing.findIndex((m) => m?.backlog === mapping.backlog);
+  if (index >= 0 && !options.force) {
+    throw new Error(`A mapping for "${mapping.backlog}" already exists. Use --force to replace it.`);
+  }
+  const entry = {
+    backlog: mapping.backlog,
+    jira: mapping.jira,
+    type: mapping.type,
+    direction: mapping.direction ?? "pull"
+  };
+  if (mapping.valueMap)
+    entry.valueMap = mapping.valueMap;
+  if (index >= 0)
+    existing[index] = entry;
+  else
+    existing.push(entry);
+  const { errors } = validateFieldMappings(existing);
+  if (errors.length > 0) {
+    throw new FieldMappingConfigError(errors);
+  }
+  return { ...config, fieldMappings: existing };
+}
+function removeFieldMapping(config, backlogTarget) {
+  const existing = Array.isArray(config.fieldMappings) ? config.fieldMappings : [];
+  const remaining = existing.filter((m) => m?.backlog !== backlogTarget);
+  if (remaining.length === existing.length) {
+    throw new Error(`No field mapping found for "${backlogTarget}"`);
+  }
+  return { ...config, fieldMappings: remaining };
+}
+function describeMapping(mapping) {
+  const valueMap = mapping.valueMap ? source_default.gray(` valueMap: ${Object.entries(mapping.valueMap).map(([from, to]) => `${from}→${to}`).join(", ")}`) : "";
+  return `  ${source_default.cyan(mapping.backlog)} ← ${source_default.yellow(mapping.jira)} ${source_default.gray(`(${mapping.type}, ${mapping.direction})`)}${valueMap}`;
+}
+async function listFieldMappings() {
+  const config = readConfig();
+  const { mappings, errors } = validateFieldMappings(config.fieldMappings);
+  console.log(source_default.bold.cyan(`
+\uD83D\uDCCB Field Mappings
+`));
+  if (mappings.length === 0 && errors.length === 0) {
+    console.log(source_default.gray("  No field mappings configured."));
+    console.log(source_default.gray("  Add one with: backlog-jira map-fields add <backlog-target> <jira-field> --type <type>"));
+  }
+  for (const mapping of mappings) {
+    console.log(describeMapping(mapping));
+  }
+  if (errors.length > 0) {
+    console.log(source_default.red(`
+❌ Invalid entries:`));
+    for (const error of errors) {
+      console.log(source_default.red(`  - ${error}`));
+    }
+    process.exitCode = 1;
+  }
+  console.log(source_default.gray(`
+  Phase 1: mappings are applied on pull (Jira → Backlog) only.
+`));
+}
+async function discoverFields(options) {
+  const jira = new JiraClient({ ...getJiraClientOptions(), silentMode: true });
+  try {
+    const fields = await jira.searchFields(options.search ?? "");
+    const filtered = options.customOnly ? fields.filter((f) => f.custom || f.id.startsWith("customfield_")) : fields;
+    if (filtered.length === 0) {
+      console.log(source_default.yellow("No Jira fields found."));
+      return;
+    }
+    console.log(source_default.bold.cyan(`
+\uD83D\uDD0E Jira fields (${filtered.length})
+`));
+    const sorted = [...filtered].sort((a, b) => a.name.localeCompare(b.name));
+    const idWidth = Math.max(...sorted.map((f) => f.id.length), 2);
+    for (const field of sorted) {
+      const schemaType = field.schema?.type ? field.schema.items ? `${field.schema.type}<${field.schema.items}>` : field.schema.type : "unknown";
+      const suggested = suggestTypeForSchema(field.schema);
+      console.log(`  ${source_default.yellow(field.id.padEnd(idWidth))}  ${field.name} ${source_default.gray(`[${schemaType}]`)}${suggested ? source_default.green(` → --type ${suggested}`) : ""}`);
+    }
+    console.log();
+  } finally {
+    await jira.close();
+  }
+}
+function registerMapFieldsCommand(program) {
+  const mapFieldsCmd = program.command("map-fields").description("Manage custom Jira → Backlog field mappings (applied on pull)");
+  const run = (label, fn) => async (...args) => {
+    try {
+      await fn(...args);
+    } catch (error) {
+      logger.error({ error }, `${label} failed`);
+      console.error(source_default.red(`Error: ${error instanceof Error ? error.message : String(error)}`));
+      process.exit(1);
+    }
+  };
+  mapFieldsCmd.command("list").alias("show").description("List configured field mappings").action(run("List field mappings", listFieldMappings));
+  mapFieldsCmd.command("add").description("Add a field mapping").argument("<backlog-target>", "milestone, dependencies, references, priority, labels, or frontmatter:<key>").argument("<jira-field>", "Jira field ID (customfield_NNNNN) or system field name (e.g. fixVersions)").requiredOption("--type <type>", `One of: ${FIELD_MAPPING_TYPES.join(", ")}`).option("--direction <direction>", `One of: ${FIELD_MAPPING_DIRECTIONS.join(", ")} (only pull is applied today)`, "pull").option("--value-map <entry>", 'Translate a Jira value, e.g. "Highest=high" (repeatable)', (value, previous = []) => [...previous, value]).option("--force", "Replace an existing mapping for the same target").action(run("Add field mapping", async (backlogTarget, jiraField, options) => {
+    const config = addFieldMapping(readConfig(), {
+      backlog: backlogTarget,
+      jira: jiraField,
+      type: options.type,
+      direction: options.direction,
+      valueMap: parseValueMapEntries(options.valueMap)
+    }, { force: options.force });
+    writeConfig(config);
+    console.log(source_default.green(`✓ Added field mapping: ${backlogTarget} ← ${jiraField}`));
+    console.log(source_default.gray("  Run 'backlog-jira pull' to apply it to mapped tasks."));
+  }));
+  mapFieldsCmd.command("remove").alias("rm").description("Remove the field mapping for a Backlog target").argument("<backlog-target>", "Backlog target of the mapping to remove").action(run("Remove field mapping", async (backlogTarget) => {
+    writeConfig(removeFieldMapping(readConfig(), backlogTarget));
+    console.log(source_default.green(`✓ Removed field mapping: ${backlogTarget}`));
+  }));
+  mapFieldsCmd.command("discover").description("List Jira fields with their IDs and types").option("--search <keyword>", "Only show fields matching a keyword").option("--custom-only", "Only show custom fields").action(run("Discover fields", discoverFields));
 }
 
 // src/commands/map.ts
@@ -27150,8 +27903,8 @@ function registerMapCommand(program) {
 
 // src/commands/mcp.ts
 import { spawn as spawn4 } from "node:child_process";
-import { existsSync as existsSync8, readFileSync as readFileSync9 } from "node:fs";
-import { join as join9 } from "node:path";
+import { existsSync as existsSync10, readFileSync as readFileSync11 } from "node:fs";
+import { join as join11 } from "node:path";
 function registerMcpCommand(program) {
   const mcpCommand = program.command("mcp").description("MCP Atlassian server management");
   mcpCommand.command("start").description("Start MCP Atlassian server using plugin configuration").option("--debug", "Print startup info and debug output").option("-v, --verbose", "Display docker commands being executed").option("--dns-servers <servers...>", "DNS server IPs for the MCP server process (e.g., 8.8.8.8 1.1.1.1)").option("--dns-search-domains <domains...>", "DNS search domains for the MCP server process (e.g., company.com internal.local)").action(async (options) => {
@@ -27236,8 +27989,8 @@ function validateAndPrepareCredentials(debug) {
   return envVars;
 }
 function loadMcpConfiguration(debug) {
-  const configDir = join9(process.cwd(), ".backlog-jira");
-  const configPath = join9(configDir, "config.json");
+  const configDir = join11(process.cwd(), ".backlog-jira");
+  const configPath = join11(configDir, "config.json");
   const defaultConfig = {
     serverCommand: "mcp-atlassian",
     serverArgs: [],
@@ -27246,14 +27999,14 @@ function loadMcpConfiguration(debug) {
     dnsServers: [],
     dnsSearchDomains: []
   };
-  if (!existsSync8(configPath)) {
+  if (!existsSync10(configPath)) {
     if (debug) {
       console.log(source_default.yellow("⚠ No config.json found, using defaults"));
     }
     return defaultConfig;
   }
   try {
-    const configContent = readFileSync9(configPath, "utf-8");
+    const configContent = readFileSync11(configPath, "utf-8");
     const config = JSON.parse(configContent);
     const mcpConfig = {
       ...defaultConfig,
@@ -27418,16 +28171,16 @@ function logDockerCommand(command, args) {
 }
 
 // src/commands/pull.ts
-import { existsSync as existsSync9, readFileSync as readFileSync11 } from "node:fs";
-import { join as join11 } from "node:path";
+import { existsSync as existsSync11, readFileSync as readFileSync13 } from "node:fs";
+import { join as join13 } from "node:path";
 
 // src/utils/status-mapping.ts
-import { readFileSync as readFileSync10 } from "node:fs";
-import { join as join10 } from "node:path";
+import { readFileSync as readFileSync12 } from "node:fs";
+import { join as join12 } from "node:path";
 function loadStatusMapping() {
   try {
-    const configPath = join10(process.cwd(), ".backlog-jira", "config.json");
-    const content = readFileSync10(configPath, "utf-8");
+    const configPath = join12(process.cwd(), ".backlog-jira", "config.json");
+    const content = readFileSync12(configPath, "utf-8");
     const config = JSON.parse(content);
     const backlogToJira = config.backlog?.statusMapping || getDefaultBacklogToJiraMapping();
     const jiraToBacklog = {};
@@ -27578,7 +28331,7 @@ function findBestTransitionMatch(transitions, acceptableStatuses) {
 }
 
 // src/utils/sync-state.ts
-function classifySyncState(currentBacklogHash, currentJiraHash, backlogSnapshot, jiraSnapshot) {
+function classifySyncState(currentBacklogHash, currentJiraHash, backlogSnapshot, jiraSnapshot, currentPayloads) {
   logger.debug({
     currentBacklogHash,
     currentJiraHash,
@@ -27594,8 +28347,15 @@ function classifySyncState(currentBacklogHash, currentJiraHash, backlogSnapshot,
   }
   const baseBacklogHash = backlogSnapshot.hash;
   const baseJiraHash = jiraSnapshot.hash;
-  const backlogChanged = currentBacklogHash !== baseBacklogHash;
-  const jiraChanged = currentJiraHash !== baseJiraHash;
+  let backlogChanged = currentBacklogHash !== baseBacklogHash;
+  let jiraChanged = currentJiraHash !== baseJiraHash;
+  if (currentPayloads) {
+    const adjusted = detectChangesAcrossMappingChange(currentPayloads, backlogSnapshot, jiraSnapshot);
+    if (adjusted) {
+      backlogChanged = adjusted.backlogChanged;
+      jiraChanged = adjusted.jiraChanged;
+    }
+  }
   logger.debug({
     backlogChanged,
     jiraChanged,
@@ -27620,6 +28380,49 @@ function classifySyncState(currentBacklogHash, currentJiraHash, backlogSnapshot,
     baseJiraHash
   };
 }
+function mappedFieldKeys(payload) {
+  return Object.keys(payload?.mappedFields ?? {}).sort();
+}
+function parseSnapshotPayload(snapshot) {
+  try {
+    return JSON.parse(snapshot.payload);
+  } catch {
+    return null;
+  }
+}
+function restrictMappedFields(payload, keys) {
+  const mappedFields = {};
+  for (const key of keys) {
+    mappedFields[key] = payload.mappedFields?.[key] ?? "";
+  }
+  return { ...payload, mappedFields };
+}
+function detectChangesAcrossMappingChange(current, backlogSnapshot, jiraSnapshot) {
+  const currentKeys = mappedFieldKeys(current.jira);
+  const baseBacklogPayload = parseSnapshotPayload(backlogSnapshot);
+  const baseJiraPayload = parseSnapshotPayload(jiraSnapshot);
+  const baseKeys = mappedFieldKeys(baseJiraPayload);
+  if (JSON.stringify(currentKeys) === JSON.stringify(baseKeys)) {
+    return null;
+  }
+  const commonKeys = currentKeys.filter((k) => baseKeys.includes(k));
+  const baseHash = (snapshot, payload) => {
+    if (!payload || JSON.stringify(mappedFieldKeys(payload)) === JSON.stringify(commonKeys)) {
+      return snapshot.hash;
+    }
+    return computeHash(restrictMappedFields(payload, commonKeys));
+  };
+  const backlogChanged = computeHash(restrictMappedFields(current.backlog, commonKeys)) !== baseHash(backlogSnapshot, baseBacklogPayload);
+  let jiraChanged = computeHash(restrictMappedFields(current.jira, commonKeys)) !== baseHash(jiraSnapshot, baseJiraPayload);
+  const newKeys = currentKeys.filter((k) => !baseKeys.includes(k));
+  for (const key of newKeys) {
+    if ((current.backlog.mappedFields?.[key] ?? "") !== (current.jira.mappedFields?.[key] ?? "")) {
+      jiraChanged = true;
+    }
+  }
+  logger.debug({ currentKeys, baseKeys, backlogChanged, jiraChanged }, "Mapped field set changed since snapshot");
+  return { backlogChanged, jiraChanged };
+}
 
 // src/utils/title-sanitizer.ts
 function sanitizeTitle(title) {
@@ -27641,6 +28444,13 @@ async function pull(options = {}) {
     logger.level = "error";
   }
   logger.info({ options }, "Starting pull operation");
+  let fieldMappings;
+  try {
+    fieldMappings = loadFieldMappings();
+  } catch (error) {
+    logger.level = originalLevel;
+    throw error;
+  }
   const store = new FrontmatterStore;
   const backlog = new BacklogClient;
   const jira = new JiraClient(getJiraClientOptions());
@@ -27665,6 +28475,7 @@ async function pull(options = {}) {
               store,
               backlog,
               jira,
+              fieldMappings,
               dryRun: options.dryRun || false
             });
             result.imported.push(taskId);
@@ -27690,6 +28501,7 @@ async function pull(options = {}) {
               store,
               backlog,
               jira,
+              fieldMappings,
               force: options.force || false,
               dryRun: options.dryRun || false
             });
@@ -27732,10 +28544,12 @@ async function getTaskIds(options, backlog, jira, store) {
     try {
       const task = await backlog.getTask(taskId);
       const issue = await jira.getIssue(jiraKey);
-      const backlogHash = computeHash(normalizeBacklogTask(task));
-      const jiraHash = computeHash(normalizeJiraIssue(issue));
+      const backlogPayload = normalizeBacklogTask(task);
+      const jiraPayload = normalizeJiraIssue(issue);
+      const backlogHash = computeHash(backlogPayload);
+      const jiraHash = computeHash(jiraPayload);
       const snapshots = store.getSnapshots(taskId);
-      const state = classifySyncState(backlogHash, jiraHash, snapshots.backlog, snapshots.jira);
+      const state = classifySyncState(backlogHash, jiraHash, snapshots.backlog, snapshots.jira, { backlog: backlogPayload, jira: jiraPayload });
       if (state.state === "NeedsPull") {
         needsPull.push(taskId);
       }
@@ -27749,9 +28563,9 @@ async function getIssuesForImport(options, jira, store) {
   let jql = options.jql;
   if (!jql) {
     try {
-      const configPath = join11(process.cwd(), ".backlog-jira", "config.json");
-      if (existsSync9(configPath)) {
-        const config = JSON.parse(readFileSync11(configPath, "utf-8"));
+      const configPath = join13(process.cwd(), ".backlog-jira", "config.json");
+      if (existsSync11(configPath)) {
+        const config = JSON.parse(readFileSync13(configPath, "utf-8"));
         jql = config.jira?.jqlFilter;
       }
     } catch (error) {
@@ -27799,7 +28613,7 @@ async function getAvailableBacklogAssignees(backlog) {
   }
 }
 async function pullTask(taskId, context) {
-  const { store, backlog, jira, force, dryRun } = context;
+  const { store, backlog, jira, fieldMappings, force, dryRun } = context;
   const mapping = store.getMapping(taskId);
   logger.info({ taskId, mapping }, "Retrieved mapping from store");
   if (!mapping) {
@@ -27808,11 +28622,13 @@ async function pullTask(taskId, context) {
   const task = await backlog.getTask(taskId);
   logger.info({ mappingJiraKey: mapping.jiraKey, mappingKeys: Object.keys(mapping) }, "Accessing mapping.jiraKey");
   const issue = await jira.getIssue(mapping.jiraKey);
-  const backlogHash = computeHash(normalizeBacklogTask(task));
-  const jiraHash = computeHash(normalizeJiraIssue(issue));
+  const backlogPayload = normalizeBacklogTask(task);
+  const jiraPayload = normalizeJiraIssue(issue);
+  const backlogHash = computeHash(backlogPayload);
+  const jiraHash = computeHash(jiraPayload);
   if (!force) {
     const snapshots = store.getSnapshots(taskId);
-    const state = classifySyncState(backlogHash, jiraHash, snapshots.backlog, snapshots.jira);
+    const state = classifySyncState(backlogHash, jiraHash, snapshots.backlog, snapshots.jira, { backlog: backlogPayload, jira: jiraPayload });
     if (state.state === "Conflict") {
       throw new Error(`Conflict detected. Use --force to override or run 'backlog-jira sync' to resolve`);
     }
@@ -27834,13 +28650,16 @@ async function pullTask(taskId, context) {
       }
     }
   }
-  const updates = buildBacklogUpdates(issue, task, projectKey);
+  const updates = buildBacklogUpdates(issue, task, projectKey, fieldMappings);
+  const mappedUpdates = buildMappedFieldUpdates(issue, readTaskFrontmatter(taskId), fieldMappings);
+  Object.assign(updates, mappedUpdates.cli);
   if (dryRun) {
-    logger.info({ taskId, updates }, "DRY RUN: Would update Backlog task");
+    logger.info({ taskId, updates, frontmatter: mappedUpdates.frontmatter }, "DRY RUN: Would update Backlog task");
   } else {
     if (Object.keys(updates).length > 0) {
       await backlog.updateTask(taskId, updates);
     }
+    applyMappedFrontmatter(taskId, issue, fieldMappings);
     const updatedTask = await backlog.getTask(taskId);
     const syncedHash = computeHash(normalizeJiraIssue(issue));
     store.setSnapshot(taskId, "backlog", syncedHash, normalizeBacklogTask(updatedTask));
@@ -27864,8 +28683,9 @@ async function pullTask(taskId, context) {
     logger.info({ taskId, jiraKey: mapping.jiraKey }, "Updated Backlog task from Jira");
   }
 }
-function buildBacklogUpdates(issue, currentTask, projectKey) {
+function buildBacklogUpdates(issue, currentTask, projectKey, fieldMappings = []) {
   const updates = {};
+  const overridden = new Set(getPullMappings(fieldMappings).map((m) => m.backlog).filter(isCoreOverrideTarget));
   const sanitizedTitle = sanitizeTitle(issue.summary);
   if (sanitizedTitle !== currentTask.title) {
     updates.title = sanitizedTitle;
@@ -27900,10 +28720,10 @@ function buildBacklogUpdates(issue, currentTask, projectKey) {
       }, "Mapped Jira user to Backlog assignee");
     }
   }
-  if (issue.labels && JSON.stringify(issue.labels) !== JSON.stringify(currentTask.labels)) {
+  if (!overridden.has("labels") && issue.labels && JSON.stringify(issue.labels) !== JSON.stringify(currentTask.labels)) {
     updates.labels = issue.labels;
   }
-  if (issue.priority) {
+  if (issue.priority && !overridden.has("priority")) {
     const mappedPriority = mapJiraPriorityToBacklog(issue.priority);
     if (mappedPriority && mappedPriority !== currentTask.priority) {
       updates.priority = mappedPriority;
@@ -27929,6 +28749,15 @@ function buildBacklogUpdates(issue, currentTask, projectKey) {
     updates.uncheckAc = acUpdates.uncheckAc;
   }
   return updates;
+}
+function applyMappedFrontmatter(taskId, issue, fieldMappings) {
+  if (fieldMappings.length === 0)
+    return;
+  const { frontmatter } = buildMappedFieldUpdates(issue, readTaskFrontmatter(taskId), fieldMappings);
+  if (Object.keys(frontmatter).length > 0) {
+    updateFrontmatterFields(getTaskFilePath(taskId), frontmatter);
+    logger.debug({ taskId, fields: Object.keys(frontmatter) }, "Applied mapped frontmatter fields");
+  }
 }
 function syncAcceptanceCriteria(issue, currentTask) {
   const jiraAc = normalizeJiraIssue(issue).acceptanceCriteria;
@@ -27966,7 +28795,7 @@ function syncAcceptanceCriteria(issue, currentTask) {
   return { addAc, removeAc, checkAc, uncheckAc };
 }
 async function importJiraIssue(jiraKey, context) {
-  const { store, backlog, jira, dryRun } = context;
+  const { store, backlog, jira, fieldMappings, dryRun } = context;
   const issue = await jira.getIssue(jiraKey);
   logger.info({ jiraKey, summary: issue.summary }, "Importing Jira issue");
   const normalized = normalizeJiraIssue(issue);
@@ -28020,6 +28849,14 @@ async function importJiraIssue(jiraKey, context) {
     });
     logger.debug({ taskId, checkedIndices }, "Updated acceptance criteria checked states");
   }
+  const mappedUpdates = buildMappedFieldUpdates(issue, readTaskFrontmatter(taskId), fieldMappings);
+  if (hasMappedFieldUpdates(mappedUpdates)) {
+    if (Object.keys(mappedUpdates.cli).length > 0) {
+      await backlog.updateTask(taskId, mappedUpdates.cli);
+    }
+    applyMappedFrontmatter(taskId, issue, fieldMappings);
+    logger.debug({ taskId, jiraKey }, "Applied mapped fields to imported task");
+  }
   store.addMapping(taskId, jiraKey);
   logger.info({ taskId, jiraKey }, "Created mapping");
   const task = await backlog.getTask(taskId);
@@ -28047,8 +28884,8 @@ async function importJiraIssue(jiraKey, context) {
 }
 
 // src/commands/push.ts
-import { readFileSync as readFileSync12 } from "node:fs";
-import { join as join12 } from "node:path";
+import { readFileSync as readFileSync14 } from "node:fs";
+import { join as join14 } from "node:path";
 async function push(options = {}) {
   const originalLevel = logger.level;
   if (!options.verbose) {
@@ -28123,10 +28960,12 @@ async function getTaskIds2(options, backlog, jira, store) {
     try {
       const task = await backlog.getTask(taskId);
       const issue = await jira.getIssue(jiraKey);
-      const backlogHash = computeHash(normalizeBacklogTask(task));
-      const jiraHash = computeHash(normalizeJiraIssue(issue));
+      const backlogPayload = normalizeBacklogTask(task);
+      const jiraPayload = normalizeJiraIssue(issue);
+      const backlogHash = computeHash(backlogPayload);
+      const jiraHash = computeHash(jiraPayload);
       const snapshots = store.getSnapshots(taskId);
-      const state = classifySyncState(backlogHash, jiraHash, snapshots.backlog, snapshots.jira);
+      const state = classifySyncState(backlogHash, jiraHash, snapshots.backlog, snapshots.jira, { backlog: backlogPayload, jira: jiraPayload });
       if (state.state === "NeedsPush") {
         needsPush.push(taskId);
       }
@@ -28139,14 +28978,16 @@ async function getTaskIds2(options, backlog, jira, store) {
 async function pushTask(taskId, context) {
   const { store, backlog, jira, projectKey, issueType, force, dryRun } = context;
   const task = await backlog.getTask(taskId);
-  const backlogHash = computeHash(normalizeBacklogTask(task));
+  const backlogPayload = normalizeBacklogTask(task);
+  const backlogHash = computeHash(backlogPayload);
   const mapping = store.getMapping(taskId);
   if (mapping) {
     const issue = await jira.getIssue(mapping.jiraKey);
-    const jiraHash = computeHash(normalizeJiraIssue(issue));
+    const jiraPayload = normalizeJiraIssue(issue);
+    const jiraHash = computeHash(jiraPayload);
     if (!force) {
       const snapshots = store.getSnapshots(taskId);
-      const state = classifySyncState(backlogHash, jiraHash, snapshots.backlog, snapshots.jira);
+      const state = classifySyncState(backlogHash, jiraHash, snapshots.backlog, snapshots.jira, { backlog: backlogPayload, jira: jiraPayload });
       if (state.state === "Conflict") {
         throw new Error(`Conflict detected. Use --force to override or run 'backlog-jira sync' to resolve`);
       }
@@ -28289,8 +29130,8 @@ async function buildJiraUpdates(task, currentIssue, jiraClient, projectKey) {
 }
 function loadConfig2() {
   try {
-    const configPath = join12(process.cwd(), ".backlog-jira", "config.json");
-    const content = readFileSync12(configPath, "utf-8");
+    const configPath = join14(process.cwd(), ".backlog-jira", "config.json");
+    const content = readFileSync14(configPath, "utf-8");
     return JSON.parse(content);
   } catch (error) {
     logger.warn({ error }, "Failed to load config, using defaults");
@@ -28321,7 +29162,7 @@ async function getStatus(options) {
         const currentBacklogHash = computeHash(backlogPayload);
         const currentJiraHash = computeHash(jiraPayload);
         const snapshots = store.getSnapshots(taskId);
-        const stateResult = classifySyncState(currentBacklogHash, currentJiraHash, snapshots.backlog, snapshots.jira);
+        const stateResult = classifySyncState(currentBacklogHash, currentJiraHash, snapshots.backlog, snapshots.jira, { backlog: backlogPayload, jira: jiraPayload });
         let changedFields;
         if (stateResult.state !== "InSync" && snapshots.backlog && snapshots.jira) {
           const baseBacklogPayload = JSON.parse(snapshots.backlog.payload);
@@ -28434,8 +29275,8 @@ function registerStatusCommand(program) {
 }
 
 // src/commands/sync.ts
-import { readFileSync as readFileSync13, writeFileSync as writeFileSync8 } from "node:fs";
-import { join as join13 } from "node:path";
+import { readFileSync as readFileSync15, writeFileSync as writeFileSync9 } from "node:fs";
+import { join as join15 } from "node:path";
 
 // src/ui/conflict-resolver.ts
 var import_prompts3 = __toESM(require_prompts3(), 1);
@@ -28707,10 +29548,12 @@ async function syncTask(taskId, context) {
   }
   const task = await backlog.getTask(taskId);
   const issue = await jira.getIssue(mapping.jiraKey);
-  const backlogHash = computeHash(normalizeBacklogTask(task));
-  const jiraHash = computeHash(normalizeJiraIssue(issue));
+  const backlogPayload = normalizeBacklogTask(task);
+  const jiraPayload = normalizeJiraIssue(issue);
+  const backlogHash = computeHash(backlogPayload);
+  const jiraHash = computeHash(jiraPayload);
   const snapshots = store.getSnapshots(taskId);
-  const state = classifySyncState(backlogHash, jiraHash, snapshots.backlog, snapshots.jira);
+  const state = classifySyncState(backlogHash, jiraHash, snapshots.backlog, snapshots.jira, { backlog: backlogPayload, jira: jiraPayload });
   logger.debug({ taskId, state: state.state }, "Sync state classified");
   switch (state.state) {
     case "InSync":
@@ -28739,8 +29582,8 @@ async function syncTask(taskId, context) {
     case "Unknown":
       logger.info({ taskId }, "No baseline snapshot, creating initial sync");
       if (!dryRun) {
-        store.setSnapshot(taskId, "backlog", backlogHash, normalizeBacklogTask(task));
-        store.setSnapshot(taskId, "jira", jiraHash, normalizeJiraIssue(issue));
+        store.setSnapshot(taskId, "backlog", backlogHash, backlogPayload);
+        store.setSnapshot(taskId, "jira", jiraHash, jiraPayload);
         store.updateSyncState(taskId, {
           lastSyncAt: new Date().toISOString()
         });
@@ -28867,8 +29710,8 @@ async function resolveConflict(conflict, strategy, context) {
 }
 function loadConfig3() {
   try {
-    const configPath = join13(process.cwd(), ".backlog-jira", "config.json");
-    const content = readFileSync13(configPath, "utf-8");
+    const configPath = join15(process.cwd(), ".backlog-jira", "config.json");
+    const content = readFileSync15(configPath, "utf-8");
     return JSON.parse(content);
   } catch (error) {
     logger.warn({ error }, "Failed to load config, using defaults");
@@ -28897,10 +29740,12 @@ async function applyFieldResolutions(taskId, jiraKey, resolutions, context) {
   }
   const task = await backlog.getTask(taskId);
   const issue = await jira.getIssue(jiraKey);
-  const backlogHash = computeHash(normalizeBacklogTask(task));
-  const jiraHash = computeHash(normalizeJiraIssue(issue));
-  store.setSnapshot(taskId, "backlog", backlogHash, normalizeBacklogTask(task));
-  store.setSnapshot(taskId, "jira", jiraHash, normalizeJiraIssue(issue));
+  const backlogPayload = normalizeBacklogTask(task);
+  const jiraPayload = normalizeJiraIssue(issue);
+  const backlogHash = computeHash(backlogPayload);
+  const jiraHash = computeHash(jiraPayload);
+  store.setSnapshot(taskId, "backlog", backlogHash, backlogPayload);
+  store.setSnapshot(taskId, "jira", jiraHash, jiraPayload);
   store.updateSyncState(taskId, {
     lastSyncAt: new Date().toISOString(),
     conflictState: null
@@ -28939,11 +29784,11 @@ function determinePreferredSource(resolutions) {
 }
 function saveConflictPreference(preference) {
   try {
-    const configPath = join13(process.cwd(), ".backlog-jira", "config.json");
+    const configPath = join15(process.cwd(), ".backlog-jira", "config.json");
     const config = loadConfig3();
     config.sync = config.sync || {};
     config.sync.conflictStrategy = preference;
-    writeFileSync8(configPath, JSON.stringify(config, null, 2));
+    writeFileSync9(configPath, JSON.stringify(config, null, 2));
     logger.info({ preference }, "Saved conflict resolution preference");
   } catch (error) {
     logger.warn({ error }, "Failed to save conflict preference");
@@ -29222,6 +30067,7 @@ program2.command("doctor").description("Run environment health checks").action(a
 });
 registerMapCommand(program2);
 registerMapAssigneesCommand(program2);
+registerMapFieldsCommand(program2);
 registerMcpCommand(program2);
 registerStatusCommand(program2);
 registerViewCommand(program2);

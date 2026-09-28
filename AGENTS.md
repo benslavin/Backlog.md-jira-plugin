@@ -27,6 +27,7 @@ backlog-jira watch          # Continuous sync mode
 ```bash
 backlog-jira status         # View sync status
 backlog-jira map            # Configure status mappings
+backlog-jira map-fields     # Map extra Jira fields onto Backlog tasks (pull-only)
 backlog-jira configure      # Update configuration
 backlog-jira view <task-id> # View task sync details
 ```

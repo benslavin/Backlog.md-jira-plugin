@@ -1,5 +1,13 @@
-import { describe, expect, it } from "bun:test";
-import { parseFrontmatter } from "./frontmatter.ts";
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { cleanupDir, uniqueTestDir } from "../../test/helpers/fs.ts";
+import {
+	getTaskFilePath,
+	parseFrontmatter,
+	updateFrontmatterFields,
+	updateJiraMetadata,
+} from "./frontmatter.ts";
 
 describe("parseFrontmatter", () => {
 	describe("basic parsing", () => {
@@ -280,5 +288,126 @@ Body`;
 			expect(frontmatter.description).toBe("First block continues here");
 			expect(frontmatter.notes).toBe("Second block also continues");
 		});
+	});
+});
+
+describe("block sequences and quoting (Backlog.md 1.5x format)", () => {
+	it("parses block sequence lists", () => {
+		const content = `---
+id: TASK-345
+title: 'Phase 2: push'
+assignee: []
+labels:
+  - jira
+  - sync
+dependencies:
+  - TASK-344
+priority: medium
+---
+body`;
+
+		const { frontmatter } = parseFrontmatter(content);
+		expect(frontmatter.title).toBe("Phase 2: push");
+		expect(frontmatter.assignee).toEqual([]);
+		expect(frontmatter.labels).toEqual(["jira", "sync"]);
+		expect(frontmatter.dependencies).toEqual(["TASK-344"]);
+		expect(frontmatter.priority).toBe("medium");
+	});
+
+	it("unescapes quotes in single- and double-quoted values", () => {
+		const content = `---
+a: 'it''s'
+b: "say \\"hi\\""
+c: ["x, y", 'z']
+---
+`;
+		const { frontmatter } = parseFrontmatter(content);
+		expect(frontmatter.a).toBe("it's");
+		expect(frontmatter.b).toBe('say "hi"');
+		expect(frontmatter.c).toEqual(["x, y", "z"]);
+	});
+});
+
+describe("frontmatter writers", () => {
+	let testDir: string;
+	let filePath: string;
+
+	beforeEach(() => {
+		testDir = uniqueTestDir("frontmatter-test");
+		filePath = join(testDir, "task.md");
+		writeFileSync(
+			filePath,
+			`---
+id: TASK-1
+title: One
+labels:
+  - a
+  - b
+dependencies:
+  - TASK-2
+---
+
+## Description
+`,
+		);
+	});
+
+	afterEach(() => {
+		cleanupDir(testDir);
+	});
+
+	it("preserves block lists when updating Jira metadata", () => {
+		updateJiraMetadata(filePath, { jiraKey: "PROJ-1" });
+		const { frontmatter, body } = parseFrontmatter(
+			readFileSync(filePath, "utf-8"),
+		);
+		expect(frontmatter.labels).toEqual(["a", "b"]);
+		expect(frontmatter.dependencies).toEqual(["TASK-2"]);
+		expect(frontmatter.jira_key).toBe("PROJ-1");
+		expect(body).toBe("\n## Description\n");
+	});
+
+	it("sets, round-trips and removes plugin frontmatter fields", () => {
+		updateFrontmatterFields(filePath, {
+			story_points: "5",
+			team: "Core: Platform",
+			components: ["API", "UI, Web"],
+			quote: 'a "b" \\ c',
+		});
+
+		let { frontmatter } = parseFrontmatter(readFileSync(filePath, "utf-8"));
+		expect(frontmatter.story_points).toBe("5");
+		expect(frontmatter.team).toBe("Core: Platform");
+		expect(frontmatter.components).toEqual(["API", "UI, Web"]);
+		expect(frontmatter.quote).toBe('a "b" \\ c');
+		expect(frontmatter.labels).toEqual(["a", "b"]);
+
+		updateFrontmatterFields(filePath, { story_points: null });
+		({ frontmatter } = parseFrontmatter(readFileSync(filePath, "utf-8")));
+		expect("story_points" in frontmatter).toBe(false);
+		expect(frontmatter.team).toBe("Core: Platform");
+	});
+});
+
+describe("getTaskFilePath", () => {
+	let testDir: string;
+	let originalCwd: string;
+
+	beforeEach(() => {
+		originalCwd = process.cwd();
+		testDir = uniqueTestDir("task-path-test");
+		mkdirSync(join(testDir, "backlog", "tasks"), { recursive: true });
+		writeFileSync(join(testDir, "backlog", "tasks", "task-7 - Seven.md"), "");
+		process.chdir(testDir);
+	});
+
+	afterEach(() => {
+		process.chdir(originalCwd);
+		cleanupDir(testDir);
+	});
+
+	it("matches task IDs case-insensitively", () => {
+		expect(getTaskFilePath("task-7")).toEndWith("task-7 - Seven.md");
+		expect(getTaskFilePath("TASK-7")).toEndWith("task-7 - Seven.md");
 	});
 });

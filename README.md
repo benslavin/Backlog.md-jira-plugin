@@ -28,7 +28,7 @@ The Backlog.md Jira plugin enables seamless bidirectional synchronization betwee
 - **✅ Acceptance Criteria**: Sync acceptance criteria with full checked/unchecked state
 - **📊 Status Mapping**: Flexible status mapping with project-specific overrides
 - **🔍 Conflict Detection**: Field-level conflict detection with multiple resolution strategies
-- **📝 Field Mapping**: Sync titles, descriptions, assignees, labels, and custom fields
+- **📝 Field Mapping**: Sync titles, descriptions, statuses, priorities, assignees and labels; pull additional Jira fields (story points, fix versions, custom fields) into Backlog with [custom field mappings](#custom-field-mappings)
 - **🔐 Secure**: Uses MCP (Model Context Protocol) for secure Jira access
 - **📦 Standalone**: Zero modifications to Backlog.md core - fully independent plugin
 
@@ -126,7 +126,8 @@ The plugin uses file-based storage in `.backlog-jira/`:
 ### 🚧 Future Enhancements
 
 - [ ] **Web UI Integration**: Pull/Push buttons in browser interface
-- [ ] **Custom Field Mapping**: User-defined field mapping rules
+- [x] **Custom Field Mapping (pull)**: User-defined Jira → Backlog field mappings (see [Custom Field Mappings](#custom-field-mappings))
+- [ ] **Custom Field Mapping (push)**: Send mapped fields from Backlog to Jira and resolve per-field conflicts
 - [ ] **Webhooks**: Real-time sync triggered by Jira webhooks
 
 ## Prerequisites
@@ -308,6 +309,40 @@ Edit `.backlog-jira/config.json`:
 | `conflictStrategy` | Default conflict resolution | `prompt`, `prefer-backlog`, `prefer-jira`, `manual` |
 | `enableAnnotations` | Add sync metadata to tasks | `true`, `false` |
 | `watchInterval` | Watch mode check interval (seconds) | `60`, `300` |
+
+#### Custom Field Mappings
+
+Top-level `fieldMappings` maps extra Jira fields onto Backlog tasks. Mappings are
+**pull-only** today: `backlog-jira pull` writes Jira values into Backlog, but
+mapped values are never sent to Jira and local edits to them are overwritten on
+the next pull.
+
+```json
+{
+  "fieldMappings": [
+    { "backlog": "frontmatter:story_points", "jira": "customfield_10016", "type": "number" },
+    { "backlog": "milestone", "jira": "fixVersions", "type": "version" },
+    { "backlog": "frontmatter:team", "jira": "customfield_10020", "type": "option",
+      "valueMap": { "Platform Team": "platform" } }
+  ]
+}
+```
+
+| Property | Description |
+|----------|-------------|
+| `backlog` | `milestone`, `dependencies`, `references`, `priority`, `labels` (written with `backlog task edit`), or `frontmatter:<key>` (a plugin-owned key in the task file) |
+| `jira` | Custom field ID (`customfield_10016`) or system field name (`fixVersions`, `components`, `duedate`) |
+| `type` | `string`, `number`, `date`, `option`, `multi-option`, `user`, `version`, `array` |
+| `direction` | Optional, default `pull`. `push` and `both` are accepted for forward compatibility; only the pull side is applied |
+| `valueMap` | Optional. Translates Jira values to Backlog values, e.g. `{ "Highest": "high" }` |
+
+Invalid entries (unknown targets, unknown types, duplicate targets, or
+`frontmatter:` keys that collide with Backlog core keys such as `status` or with
+the plugin's `jira_*` keys) stop `pull` with an error listing every problem.
+Mapping `priority` or `labels` replaces the built-in Jira priority/labels as the
+source for that field. Manage mappings with
+[`backlog-jira map-fields`](#backlog-jira-map-fields); see the
+[Custom Field Mapping Guide](docs/custom-field-mapping.md) for details.
 
 ### 4. Verify Configuration
 
@@ -545,6 +580,29 @@ backlog-jira map --list
 
 # Remove a mapping
 backlog-jira map --remove task-123
+```
+
+### `backlog-jira map-fields`
+
+Manage [custom field mappings](#custom-field-mappings) (applied on pull).
+
+```bash
+# Find field IDs and suggested adapter types
+backlog-jira map-fields discover --search "story points"
+backlog-jira map-fields discover --custom-only
+
+# Add mappings
+backlog-jira map-fields add frontmatter:story_points customfield_10016 --type number
+backlog-jira map-fields add milestone fixVersions --type version
+backlog-jira map-fields add priority customfield_10050 --type option \
+  --value-map "P1=high" --value-map "P2=medium" --value-map "P3=low"
+
+# Review and remove
+backlog-jira map-fields list
+backlog-jira map-fields remove milestone
+
+# Apply to mapped tasks
+backlog-jira pull --all
 ```
 
 ### `backlog-jira status`
@@ -891,6 +949,7 @@ tail -f .backlog-jira/logs/backlog-jira.log
 1. **Check documentation**:
    - [Status Mapping Guide](docs/status-mapping.md)
    - [Acceptance Criteria Sync](docs/acceptance-criteria-sync.md)
+   - [Custom Field Mapping](docs/custom-field-mapping.md)
 
 2. **Run diagnostics**:
    ```bash
@@ -1032,6 +1091,7 @@ Includes critical information about working with prompts, command structure, and
 - **Model Context Protocol**: [modelcontextprotocol.io](https://modelcontextprotocol.io)
 - **Status Mapping Guide**: [docs/status-mapping.md](docs/status-mapping.md)
 - **AC Sync Guide**: [docs/acceptance-criteria-sync.md](docs/acceptance-criteria-sync.md)
+- **Custom Field Mapping Guide**: [docs/custom-field-mapping.md](docs/custom-field-mapping.md)
 
 ## License
 

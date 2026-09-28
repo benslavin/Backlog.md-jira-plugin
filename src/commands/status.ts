@@ -71,6 +71,7 @@ async function getStatus(options: {
 					currentJiraHash,
 					snapshots.backlog,
 					snapshots.jira,
+					{ backlog: backlogPayload, jira: jiraPayload },
 				);
 
 				// Calculate changed fields if there are changes
