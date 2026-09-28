@@ -5,7 +5,7 @@
  * including:
  * - Directory structure creation
  * - Configuration file generation with correct defaults
- * - SQLite database initialization
+ * - Snapshots directory creation
  * - .gitignore file creation
  * - Agent instructions setup flow
  * - Process exit behavior (ensuring no hanging after completion)

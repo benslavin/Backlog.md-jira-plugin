@@ -7,10 +7,10 @@ import {
 	updateJiraMetadata,
 	parseFrontmatter,
 } from "../utils/frontmatter.ts";
-import type { Mapping, Snapshot, SyncState, OpLog } from "./store.ts";
+import type { Mapping, Snapshot, SyncState, OpLog } from "./types.ts";
 
 /**
- * FrontmatterStore replaces SQLite with file-based storage
+ * FrontmatterStore provides file-based sync state storage
  * 
  * Storage architecture:
  * - Mappings: Stored in task frontmatter (jira_key field)

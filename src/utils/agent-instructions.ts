@@ -246,14 +246,14 @@ rm -rf .backlog-jira
 backlog-jira init
 \`\`\`
 
-## Database
+## Storage
 
-The plugin maintains a local SQLite database at \`.backlog-jira/jira-sync.db\` to track:
-- Sync state for each task
-- Conflict detection via content hashing
-- Last sync timestamps
+The plugin uses file-based storage for sync state:
+- **Task frontmatter**: Jira metadata (\`jira_key\`, \`jira_last_sync\`, \`jira_sync_state\`) stored in the task file
+- **Snapshots**: Stored as JSON files in \`.backlog-jira/snapshots/<task-id>-<side>.json\` for conflict detection via content hashing
+- **Operations log**: Append-only log in \`.backlog-jira/ops-log.jsonl\`
 
-This database is automatically managed and should not be modified manually.`;
+These files are automatically managed and should not be modified manually.`;
 }
 
 /**

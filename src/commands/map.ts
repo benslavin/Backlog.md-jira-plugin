@@ -266,7 +266,7 @@ async function interactiveMap(): Promise<void> {
  * Helper to create a mapping with snapshots and frontmatter
  */
 async function createMapping(
-	store: SyncStore,
+	store: FrontmatterStore,
 	backlog: BacklogClient,
 	jira: JiraClient,
 	taskId: string,

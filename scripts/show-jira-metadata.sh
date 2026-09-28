@@ -1,11 +1,11 @@
 #!/bin/bash
 # Show Jira metadata for a Backlog task
+# Run from the project root (the directory containing backlog/ and .backlog-jira/)
 
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-DB_PATH="$PROJECT_ROOT/.backlog-jira/jira-sync.db"
+TASKS_DIR="backlog/tasks"
+SNAPSHOTS_DIR=".backlog-jira/snapshots"
 
 if [ $# -eq 0 ]; then
     echo "Usage: $0 <task-id>"
@@ -20,83 +20,81 @@ if [[ ! "$TASK_ID" =~ ^task- ]]; then
     TASK_ID="task-$TASK_ID"
 fi
 
-if [ ! -f "$DB_PATH" ]; then
-    echo "Error: Database not found at $DB_PATH"
-    echo "Have you run 'backlog-jira init'?"
+TASK_FILE=$(find "$TASKS_DIR" -maxdepth 1 -name "$TASK_ID - *.md" 2>/dev/null | head -n 1)
+
+if [ -z "$TASK_FILE" ]; then
+    echo "Error: Task file not found for $TASK_ID in $TASKS_DIR"
+    echo "Run this script from the project root."
     exit 1
 fi
+
+# Read a scalar field from the task's YAML frontmatter
+frontmatter_field() {
+    awk -v key="$1" '
+        NR == 1 && $0 == "---" { in_fm = 1; next }
+        in_fm && $0 == "---" { exit }
+        in_fm && index($0, key ":") == 1 {
+            value = substr($0, length(key) + 2)
+            sub(/^[ \t]+/, "", value)
+            gsub(/^["'\'']|["'\'']$/, "", value)
+            print value
+            exit
+        }
+    ' "$TASK_FILE"
+}
 
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo "📋 Jira Metadata for $TASK_ID"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
-# Check if mapping exists
-MAPPING=$(sqlite3 "$DB_PATH" "SELECT jira_key FROM mappings WHERE backlog_id = '$TASK_ID';" 2>/dev/null || echo "")
+JIRA_KEY=$(frontmatter_field jira_key)
 
-if [ -z "$MAPPING" ]; then
+if [ -z "$JIRA_KEY" ]; then
     echo "❌ No Jira mapping found for $TASK_ID"
     echo ""
     echo "To create a mapping, run:"
-    echo "  bun run backlog-jira/src/cli.ts map interactive"
+    echo "  backlog-jira map interactive"
     exit 1
 fi
 
 echo ""
 echo "🔗 Mapping Information"
 echo "────────────────────────────────────────────────────────"
-sqlite3 "$DB_PATH" "
-SELECT 
-  '  Backlog ID:    ' || backlog_id ||
-  '\n  Jira Key:      ' || jira_key ||
-  '\n  Mapped At:     ' || created_at ||
-  '\n  Last Updated:  ' || updated_at
-FROM mappings 
-WHERE backlog_id = '$TASK_ID';
-" | sed 's/\\n/\
-/g'
+echo "  Backlog ID:    $TASK_ID"
+echo "  Jira Key:      $JIRA_KEY"
+JIRA_URL=$(frontmatter_field jira_url)
+if [ -n "$JIRA_URL" ]; then
+    echo "  Jira URL:      $JIRA_URL"
+fi
 
-echo ""
 echo ""
 echo "📊 Sync State"
 echo "────────────────────────────────────────────────────────"
-SYNC_STATE=$(sqlite3 "$DB_PATH" "SELECT last_sync_at, conflict_state FROM sync_state WHERE backlog_id = '$TASK_ID';" 2>/dev/null || echo "|")
-LAST_SYNC=$(echo "$SYNC_STATE" | cut -d'|' -f1)
-CONFLICT=$(echo "$SYNC_STATE" | cut -d'|' -f2)
+LAST_SYNC=$(frontmatter_field jira_last_sync)
+SYNC_STATE=$(frontmatter_field jira_sync_state)
+echo "  Last Sync:     ${LAST_SYNC:-Never}"
+echo "  Sync State:    ${SYNC_STATE:-None}"
 
-if [ -n "$LAST_SYNC" ]; then
-    echo "  Last Sync:     $LAST_SYNC"
-else
-    echo "  Last Sync:     Never"
-fi
-
-if [ -n "$CONFLICT" ]; then
-    echo "  Conflict:      ⚠️  $CONFLICT"
-else
-    echo "  Conflict:      None"
-fi
+show_snapshot() {
+    local snapshot_file="$SNAPSHOTS_DIR/$TASK_ID-$1.json"
+    if [ -f "$snapshot_file" ]; then
+        echo "  Updated At:    $(jq -r '.updatedAt' "$snapshot_file")"
+        echo "  Hash:          $(jq -r '.hash' "$snapshot_file")"
+        jq '.payload | fromjson' "$snapshot_file"
+    else
+        echo "  No snapshot available"
+    fi
+}
 
 echo ""
-echo ""
-echo "🔍 Jira Snapshot (Current State)"
+echo "🔍 Jira Snapshot (Last Synced State)"
 echo "────────────────────────────────────────────────────────"
-JIRA_PAYLOAD=$(sqlite3 "$DB_PATH" "SELECT payload FROM snapshots WHERE backlog_id = '$TASK_ID' AND side = 'jira';" 2>/dev/null || echo "")
-
-if [ -n "$JIRA_PAYLOAD" ]; then
-    echo "$JIRA_PAYLOAD" | jq .
-else
-    echo "  No snapshot available"
-fi
+show_snapshot jira
 
 echo ""
-echo "📝 Backlog Snapshot (Current State)"
+echo "📝 Backlog Snapshot (Last Synced State)"
 echo "────────────────────────────────────────────────────────"
-BACKLOG_PAYLOAD=$(sqlite3 "$DB_PATH" "SELECT payload FROM snapshots WHERE backlog_id = '$TASK_ID' AND side = 'backlog';" 2>/dev/null || echo "")
-
-if [ -n "$BACKLOG_PAYLOAD" ]; then
-    echo "$BACKLOG_PAYLOAD" | jq .
-else
-    echo "  No snapshot available"
-fi
+show_snapshot backlog
 
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"

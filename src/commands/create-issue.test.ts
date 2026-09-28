@@ -16,7 +16,6 @@ import { createIssue } from "./create-issue.ts";
 
 let testDir: string;
 let configDir: string;
-let dbPath: string;
 let originalCwd: string;
 
 // Mock the dependencies
@@ -108,7 +107,6 @@ describe("createIssue", () => {
 		// Create unique test directory and config
 		testDir = uniqueTestDir("create-issue-test");
 		configDir = join(testDir, ".backlog-jira");
-		dbPath = join(configDir, "jira-sync.db");
 
 		// Change to test directory so FrontmatterStore can find task files
 		process.chdir(testDir);
@@ -144,7 +142,6 @@ describe("createIssue", () => {
 		const result = await createIssue({
 			taskId: "task-123",
 			configDir,
-			dbPath,
 		});
 
 		expect(result.success).toBe(true);
@@ -175,7 +172,6 @@ describe("createIssue", () => {
 		const result = await createIssue({
 			taskId: "task-999",
 			configDir,
-			dbPath,
 		});
 
 		expect(result.success).toBe(false);
@@ -190,7 +186,6 @@ describe("createIssue", () => {
 		const result = await createIssue({
 			taskId: "task-mapped",
 			configDir,
-			dbPath,
 		});
 
 		expect(result.success).toBe(false);
@@ -206,7 +201,6 @@ describe("createIssue", () => {
 			taskId: "task-123",
 			dryRun: true,
 			configDir,
-			dbPath,
 		});
 
 		expect(result.success).toBe(true);
@@ -227,7 +221,6 @@ describe("createIssue", () => {
 			taskId: "task-123",
 			issueType: "Bug",
 			configDir,
-			dbPath,
 		});
 
 		expect(result.success).toBe(true);
@@ -241,7 +234,6 @@ describe("createIssue", () => {
 		await createIssue({
 			taskId: "task-123",
 			configDir,
-			dbPath,
 		});
 
 		// Verify description includes AC
@@ -257,7 +249,6 @@ describe("createIssue", () => {
 		await createIssue({
 			taskId: "task-123",
 			configDir,
-			dbPath,
 		});
 
 		// Verify priority was mapped
@@ -270,7 +261,6 @@ describe("createIssue", () => {
 		await createIssue({
 			taskId: "task-123",
 			configDir,
-			dbPath,
 		});
 
 		// Verify assignee was extracted (@ prefix removed)
@@ -283,7 +273,6 @@ describe("createIssue", () => {
 		await createIssue({
 			taskId: "task-123",
 			configDir,
-			dbPath,
 		});
 
 		// Verify labels were passed

@@ -173,7 +173,7 @@ async function getTaskIds(
 	options: PullOptions,
 	backlog: BacklogClient,
 	jira: JiraClient,
-	store: SyncStore,
+	store: FrontmatterStore,
 ): Promise<{ mapped: string[]; unmapped: string[] }> {
 	if (options.taskIds && options.taskIds.length > 0) {
 		return { mapped: options.taskIds, unmapped: [] };
@@ -227,7 +227,7 @@ async function getTaskIds(
 async function getIssuesForImport(
 	options: PullOptions,
 	jira: JiraClient,
-	store: SyncStore,
+	store: FrontmatterStore,
 ): Promise<{ mapped: string[]; unmapped: string[] }> {
 	// Get JQL from options or config
 	let jql = options.jql;
@@ -327,7 +327,7 @@ async function getAvailableBacklogAssignees(
 async function pullTask(
 	taskId: string,
 	context: {
-		store: SyncStore;
+		store: FrontmatterStore;
 		backlog: BacklogClient;
 		jira: JiraClient;
 		force: boolean;
@@ -665,7 +665,7 @@ function syncAcceptanceCriteria(
 async function importJiraIssue(
 	jiraKey: string,
 	context: {
-		store: SyncStore;
+		store: FrontmatterStore;
 		backlog: BacklogClient;
 		jira: JiraClient;
 		dryRun: boolean;

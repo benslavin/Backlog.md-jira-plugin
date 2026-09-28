@@ -19,7 +19,6 @@ export interface CreateIssueOptions {
 	issueType?: string;
 	dryRun?: boolean;
 	configDir?: string;
-	dbPath?: string;
 }
 
 export interface CreateIssueResult {
@@ -37,9 +36,9 @@ export async function createIssue(
 ): Promise<CreateIssueResult> {
 	logger.info({ options }, "Starting create-issue operation");
 
-	const { taskId, issueType, dryRun, dbPath } = options;
+	const { taskId, issueType, dryRun, configDir } = options;
 
-	const store = new FrontmatterStore(dbPath);
+	const store = new FrontmatterStore(configDir);
 	const backlog = new BacklogClient();
 	const jira = new JiraClient(getJiraClientOptions());
 

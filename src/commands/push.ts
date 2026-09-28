@@ -133,7 +133,7 @@ async function getTaskIds(
 	options: PushOptions,
 	backlog: BacklogClient,
 	jira: JiraClient,
-	store: SyncStore,
+	store: FrontmatterStore,
 ): Promise<string[]> {
 	if (options.taskIds && options.taskIds.length > 0) {
 		return options.taskIds;
@@ -182,7 +182,7 @@ async function getTaskIds(
 async function pushTask(
 	taskId: string,
 	context: {
-		store: SyncStore;
+		store: FrontmatterStore;
 		backlog: BacklogClient;
 		jira: JiraClient;
 		projectKey: string;

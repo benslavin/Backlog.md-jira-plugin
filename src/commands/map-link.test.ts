@@ -140,8 +140,8 @@ describe("map link command", () => {
 	});
 
 	describe("mapping creation", () => {
-		it("should create mapping in database", async () => {
-			// AC #4: Create mapping in SQLite database
+		it("should create mapping in store", async () => {
+			// AC #4: Create mapping in task frontmatter
 			const taskId = "task-123";
 			const jiraKey = "PROJ-456";
 

@@ -232,7 +232,7 @@ export async function sync(options: SyncOptions = {}): Promise<SyncResult> {
  */
 async function getTaskIds(
 	options: SyncOptions,
-	store: SyncStore,
+	store: FrontmatterStore,
 ): Promise<string[]> {
 	if (options.taskIds && options.taskIds.length > 0) {
 		return options.taskIds;
@@ -254,7 +254,7 @@ async function getTaskIds(
 async function syncTask(
 	taskId: string,
 	context: {
-		store: SyncStore;
+		store: FrontmatterStore;
 		backlog: BacklogClient;
 		jira: JiraClient;
 		strategy: ConflictStrategy;
@@ -380,7 +380,7 @@ async function syncTask(
 function detectFieldConflicts(
 	task: BacklogTask,
 	issue: JiraIssue,
-	snapshots: ReturnType<typeof SyncStore.prototype.getSnapshots>,
+	snapshots: ReturnType<typeof FrontmatterStore.prototype.getSnapshots>,
 ): FieldConflict[] {
 	const conflicts: FieldConflict[] = [];
 
@@ -475,7 +475,7 @@ async function resolveConflict(
 	conflict: Conflict,
 	strategy: ConflictStrategy,
 	context: {
-		store: SyncStore;
+		store: FrontmatterStore;
 		backlog: BacklogClient;
 		jira: JiraClient;
 		dryRun: boolean;
@@ -584,7 +584,7 @@ async function applyFieldResolutions(
 	context: {
 		backlog: BacklogClient;
 		jira: JiraClient;
-		store: SyncStore;
+		store: FrontmatterStore;
 	},
 ): Promise<void> {
 	const { backlog, jira, store } = context;

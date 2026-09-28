@@ -945,12 +945,12 @@ describe("concurrent edit conflict scenarios", () => {
 			// Documentation test: How race conditions are handled
 
 			const approach = {
-				database: "SQLite provides transaction isolation",
+				frontmatter: "Task files are rewritten whole on each update",
 				snapshots: "Atomic reads prevent inconsistent state",
 				operations: "Each sync operation is independent",
 			};
 
-			expect(approach.database).toContain("SQLite");
+			expect(approach.frontmatter).toContain("Task files");
 			expect(approach.snapshots).toContain("Atomic");
 		});
 	});
