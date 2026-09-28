@@ -52,7 +52,9 @@ status: To Do
 Body`;
 
 			const { frontmatter } = parseFrontmatter(content);
-			expect(frontmatter.title).toBe("This is a very long title that spans multiple lines but should be folded into one");
+			expect(frontmatter.title).toBe(
+				"This is a very long title that spans multiple lines but should be folded into one",
+			);
 		});
 
 		it("should parse folded scalar with > indicator", () => {
@@ -190,14 +192,20 @@ Implementation details here.`;
 
 			const { frontmatter, body } = parseFrontmatter(content);
 			expect(frontmatter.id).toBe("task-333");
-			expect(frontmatter.title).toBe("[JIRA-789] Fix: User's @mention | notification system");
+			expect(frontmatter.title).toBe(
+				"[JIRA-789] Fix: User's @mention | notification system",
+			);
 			expect(frontmatter.status).toBe("In Progress");
 			expect(frontmatter.priority).toBe("High");
 			expect(frontmatter.assignee).toBe("@john-doe");
 			expect(frontmatter.labels).toEqual(["bug", "backend", "critical"]);
-			expect(frontmatter.description).toBe("This task involves fixing the notification system for user mentions in comments");
+			expect(frontmatter.description).toBe(
+				"This task involves fixing the notification system for user mentions in comments",
+			);
 			expect(frontmatter.jira_key).toBe("JIRA-789");
-			expect(frontmatter.jira_url).toBe("https://jira.example.com/browse/JIRA-789");
+			expect(frontmatter.jira_url).toBe(
+				"https://jira.example.com/browse/JIRA-789",
+			);
 			expect(body).toContain("## Task Body");
 		});
 
@@ -223,7 +231,9 @@ plan: |-
 Body`;
 
 			const { frontmatter } = parseFrontmatter(content);
-			expect(frontmatter.plan).toBe("Step 1: Research\nStep 2: Implement\nStep 3: Test");
+			expect(frontmatter.plan).toBe(
+				"Step 1: Research\nStep 2: Implement\nStep 3: Test",
+			);
 		});
 	});
 

@@ -18,7 +18,7 @@ const YAML_UNSAFE_CHARS = /[\[\]:"#&*{}@`\n\r>|']/;
 /**
  * Sanitize a task title to be YAML-safe
  * Removes or replaces characters that break YAML frontmatter parsing
- * 
+ *
  * @param title - The original title from Jira
  * @returns A sanitized title safe for YAML frontmatter
  */
@@ -28,7 +28,7 @@ export function sanitizeTitle(title: string): string {
 	}
 
 	const original = title;
-	
+
 	// Replace problematic characters with safe equivalents
 	let sanitized = title
 		// Remove or replace brackets
@@ -51,7 +51,7 @@ export function sanitizeTitle(title: string): string {
 	if (sanitized !== original) {
 		logger.debug(
 			{ original, sanitized },
-			"Sanitized title for YAML compatibility"
+			"Sanitized title for YAML compatibility",
 		);
 	}
 
@@ -61,7 +61,7 @@ export function sanitizeTitle(title: string): string {
 /**
  * Check if a title contains YAML-unsafe characters
  * Useful for validation and testing
- * 
+ *
  * @param title - The title to check
  * @returns true if the title contains unsafe characters
  */

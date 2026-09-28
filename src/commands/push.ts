@@ -434,7 +434,7 @@ async function buildJiraUpdates(
 	// Assignee (with mapping)
 	if (task.assignee) {
 		const mappedAssignee = mapBacklogAssigneeToJira(task.assignee);
-		
+
 		if (!mappedAssignee) {
 			logger.warn(
 				{ taskId: task.id, assignee: task.assignee },

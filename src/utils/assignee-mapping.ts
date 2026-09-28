@@ -28,14 +28,14 @@ export function loadAssigneeMapping(): AssigneeMappingConfig {
 
 		// Build reverse mapping (Jira → Backlog)
 		const jiraToBacklog: Record<string, string> = {};
-		
+
 		// Add explicit mappings
 		for (const [backlogUser, jiraUser] of Object.entries(backlogToJira)) {
 			if (typeof jiraUser === "string") {
 				jiraToBacklog[jiraUser.toLowerCase()] = backlogUser;
 			}
 		}
-		
+
 		// Add auto-mapped entries to reverse mapping too
 		for (const [backlogUser, jiraUser] of Object.entries(autoMapped)) {
 			if (typeof jiraUser === "string") {
@@ -67,7 +67,7 @@ export function loadAssigneeMapping(): AssigneeMappingConfig {
 
 /**
  * Map a Backlog assignee to a Jira user identifier
- * 
+ *
  * @param backlogAssignee - Backlog assignee in format @username
  * @returns Jira user identifier or null if no mapping exists
  */
@@ -75,7 +75,7 @@ export function mapBacklogAssigneeToJira(
 	backlogAssignee: string,
 ): string | null {
 	const mapping = loadAssigneeMapping();
-	
+
 	// Remove @ prefix if present
 	const cleanAssignee = backlogAssignee.startsWith("@")
 		? backlogAssignee.substring(1)
@@ -98,17 +98,17 @@ export function mapBacklogAssigneeToJira(
 
 /**
  * Map a Jira user identifier to a Backlog assignee format
- * 
+ *
  * @param jiraUser - Jira user identifier (email, accountId, or display name)
  * @returns Backlog assignee in @username format or null if no mapping exists
  */
 export function mapJiraUserToBacklog(jiraUser: string): string | null {
 	const mapping = loadAssigneeMapping();
-	
+
 	// Try case-insensitive lookup
 	const jiraLower = jiraUser.toLowerCase();
 	const backlogUser = mapping.jiraToBacklog[jiraLower];
-	
+
 	if (backlogUser) {
 		// Ensure @ prefix
 		return backlogUser.startsWith("@") ? backlogUser : `@${backlogUser}`;
@@ -133,19 +133,23 @@ export function getAssigneeMappingDescription(): string {
 	if (explicitCount === 0) {
 		lines.push("  (none configured)");
 	} else {
-		for (const [backlogUser, jiraUser] of Object.entries(mapping.backlogToJira)) {
+		for (const [backlogUser, jiraUser] of Object.entries(
+			mapping.backlogToJira,
+		)) {
 			lines.push(`  @${backlogUser} → ${jiraUser}`);
 		}
 	}
 
 	lines.push("");
 	lines.push("Automatic Mappings (discovered from sync):");
-	
+
 	const autoCount = Object.keys(mapping.autoMapped || {}).length;
 	if (autoCount === 0) {
 		lines.push("  (none discovered yet)");
 	} else {
-		for (const [backlogUser, jiraUser] of Object.entries(mapping.autoMapped || {})) {
+		for (const [backlogUser, jiraUser] of Object.entries(
+			mapping.autoMapped || {},
+		)) {
 			lines.push(`  @${backlogUser} → ${jiraUser}`);
 		}
 	}
@@ -160,10 +164,10 @@ export function getAssigneeMappingDescription(): string {
 function calculateSimilarity(str1: string, str2: string): number {
 	const s1 = str1.toLowerCase();
 	const s2 = str2.toLowerCase();
-	
+
 	const len1 = s1.length;
 	const len2 = s2.length;
-	
+
 	// Create matrix
 	const matrix: number[][] = [];
 	for (let i = 0; i <= len1; i++) {
@@ -172,29 +176,29 @@ function calculateSimilarity(str1: string, str2: string): number {
 	for (let j = 0; j <= len2; j++) {
 		matrix[0][j] = j;
 	}
-	
+
 	// Calculate Levenshtein distance
 	for (let i = 1; i <= len1; i++) {
 		for (let j = 1; j <= len2; j++) {
 			const cost = s1[i - 1] === s2[j - 1] ? 0 : 1;
 			matrix[i][j] = Math.min(
-				matrix[i - 1][j] + 1,      // deletion
-				matrix[i][j - 1] + 1,      // insertion
-				matrix[i - 1][j - 1] + cost // substitution
+				matrix[i - 1][j] + 1, // deletion
+				matrix[i][j - 1] + 1, // insertion
+				matrix[i - 1][j - 1] + cost, // substitution
 			);
 		}
 	}
-	
+
 	const distance = matrix[len1][len2];
 	const maxLen = Math.max(len1, len2);
-	
+
 	// Convert distance to similarity score (0-1)
-	return maxLen === 0 ? 1 : 1 - (distance / maxLen);
+	return maxLen === 0 ? 1 : 1 - distance / maxLen;
 }
 
 /**
  * Attempt to find a matching Backlog assignee for a Jira user based on name similarity
- * 
+ *
  * @param jiraDisplayName - Jira user's display name (e.g., "John Doe")
  * @param backlogAssignees - List of available Backlog assignees (e.g., ["@john", "@jane"])
  * @param minSimilarity - Minimum similarity threshold (default: 0.6)
@@ -208,30 +212,30 @@ export function findBestAssigneeMatch(
 	if (!jiraDisplayName || backlogAssignees.length === 0) {
 		return null;
 	}
-	
+
 	let bestMatch: { assignee: string; score: number } | null = null;
-	
+
 	for (const backlogAssignee of backlogAssignees) {
 		// Remove @ prefix for comparison
 		const cleanAssignee = backlogAssignee.startsWith("@")
 			? backlogAssignee.substring(1)
 			: backlogAssignee;
-		
+
 		// Calculate similarity
 		const score = calculateSimilarity(jiraDisplayName, cleanAssignee);
-		
+
 		if (score >= minSimilarity && (!bestMatch || score > bestMatch.score)) {
 			bestMatch = { assignee: backlogAssignee, score };
 		}
 	}
-	
+
 	return bestMatch;
 }
 
 /**
  * Save an auto-discovered assignee mapping to config.json
  * Updates the autoMappedAssignees section without overwriting explicit mappings
- * 
+ *
  * @param backlogAssignee - Backlog assignee identifier (e.g., "@john")
  * @param jiraUser - Jira user identifier (displayName, email, or accountId)
  */
@@ -243,24 +247,25 @@ export function saveAutoDiscoveredMapping(
 		const configPath = join(process.cwd(), ".backlog-jira", "config.json");
 		const content = readFileSync(configPath, "utf-8");
 		const config = JSON.parse(content);
-		
+
 		// Ensure backlog section exists
 		if (!config.backlog) {
 			config.backlog = {};
 		}
-		
+
 		// Ensure autoMappedAssignees exists
 		if (!config.backlog.autoMappedAssignees) {
 			config.backlog.autoMappedAssignees = {};
 		}
-		
+
 		// Remove @ prefix for storage (consistent with explicit mappings)
 		const cleanBacklogAssignee = backlogAssignee.startsWith("@")
 			? backlogAssignee.substring(1)
 			: backlogAssignee;
-		
+
 		// Only save if not already explicitly mapped
-		const hasExplicitMapping = config.backlog.assigneeMapping?.[cleanBacklogAssignee];
+		const hasExplicitMapping =
+			config.backlog.assigneeMapping?.[cleanBacklogAssignee];
 		if (hasExplicitMapping) {
 			logger.debug(
 				{ backlogAssignee: cleanBacklogAssignee, jiraUser },
@@ -268,13 +273,13 @@ export function saveAutoDiscoveredMapping(
 			);
 			return;
 		}
-		
+
 		// Save the auto-discovered mapping
 		config.backlog.autoMappedAssignees[cleanBacklogAssignee] = jiraUser;
-		
+
 		// Write back to config file with pretty formatting
 		writeFileSync(configPath, JSON.stringify(config, null, 2), "utf-8");
-		
+
 		logger.info(
 			{ backlogAssignee: cleanBacklogAssignee, jiraUser },
 			"Auto-discovered assignee mapping saved to config.json",
@@ -289,7 +294,7 @@ export function saveAutoDiscoveredMapping(
 
 /**
  * Auto-discover and save assignee mapping if a good match is found
- * 
+ *
  * @param jiraDisplayName - Jira user's display name
  * @param backlogAssignees - List of available Backlog assignees
  * @returns The matched Backlog assignee or null if no match found
@@ -299,22 +304,22 @@ export function autoDiscoverAndSaveMapping(
 	backlogAssignees: string[],
 ): string | null {
 	const match = findBestAssigneeMatch(jiraDisplayName, backlogAssignees);
-	
+
 	if (match) {
 		logger.info(
-			{ 
+			{
 				jiraDisplayName,
 				backlogAssignee: match.assignee,
 				similarityScore: match.score.toFixed(2),
 			},
 			"Auto-discovered assignee mapping based on name similarity",
 		);
-		
+
 		// Save the mapping
 		saveAutoDiscoveredMapping(match.assignee, jiraDisplayName);
-		
+
 		return match.assignee;
 	}
-	
+
 	return null;
 }

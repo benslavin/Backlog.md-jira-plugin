@@ -15,7 +15,7 @@ describe("sanitizeTitle", () => {
 
 	it("should replace brackets with parentheses", () => {
 		expect(sanitizeTitle("Task [DEV-123] implementation")).toBe(
-			"Task (DEV-123) implementation"
+			"Task (DEV-123) implementation",
 		);
 		expect(sanitizeTitle("[JIRA-456] Fix bug")).toBe("(JIRA-456) Fix bug");
 		expect(sanitizeTitle("Feature [A] and [B]")).toBe("Feature (A) and (B)");
@@ -23,7 +23,7 @@ describe("sanitizeTitle", () => {
 
 	it("should replace colons with hyphens", () => {
 		expect(sanitizeTitle("Feature: Implementation")).toBe(
-			"Feature - Implementation"
+			"Feature - Implementation",
 		);
 		expect(sanitizeTitle("Bug: Critical issue")).toBe("Bug - Critical issue");
 		expect(sanitizeTitle("A:B:C")).toBe("A -B -C");
@@ -33,7 +33,7 @@ describe("sanitizeTitle", () => {
 		expect(sanitizeTitle('Task "with quotes"')).toBe("Task with quotes");
 		expect(sanitizeTitle("Task 'with quotes'")).toBe("Task with quotes");
 		expect(sanitizeTitle(`Mixed "single' and "double" quotes`)).toBe(
-			"Mixed single and double quotes"
+			"Mixed single and double quotes",
 		);
 	});
 
@@ -57,32 +57,32 @@ describe("sanitizeTitle", () => {
 	it("should clean up multiple spaces", () => {
 		expect(sanitizeTitle("Too    many     spaces")).toBe("Too many spaces");
 		expect(sanitizeTitle("  Leading and trailing  ")).toBe(
-			"Leading and trailing"
+			"Leading and trailing",
 		);
 	});
 
 	it("should handle complex edge cases", () => {
 		expect(
-			sanitizeTitle('[JIRA-123]: "Feature" implementation (phase #1)')
+			sanitizeTitle('[JIRA-123]: "Feature" implementation (phase #1)'),
 		).toBe("(JIRA-123) - Feature implementation (phase 1)");
 
 		expect(sanitizeTitle("Bug [P1]: User @john's issue with {config}")).toBe(
-			"Bug (P1) - User johns issue with config"
+			"Bug (P1) - User johns issue with config",
 		);
 
-		expect(
-			sanitizeTitle("Task: Fix\nmulti-line\ntitle with 'quotes'")
-		).toBe("Task - Fix multi-line title with quotes");
+		expect(sanitizeTitle("Task: Fix\nmulti-line\ntitle with 'quotes'")).toBe(
+			"Task - Fix multi-line title with quotes",
+		);
 
 		expect(sanitizeTitle("[DEV] Feature: A & B | C > D")).toBe(
-			"(DEV) Feature - A B C D"
+			"(DEV) Feature - A B C D",
 		);
 	});
 
 	it("should preserve safe special characters", () => {
 		expect(sanitizeTitle("Task-with-hyphens")).toBe("Task-with-hyphens");
 		expect(sanitizeTitle("Task_with_underscores")).toBe(
-			"Task_with_underscores"
+			"Task_with_underscores",
 		);
 		expect(sanitizeTitle("Task.with.dots")).toBe("Task.with.dots");
 		expect(sanitizeTitle("Task (with) parens")).toBe("Task (with) parens");
@@ -91,30 +91,26 @@ describe("sanitizeTitle", () => {
 	});
 
 	it("should handle titles with only unsafe characters", () => {
-		expect(sanitizeTitle("[]:\"#&*{}@`")).toBe("() -");
+		expect(sanitizeTitle('[]:"#&*{}@`')).toBe("() -");
 		expect(sanitizeTitle("###")).toBe("");
 	});
 
 	it("should handle real-world Jira titles", () => {
 		// Common Jira patterns
 		expect(sanitizeTitle("[PROJ-123] User Story: Implement login")).toBe(
-			"(PROJ-123) User Story - Implement login"
+			"(PROJ-123) User Story - Implement login",
 		);
 
 		expect(
-			sanitizeTitle(
-				'Bug: "Null pointer exception" in module [UserAuth]'
-			)
+			sanitizeTitle('Bug: "Null pointer exception" in module [UserAuth]'),
 		).toBe("Bug - Null pointer exception in module (UserAuth)");
 
 		expect(
-			sanitizeTitle("Epic: Refactor {backend} & optimize | performance")
+			sanitizeTitle("Epic: Refactor {backend} & optimize | performance"),
 		).toBe("Epic - Refactor backend optimize performance");
 
 		expect(
-			sanitizeTitle(
-				"[P1] Critical: Fix user's @mention notification system"
-			)
+			sanitizeTitle("[P1] Critical: Fix user's @mention notification system"),
 		).toBe("(P1) Critical - Fix users mention notification system");
 	});
 });
@@ -132,7 +128,7 @@ describe("hasUnsafeCharacters", () => {
 	it("should detect titles with quotes", () => {
 		expect(hasUnsafeCharacters('Task "name"')).toBe(true);
 		expect(hasUnsafeCharacters("Task 'name'")).toBe(true);
-		expect(hasUnsafeCharacters("Task \"name\"")).toBe(true);
+		expect(hasUnsafeCharacters('Task "name"')).toBe(true);
 	});
 
 	it("should detect titles with YAML special characters", () => {

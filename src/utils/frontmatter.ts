@@ -42,7 +42,10 @@ export function parseFrontmatter(content: string): {
 		if (keyMatch && !line.startsWith(" ") && !line.startsWith("\t")) {
 			// Save previous key-value if exists
 			if (currentKey) {
-				frontmatter[currentKey] = parseYamlValue(currentValue.trim(), multilineMode);
+				frontmatter[currentKey] = parseYamlValue(
+					currentValue.trim(),
+					multilineMode,
+				);
 			}
 
 			currentKey = keyMatch[1].trim();
@@ -59,11 +62,18 @@ export function parseFrontmatter(content: string): {
 				multilineMode = "none";
 				currentValue = valueStart;
 			}
-		} else if (currentKey && multilineMode !== "none" && (line.startsWith(" ") || line.startsWith("\t"))) {
+		} else if (
+			currentKey &&
+			multilineMode !== "none" &&
+			(line.startsWith(" ") || line.startsWith("\t"))
+		) {
 			// Continuation of multi-line value
 			const indentedLine = line.replace(/^[ \t]+/, "");
 			if (currentValue) {
-				currentValue += multilineMode === "literal" ? "\n" + indentedLine : " " + indentedLine;
+				currentValue +=
+					multilineMode === "literal"
+						? "\n" + indentedLine
+						: " " + indentedLine;
 			} else {
 				currentValue = indentedLine;
 			}
@@ -72,7 +82,10 @@ export function parseFrontmatter(content: string): {
 
 	// Save last key-value pair
 	if (currentKey) {
-		frontmatter[currentKey] = parseYamlValue(currentValue.trim(), multilineMode);
+		frontmatter[currentKey] = parseYamlValue(
+			currentValue.trim(),
+			multilineMode,
+		);
 	}
 
 	return { frontmatter, body };
@@ -81,7 +94,10 @@ export function parseFrontmatter(content: string): {
 /**
  * Parse a YAML value handling different types and quoting
  */
-function parseYamlValue(value: string, multilineMode: "none" | "folded" | "literal"): unknown {
+function parseYamlValue(
+	value: string,
+	multilineMode: "none" | "folded" | "literal",
+): unknown {
 	if (!value) {
 		return "";
 	}
@@ -101,7 +117,10 @@ function parseYamlValue(value: string, multilineMode: "none" | "folded" | "liter
 	}
 
 	// Handle quoted strings (single or double quotes)
-	if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+	if (
+		(value.startsWith('"') && value.endsWith('"')) ||
+		(value.startsWith("'") && value.endsWith("'"))
+	) {
 		return value.slice(1, -1);
 	}
 
@@ -137,7 +156,8 @@ function serializeYamlValue(value: unknown): string {
 	}
 
 	// Check if value needs quoting (contains YAML special chars or starts with special chars)
-	const needsQuoting = /[:\[\]{}#&*!|>'"%@`]|^[-?]/.test(value) || value.trim() !== value;
+	const needsQuoting =
+		/[:\[\]{}#&*!|>'"%@`]|^[-?]/.test(value) || value.trim() !== value;
 
 	if (needsQuoting) {
 		// Use double quotes and escape any internal double quotes
@@ -159,35 +179,35 @@ export function updateJiraMetadata(
 		const content = readFileSync(filePath, "utf-8");
 		const { frontmatter, body } = parseFrontmatter(content);
 
-	// Update Jira fields - undefined values delete the field
-	if ("jiraKey" in metadata) {
-		if (metadata.jiraKey === undefined) {
-			delete frontmatter.jira_key;
-		} else {
-			frontmatter.jira_key = metadata.jiraKey;
+		// Update Jira fields - undefined values delete the field
+		if ("jiraKey" in metadata) {
+			if (metadata.jiraKey === undefined) {
+				delete frontmatter.jira_key;
+			} else {
+				frontmatter.jira_key = metadata.jiraKey;
+			}
 		}
-	}
-	if ("jiraLastSync" in metadata) {
-		if (metadata.jiraLastSync === undefined) {
-			delete frontmatter.jira_last_sync;
-		} else {
-			frontmatter.jira_last_sync = metadata.jiraLastSync;
+		if ("jiraLastSync" in metadata) {
+			if (metadata.jiraLastSync === undefined) {
+				delete frontmatter.jira_last_sync;
+			} else {
+				frontmatter.jira_last_sync = metadata.jiraLastSync;
+			}
 		}
-	}
-	if ("jiraSyncState" in metadata) {
-		if (metadata.jiraSyncState === undefined) {
-			delete frontmatter.jira_sync_state;
-		} else {
-			frontmatter.jira_sync_state = metadata.jiraSyncState;
+		if ("jiraSyncState" in metadata) {
+			if (metadata.jiraSyncState === undefined) {
+				delete frontmatter.jira_sync_state;
+			} else {
+				frontmatter.jira_sync_state = metadata.jiraSyncState;
+			}
 		}
-	}
-	if ("jiraUrl" in metadata) {
-		if (metadata.jiraUrl === undefined) {
-			delete frontmatter.jira_url;
-		} else {
-			frontmatter.jira_url = metadata.jiraUrl;
+		if ("jiraUrl" in metadata) {
+			if (metadata.jiraUrl === undefined) {
+				delete frontmatter.jira_url;
+			} else {
+				frontmatter.jira_url = metadata.jiraUrl;
+			}
 		}
-	}
 
 		// Reconstruct file
 		const newFrontmatter = serializeFrontmatter(frontmatter);

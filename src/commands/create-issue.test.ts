@@ -159,7 +159,10 @@ describe("createIssue", () => {
 		expect(createCall[2]).toBe("Test Task"); // summary
 
 		// Verify storage operations by checking task file
-		const { getJiraMetadata, getTaskFilePath } = require("../utils/frontmatter.ts");
+		const {
+			getJiraMetadata,
+			getTaskFilePath,
+		} = require("../utils/frontmatter.ts");
 		const taskPath = getTaskFilePath("task-123");
 		const metadata = getJiraMetadata(taskPath);
 		expect(metadata.jiraKey).toBe("TEST-123");
@@ -210,7 +213,10 @@ describe("createIssue", () => {
 		expect(mockJiraClient.createIssue).not.toHaveBeenCalled();
 
 		// Verify no mapping was created in dry-run
-		const { getJiraMetadata, getTaskFilePath } = require("../utils/frontmatter.ts");
+		const {
+			getJiraMetadata,
+			getTaskFilePath,
+		} = require("../utils/frontmatter.ts");
 		const taskPath = getTaskFilePath("task-123");
 		const metadata = getJiraMetadata(taskPath);
 		expect(metadata.jiraKey).toBeUndefined();

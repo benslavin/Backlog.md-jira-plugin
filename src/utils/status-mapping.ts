@@ -127,7 +127,11 @@ export function mapJiraStatusToBacklog(
 
 	// Use global mapping (case-insensitive)
 	const lower = jiraStatus.toLowerCase();
-	return mapping.jiraToBacklog[lower] || mapping.jiraToBacklog[jiraStatus] || jiraStatus;
+	return (
+		mapping.jiraToBacklog[lower] ||
+		mapping.jiraToBacklog[jiraStatus] ||
+		jiraStatus
+	);
 }
 
 /**
@@ -252,9 +256,7 @@ function findBestTransitionMatch(
 	// Second pass: case-insensitive match on destination status name
 	for (const acceptable of acceptableStatuses) {
 		const caseInsensitive = transitions.find(
-			(t) =>
-				t.to.name &&
-				t.to.name.toLowerCase() === acceptable.toLowerCase(),
+			(t) => t.to.name && t.to.name.toLowerCase() === acceptable.toLowerCase(),
 		);
 		if (caseInsensitive) {
 			return caseInsensitive;
@@ -271,14 +273,19 @@ function findBestTransitionMatch(
 		const lowerAcceptable = acceptable.toLowerCase();
 		const nameMatch = transitions.find((t) => {
 			const lowerTransitionName = t.name.toLowerCase();
-			
+
 			// Check if transition name contains the acceptable status
 			if (lowerTransitionName.includes(lowerAcceptable)) {
 				return true;
 			}
-			
+
 			// Common patterns
-			if (lowerAcceptable === "done" || lowerAcceptable === "closed" || lowerAcceptable === "resolved" || lowerAcceptable === "complete") {
+			if (
+				lowerAcceptable === "done" ||
+				lowerAcceptable === "closed" ||
+				lowerAcceptable === "resolved" ||
+				lowerAcceptable === "complete"
+			) {
 				if (
 					lowerTransitionName.includes("resolve") ||
 					lowerTransitionName.includes("close") ||
@@ -288,8 +295,11 @@ function findBestTransitionMatch(
 					return true;
 				}
 			}
-			
-			if (lowerAcceptable === "in progress" || lowerAcceptable === "in development") {
+
+			if (
+				lowerAcceptable === "in progress" ||
+				lowerAcceptable === "in development"
+			) {
 				if (
 					lowerTransitionName.includes("start") ||
 					lowerTransitionName.includes("progress")
@@ -297,10 +307,10 @@ function findBestTransitionMatch(
 					return true;
 				}
 			}
-			
+
 			return false;
 		});
-		
+
 		if (nameMatch) {
 			logger.debug(
 				{

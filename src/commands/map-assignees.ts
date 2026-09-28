@@ -70,7 +70,9 @@ async function addMapping(
 	// Write back to config
 	writeFileSync(configPath, JSON.stringify(config, null, 2));
 
-	console.log(chalk.green(`✓ Added mapping: @${cleanBacklogUser} → ${jiraUser}`));
+	console.log(
+		chalk.green(`✓ Added mapping: @${cleanBacklogUser} → ${jiraUser}`),
+	);
 	logger.info(
 		{ backlogUser: cleanBacklogUser, jiraUser },
 		"Added assignee mapping",
@@ -112,11 +114,19 @@ async function removeMapping(backlogUser: string): Promise<void> {
 	if (explicitMapping) {
 		jiraUser = explicitMapping;
 		delete config.backlog.assigneeMapping[cleanBacklogUser];
-		console.log(chalk.green(`✓ Removed explicit mapping: @${cleanBacklogUser} → ${jiraUser}`));
+		console.log(
+			chalk.green(
+				`✓ Removed explicit mapping: @${cleanBacklogUser} → ${jiraUser}`,
+			),
+		);
 	} else {
 		jiraUser = autoMapping;
 		delete config.backlog.autoMappedAssignees[cleanBacklogUser];
-		console.log(chalk.green(`✓ Removed auto-discovered mapping: @${cleanBacklogUser} → ${jiraUser}`));
+		console.log(
+			chalk.green(
+				`✓ Removed auto-discovered mapping: @${cleanBacklogUser} → ${jiraUser}`,
+			),
+		);
 	}
 
 	// Write back to config
@@ -154,9 +164,7 @@ async function promoteMapping(backlogUser: string): Promise<void> {
 
 	if (!autoMapping) {
 		console.error(
-			chalk.red(
-				`❌ No auto-discovered mapping found for @${cleanBacklogUser}`,
-			),
+			chalk.red(`❌ No auto-discovered mapping found for @${cleanBacklogUser}`),
 		);
 		process.exit(1);
 	}
@@ -214,9 +222,7 @@ async function interactiveMapping(): Promise<void> {
 			: backlogUser;
 
 		console.log(
-			chalk.gray(
-				"\nSearching for Jira users (this may take a moment)...\n",
-			),
+			chalk.gray("\nSearching for Jira users (this may take a moment)...\n"),
 		);
 
 		// Search for Jira users by name
@@ -224,13 +230,9 @@ async function interactiveMapping(): Promise<void> {
 
 		if (users.length === 0) {
 			console.log(
-				chalk.yellow(
-					`No Jira users found matching "${cleanBacklogUser}"`,
-				),
+				chalk.yellow(`No Jira users found matching "${cleanBacklogUser}"`),
 			);
-			console.log(
-				chalk.gray("\nYou can add the mapping manually with:"),
-			);
+			console.log(chalk.gray("\nYou can add the mapping manually with:"));
 			console.log(
 				chalk.cyan(
 					`  backlog-jira map-assignees add @${cleanBacklogUser} <jira-user-id>`,
@@ -272,7 +274,9 @@ async function interactiveMapping(): Promise<void> {
 		throw error;
 	} finally {
 		rl.close();
-		try { await jira.close(); } catch {}
+		try {
+			await jira.close();
+		} catch {}
 	}
 }
 

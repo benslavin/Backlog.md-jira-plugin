@@ -52,7 +52,10 @@ export function getJiraClientOptions(): JiraClientOptions {
 				(options as any).serverArgs = config.mcp.serverArgs;
 			}
 			if (config.mcp.envVars && typeof config.mcp.envVars === "object") {
-				(options as any).extraEnv = config.mcp.envVars as Record<string, string>;
+				(options as any).extraEnv = config.mcp.envVars as Record<
+					string,
+					string
+				>;
 			}
 		}
 

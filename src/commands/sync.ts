@@ -92,7 +92,8 @@ export async function sync(options: SyncOptions = {}): Promise<SyncResult> {
 		// @ts-ignore Node typings allow any
 		process.stdout.write = (chunk: any, enc?: any, cb?: any) => {
 			try {
-				const s = typeof chunk === "string" ? chunk : chunk?.toString?.() ?? "";
+				const s =
+					typeof chunk === "string" ? chunk : (chunk?.toString?.() ?? "");
 				if (s && shouldFilter(s)) return true;
 			} catch {}
 			return origStdout(chunk, enc as any, cb as any);
@@ -100,7 +101,8 @@ export async function sync(options: SyncOptions = {}): Promise<SyncResult> {
 		// @ts-ignore Node typings allow any
 		process.stderr.write = (chunk: any, enc?: any, cb?: any) => {
 			try {
-				const s = typeof chunk === "string" ? chunk : chunk?.toString?.() ?? "";
+				const s =
+					typeof chunk === "string" ? chunk : (chunk?.toString?.() ?? "");
 				if (s && shouldFilter(s)) return true;
 			} catch {}
 			return origStderr(chunk, enc as any, cb as any);
@@ -176,7 +178,8 @@ export async function sync(options: SyncOptions = {}): Promise<SyncResult> {
 
 					logger.info({ taskId, outcome }, "Sync task completed");
 				} catch (error) {
-					const errorMsg = error instanceof Error ? error.message : String(error);
+					const errorMsg =
+						error instanceof Error ? error.message : String(error);
 					// Get jira key for nicer message
 					const m = store.getMapping(taskId);
 					const jiraKey = m?.jiraKey;
@@ -189,7 +192,7 @@ export async function sync(options: SyncOptions = {}): Promise<SyncResult> {
 						em.includes("expecting value") ||
 						em.includes("jsondecodeerror") ||
 						em.includes("proxy authentication") ||
-						em.includes("login") && em.includes("html")
+						(em.includes("login") && em.includes("html"))
 					) {
 						const jiraUrl = process.env.JIRA_URL || "your Jira URL";
 						const hint = `Hint: If you're behind a corporate proxy, open ${jiraUrl} in your browser, sign in, then retry. Use --verbose for details.`;

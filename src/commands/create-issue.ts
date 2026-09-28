@@ -230,7 +230,10 @@ export async function createIssue(
 /**
  * Build Jira issue data from Backlog task
  */
-function buildJiraIssueFromBacklogTask(task: BacklogTask, projectKey?: string): {
+function buildJiraIssueFromBacklogTask(
+	task: BacklogTask,
+	projectKey?: string,
+): {
 	summary: string;
 	description?: string;
 	status?: string;

@@ -236,7 +236,14 @@ export class JiraClient {
 		// Pass through any extra environment variables to the container
 		for (const key of Object.keys(this.extraEnv)) {
 			// Avoid duplicating credentials already handled above
-			if (["JIRA_URL", "JIRA_PERSONAL_TOKEN", "JIRA_USERNAME", "JIRA_API_TOKEN"].includes(key)) {
+			if (
+				[
+					"JIRA_URL",
+					"JIRA_PERSONAL_TOKEN",
+					"JIRA_USERNAME",
+					"JIRA_API_TOKEN",
+				].includes(key)
+			) {
 				continue;
 			}
 			dockerArgs.push("-e", key);
@@ -288,8 +295,12 @@ export class JiraClient {
 					return;
 				}
 			} catch (error) {
-				const errorMessage = error instanceof Error ? error.message : String(error);
-				if (errorMessage.includes("-32602") || errorMessage.includes("before initialization")) {
+				const errorMessage =
+					error instanceof Error ? error.message : String(error);
+				if (
+					errorMessage.includes("-32602") ||
+					errorMessage.includes("before initialization")
+				) {
 					logger.debug(
 						{ attempt: i + 1, maxRetries },
 						"Waiting for MCP server initialization",
@@ -346,35 +357,47 @@ export class JiraClient {
 			if (result.isError) {
 				const errorText = this.extractErrorText(result.content);
 				if (this.silentMode) {
-					logger.debug({ toolName, error: errorText }, "MCP tool returned error");
+					logger.debug(
+						{ toolName, error: errorText },
+						"MCP tool returned error",
+					);
 				} else {
-					logger.error({ toolName, error: errorText, resultContent: result.content }, "MCP tool returned error");
-				}
-				
-				// Check if this is a Jira API v2 deprecation error
-				if (errorText.includes("/rest/api/3/search") || errorText.includes("API has been removed")) {
-					throw new Error(
-						`Jira API v2 deprecated: Your Jira server has disabled the v2 REST API.\n` +
-						`\nThe MCP Atlassian server (${this.dockerImage}) uses the deprecated v2 API.\n` +
-						`\nPossible solutions:\n` +
-						`1. Check if a newer version of mcp-atlassian is available that supports v3\n` +
-						`2. Report this issue to: https://github.com/sooperset/mcp-atlassian/issues\n` +
-						`3. Temporarily re-enable v2 API in Jira (if possible)\n` +
-						`\nFor details, see: https://developer.atlassian.com/changelog/#CHANGE-2046\n` +
-						`\nOriginal error: ${errorText}`,
+					logger.error(
+						{ toolName, error: errorText, resultContent: result.content },
+						"MCP tool returned error",
 					);
 				}
-				
+
+				// Check if this is a Jira API v2 deprecation error
+				if (
+					errorText.includes("/rest/api/3/search") ||
+					errorText.includes("API has been removed")
+				) {
+					throw new Error(
+						`Jira API v2 deprecated: Your Jira server has disabled the v2 REST API.\n` +
+							`\nThe MCP Atlassian server (${this.dockerImage}) uses the deprecated v2 API.\n` +
+							`\nPossible solutions:\n` +
+							`1. Check if a newer version of mcp-atlassian is available that supports v3\n` +
+							`2. Report this issue to: https://github.com/sooperset/mcp-atlassian/issues\n` +
+							`3. Temporarily re-enable v2 API in Jira (if possible)\n` +
+							`\nFor details, see: https://developer.atlassian.com/changelog/#CHANGE-2046\n` +
+							`\nOriginal error: ${errorText}`,
+					);
+				}
+
 				// Check if this is a proxy/JSON error
-				if (errorText.includes("Expecting value") || errorText.includes("JSONDecodeError")) {
+				if (
+					errorText.includes("Expecting value") ||
+					errorText.includes("JSONDecodeError")
+				) {
 					throw new Error(
 						`Proxy authentication required: The MCP server is receiving HTML instead of JSON from Jira.\n` +
-						`This typically happens when your corporate proxy requires browser-based authentication.\n` +
-						`\nTo resolve this:\n` +
-						`1. Open your browser and navigate to your Jira URL: ${process.env.JIRA_URL || "(not set)"}\n` +
-						`2. Complete the proxy authentication/login\n` +
-						`3. Try the command again\n` +
-						`\nOriginal error: ${errorText}`,
+							`This typically happens when your corporate proxy requires browser-based authentication.\n` +
+							`\nTo resolve this:\n` +
+							`1. Open your browser and navigate to your Jira URL: ${process.env.JIRA_URL || "(not set)"}\n` +
+							`2. Complete the proxy authentication/login\n` +
+							`3. Try the command again\n` +
+							`\nOriginal error: ${errorText}`,
 					);
 				}
 
@@ -382,13 +405,13 @@ export class JiraClient {
 				if (errorText.startsWith("Error calling tool")) {
 					throw new Error(
 						`MCP tool ${toolName} failed with a server-side error.\n` +
-						`This can happen if Jira returned HTML (e.g., proxy login page) instead of JSON.\n` +
-						`Try: backlog-jira mcp start --debug to inspect logs, and consider adding HTTP(S)_PROXY/NO_PROXY to .backlog-jira/config.json -> mcp.envVars.\n` +
-						`If you're behind a corporate proxy, authenticate in the browser to ${process.env.JIRA_URL || "your Jira URL"} first.\n` +
-						`Original error: ${errorText}`,
+							`This can happen if Jira returned HTML (e.g., proxy login page) instead of JSON.\n` +
+							`Try: backlog-jira mcp start --debug to inspect logs, and consider adding HTTP(S)_PROXY/NO_PROXY to .backlog-jira/config.json -> mcp.envVars.\n` +
+							`If you're behind a corporate proxy, authenticate in the browser to ${process.env.JIRA_URL || "your Jira URL"} first.\n` +
+							`Original error: ${errorText}`,
 					);
 				}
-				
+
 				throw new Error(`MCP tool ${toolName} failed: ${errorText}`);
 			}
 
@@ -402,7 +425,10 @@ export class JiraClient {
 					// Check if the text content is an error message or proxy redirect
 					if (this.isErrorResponse(content.text)) {
 						const errorMsg = this.formatErrorMessage(content.text, toolName);
-						logger.error({ toolName, response: content.text }, "MCP tool returned error string");
+						logger.error(
+							{ toolName, response: content.text },
+							"MCP tool returned error string",
+						);
 						throw new Error(errorMsg);
 					}
 
@@ -430,16 +456,23 @@ export class JiraClient {
 			if (this.silentMode) {
 				logger.debug({ toolName }, "MCP tool returned unexpected format");
 			} else {
-				logger.warn({ toolName, result }, "MCP tool returned unexpected format");
+				logger.warn(
+					{ toolName, result },
+					"MCP tool returned unexpected format",
+				);
 			}
 			return result;
 		} catch (error) {
 			// Enhance error message for common issues
-			const errorMessage = error instanceof Error ? error.message : String(error);
+			const errorMessage =
+				error instanceof Error ? error.message : String(error);
 			const errorString = String(error);
-			
+
 			// Check for MCP initialization errors
-			if (errorMessage.includes("-32602") || errorMessage.includes("Invalid request parameters")) {
+			if (
+				errorMessage.includes("-32602") ||
+				errorMessage.includes("Invalid request parameters")
+			) {
 				if (this.silentMode) {
 					logger.debug(
 						{ error: errorMessage, toolName },
@@ -455,7 +488,7 @@ export class JiraClient {
 					`MCP error -32602: Invalid request parameters. The MCP server may not be fully initialized yet. Tool: ${toolName}`,
 				);
 			}
-			
+
 			// Check for proxy/JSON parsing errors
 			if (
 				errorMessage.includes("Expecting value") ||
@@ -464,22 +497,28 @@ export class JiraClient {
 			) {
 				const proxyError = new Error(
 					`Proxy authentication required: The MCP server is receiving HTML instead of JSON from Jira.\n` +
-					`This typically happens when your corporate proxy requires browser-based authentication.\n` +
-					`\nTo resolve this:\n` +
-					`1. Open your browser and navigate to your Jira URL: ${process.env.JIRA_URL || "(not set)"}\n` +
-					`2. Complete the proxy authentication/login\n` +
-					`3. Try the command again\n` +
-					`\nAlternatively, configure proxy settings or DNS to bypass authentication for the Docker container.\n` +
-					`\nOriginal error: ${errorMessage}`,
+						`This typically happens when your corporate proxy requires browser-based authentication.\n` +
+						`\nTo resolve this:\n` +
+						`1. Open your browser and navigate to your Jira URL: ${process.env.JIRA_URL || "(not set)"}\n` +
+						`2. Complete the proxy authentication/login\n` +
+						`3. Try the command again\n` +
+						`\nAlternatively, configure proxy settings or DNS to bypass authentication for the Docker container.\n` +
+						`\nOriginal error: ${errorMessage}`,
 				);
-			if (this.silentMode) {
-				logger.debug({ error: proxyError.message, toolName }, "Proxy authentication required");
-			} else {
-				logger.error({ error: proxyError, toolName }, "Proxy authentication required");
+				if (this.silentMode) {
+					logger.debug(
+						{ error: proxyError.message, toolName },
+						"Proxy authentication required",
+					);
+				} else {
+					logger.error(
+						{ error: proxyError, toolName },
+						"Proxy authentication required",
+					);
+				}
+				throw proxyError;
 			}
-			throw proxyError;
-			}
-			
+
 			if (this.silentMode) {
 				logger.debug({ error: errorMessage, toolName }, "MCP tool call failed");
 			} else {
@@ -494,27 +533,27 @@ export class JiraClient {
 	 */
 	private isErrorResponse(text: string): boolean {
 		const lowerText = text.toLowerCase();
-		
+
 		// Check for proxy/HTML login page indicators
-		const isHtmlResponse = 
+		const isHtmlResponse =
 			lowerText.includes("<html") ||
 			lowerText.includes("<!doctype") ||
 			lowerText.includes("<head>") ||
 			lowerText.includes("<body>");
-			
-		const isProxyLogin = 
-			lowerText.includes("login") && isHtmlResponse ||
+
+		const isProxyLogin =
+			(lowerText.includes("login") && isHtmlResponse) ||
 			lowerText.includes("authentication required") ||
 			lowerText.includes("proxy authentication") ||
-			lowerText.includes("sign in") && isHtmlResponse;
-		
+			(lowerText.includes("sign in") && isHtmlResponse);
+
 		// Check for standard error indicators
-		const isStandardError = 
+		const isStandardError =
 			lowerText.includes("error") ||
 			lowerText.includes("failed") ||
 			lowerText.includes("exception") ||
 			lowerText.startsWith("expecting value:");
-		
+
 		return isProxyLogin || isHtmlResponse || isStandardError;
 	}
 
@@ -522,9 +561,7 @@ export class JiraClient {
 	 * Extract error text from MCP response content
 	 */
 	private extractErrorText(
-		content:
-			| Array<{ type: string; text?: string }>
-			| undefined,
+		content: Array<{ type: string; text?: string }> | undefined,
 	): string {
 		if (!content || content.length === 0) {
 			return "Unknown error";
@@ -533,17 +570,19 @@ export class JiraClient {
 		const text = firstContent.text || "Unknown error";
 		return text.trim();
 	}
-	
+
 	/**
 	 * Format error message with specific guidance for common issues
 	 */
 	private formatErrorMessage(errorText: string, toolName: string): string {
 		const lowerText = errorText.toLowerCase();
-		
+
 		// Detect proxy/HTML login page
 		if (
 			(lowerText.includes("<html") || lowerText.includes("<!doctype")) &&
-			(lowerText.includes("login") || lowerText.includes("sign in") || lowerText.includes("authentication"))
+			(lowerText.includes("login") ||
+				lowerText.includes("sign in") ||
+				lowerText.includes("authentication"))
 		) {
 			return (
 				`Proxy authentication required: The MCP server is being redirected to a login page.\n` +
@@ -555,9 +594,12 @@ export class JiraClient {
 				`\nAlternatively, configure proxy settings to bypass authentication for the Docker container.`
 			);
 		}
-		
+
 		// Detect JSON parsing errors (likely HTML response)
-		if (lowerText.includes("expecting value") && lowerText.includes("line 1 column 1")) {
+		if (
+			lowerText.includes("expecting value") &&
+			lowerText.includes("line 1 column 1")
+		) {
 			return (
 				`Invalid JSON response from Jira API (received HTML instead of JSON).\n` +
 				`This often indicates:\n` +
@@ -567,7 +609,7 @@ export class JiraClient {
 				`\nCurrent tool: ${toolName}`
 			);
 		}
-		
+
 		// Default error message
 		return `MCP tool ${toolName} failed: ${errorText}`;
 	}
@@ -744,10 +786,13 @@ export class JiraClient {
 			}
 
 			const result = await this.callMcpTool("jira_get_issue", input);
-			
+
 			// Validate response structure
 			if (typeof result !== "object" || result === null) {
-				logger.error({ result, issueKey }, "Invalid response from jira_get_issue: not an object");
+				logger.error(
+					{ result, issueKey },
+					"Invalid response from jira_get_issue: not an object",
+				);
 				throw new Error(
 					`Invalid response from jira_get_issue for ${issueKey}: expected object, got ${typeof result}`,
 				);
@@ -771,7 +816,10 @@ export class JiraClient {
 
 			// Validate required fields
 			if (!typedResult.key || !typedResult.id) {
-				logger.error({ result: typedResult, issueKey }, "Invalid response: missing key or id");
+				logger.error(
+					{ result: typedResult, issueKey },
+					"Invalid response: missing key or id",
+				);
 				throw new Error(
 					`Invalid response from jira_get_issue for ${issueKey}: missing required fields (key, id)`,
 				);
@@ -797,7 +845,13 @@ export class JiraClient {
 			return issue;
 		} catch (error) {
 			if (this.silentMode) {
-				logger.debug({ issueKey, err: error instanceof Error ? error.message : String(error) }, "Failed to get Jira issue");
+				logger.debug(
+					{
+						issueKey,
+						err: error instanceof Error ? error.message : String(error),
+					},
+					"Failed to get Jira issue",
+				);
 			} else {
 				logger.error({ error, issueKey }, "Failed to get Jira issue");
 			}
@@ -849,9 +903,18 @@ export class JiraClient {
 			logger.info({ issueKey, updates }, "Updated Jira issue");
 		} catch (error) {
 			if (this.silentMode) {
-				logger.debug({ issueKey, err: error instanceof Error ? error.message : String(error) }, "Failed to update Jira issue");
+				logger.debug(
+					{
+						issueKey,
+						err: error instanceof Error ? error.message : String(error),
+					},
+					"Failed to update Jira issue",
+				);
 			} else {
-				logger.error({ error, issueKey, updates }, "Failed to update Jira issue");
+				logger.error(
+					{ error, issueKey, updates },
+					"Failed to update Jira issue",
+				);
 			}
 			throw error;
 		}
@@ -879,12 +942,22 @@ export class JiraClient {
 			if (Array.isArray(result)) {
 				// MCP server returns a plain array
 				transitions = result;
-			} else if (result && typeof result === 'object' && 'transitions' in result) {
+			} else if (
+				result &&
+				typeof result === "object" &&
+				"transitions" in result
+			) {
 				// Alternative format with transitions wrapper
-				transitions = (result as { transitions: typeof transitions }).transitions;
+				transitions = (result as { transitions: typeof transitions })
+					.transitions;
 			} else {
-				logger.error({ result, issueKey }, "Unexpected response format from jira_get_transitions");
-				throw new Error(`Invalid response format from jira_get_transitions for ${issueKey}`);
+				logger.error(
+					{ result, issueKey },
+					"Unexpected response format from jira_get_transitions",
+				);
+				throw new Error(
+					`Invalid response format from jira_get_transitions for ${issueKey}`,
+				);
 			}
 
 			// Map to JiraTransition format, providing placeholder 'to' field if missing
@@ -906,7 +979,13 @@ export class JiraClient {
 			return mapped;
 		} catch (error) {
 			if (this.silentMode) {
-				logger.debug({ issueKey, err: error instanceof Error ? error.message : String(error) }, "Failed to get Jira transitions");
+				logger.debug(
+					{
+						issueKey,
+						err: error instanceof Error ? error.message : String(error),
+					},
+					"Failed to get Jira transitions",
+				);
 			} else {
 				logger.error({ error, issueKey }, "Failed to get Jira transitions");
 			}
@@ -942,7 +1021,14 @@ export class JiraClient {
 			logger.info({ issueKey, transitionId }, "Transitioned Jira issue");
 		} catch (error) {
 			if (this.silentMode) {
-				logger.debug({ issueKey, transitionId, err: error instanceof Error ? error.message : String(error) }, "Failed to transition Jira issue");
+				logger.debug(
+					{
+						issueKey,
+						transitionId,
+						err: error instanceof Error ? error.message : String(error),
+					},
+					"Failed to transition Jira issue",
+				);
 			} else {
 				logger.error(
 					{ error, issueKey, transitionId },
@@ -972,11 +1058,13 @@ export class JiraClient {
 	/**
 	 * Search for Jira users by name or email
 	 */
-	async searchUsers(query: string): Promise<Array<{
-		displayName: string;
-		emailAddress?: string;
-		accountId: string;
-	}>> {
+	async searchUsers(query: string): Promise<
+		Array<{
+			displayName: string;
+			emailAddress?: string;
+			accountId: string;
+		}>
+	> {
 		try {
 			// Use jira_search_user MCP tool with CQL query
 			const cql = `user.fullname ~ "${query.replace(/"/g, '\\"')}"`;
@@ -997,7 +1085,7 @@ export class JiraClient {
 				{ query, count: result.results.length },
 				"Searched Jira users",
 			);
-			return result.results.map(r => r.user);
+			return result.results.map((r) => r.user);
 		} catch (error) {
 			logger.error({ error, query }, "Failed to search Jira users");
 			throw error;
@@ -1011,28 +1099,38 @@ export class JiraClient {
 	async resolveUserToAccountId(userIdentifier: string): Promise<string | null> {
 		try {
 			// If it looks like an account ID already (format: 557058:xxx or 5-digit string), return it
-			if (/^[0-9a-f]{24}$/.test(userIdentifier) || /^[0-9]{5,}:[a-f0-9-]+$/.test(userIdentifier)) {
-				logger.debug({ userIdentifier }, "User identifier appears to be an account ID already");
+			if (
+				/^[0-9a-f]{24}$/.test(userIdentifier) ||
+				/^[0-9]{5,}:[a-f0-9-]+$/.test(userIdentifier)
+			) {
+				logger.debug(
+					{ userIdentifier },
+					"User identifier appears to be an account ID already",
+				);
 				return userIdentifier;
 			}
 
 			// Try to search for the user
 			const users = await this.searchUsers(userIdentifier);
-			
+
 			if (users.length === 0) {
-				logger.warn({ userIdentifier }, "No Jira user found matching identifier");
+				logger.warn(
+					{ userIdentifier },
+					"No Jira user found matching identifier",
+				);
 				return null;
 			}
 
 			// If we get an exact match by displayName or email, use that
 			const exactMatch = users.find(
-				u => u.displayName === userIdentifier || u.emailAddress === userIdentifier
+				(u) =>
+					u.displayName === userIdentifier || u.emailAddress === userIdentifier,
 			);
-			
+
 			if (exactMatch) {
 				logger.debug(
 					{ userIdentifier, accountId: exactMatch.accountId },
-					"Resolved user identifier to account ID (exact match)"
+					"Resolved user identifier to account ID (exact match)",
 				);
 				return exactMatch.accountId;
 			}
@@ -1040,12 +1138,19 @@ export class JiraClient {
 			// Otherwise, take the first result (fuzzy match)
 			const firstMatch = users[0];
 			logger.debug(
-				{ userIdentifier, accountId: firstMatch.accountId, displayName: firstMatch.displayName },
-				"Resolved user identifier to account ID (first match)"
+				{
+					userIdentifier,
+					accountId: firstMatch.accountId,
+					displayName: firstMatch.displayName,
+				},
+				"Resolved user identifier to account ID (first match)",
 			);
 			return firstMatch.accountId;
 		} catch (error) {
-			logger.error({ error, userIdentifier }, "Failed to resolve user to account ID");
+			logger.error(
+				{ error, userIdentifier },
+				"Failed to resolve user to account ID",
+			);
 			return null;
 		}
 	}
@@ -1101,56 +1206,65 @@ export class JiraClient {
 				};
 			}
 
-		const result = await this.callMcpTool("jira_create_issue", input);
+			const result = await this.callMcpTool("jira_create_issue", input);
 
-		// Validate response structure
-		if (!result || typeof result !== "object") {
-			logger.error({ result, projectKey, issueType }, "Invalid response from jira_create_issue: not an object");
-			throw new Error(
-				`Invalid response from jira_create_issue: expected object, got ${typeof result}`,
-			);
-		}
+			// Validate response structure
+			if (!result || typeof result !== "object") {
+				logger.error(
+					{ result, projectKey, issueType },
+					"Invalid response from jira_create_issue: not an object",
+				);
+				throw new Error(
+					`Invalid response from jira_create_issue: expected object, got ${typeof result}`,
+				);
+			}
 
-		const typedResult = result as {
-			key?: string;
-			id?: string;
-			fields?: {
-				summary?: string;
-				description?: string;
-				status?: { name?: string };
-				issuetype?: { name?: string };
-				created?: string;
-				updated?: string;
-				[key: string]: unknown;
+			const typedResult = result as {
+				key?: string;
+				id?: string;
+				fields?: {
+					summary?: string;
+					description?: string;
+					status?: { name?: string };
+					issuetype?: { name?: string };
+					created?: string;
+					updated?: string;
+					[key: string]: unknown;
+				};
 			};
-		};
 
-		// Validate required fields
-		if (!typedResult.key || !typedResult.id) {
-			logger.error({ result: typedResult, projectKey }, "Invalid response: missing key or id");
-			throw new Error(
-				`Invalid response from jira_create_issue: missing required fields (key, id)`,
-			);
-		}
+			// Validate required fields
+			if (!typedResult.key || !typedResult.id) {
+				logger.error(
+					{ result: typedResult, projectKey },
+					"Invalid response: missing key or id",
+				);
+				throw new Error(
+					`Invalid response from jira_create_issue: missing required fields (key, id)`,
+				);
+			}
 
-		if (!typedResult.fields) {
-			logger.error({ result: typedResult, projectKey }, "Invalid response: missing fields object");
-			throw new Error(
-				`Invalid response from jira_create_issue: missing fields object`,
-			);
-		}
+			if (!typedResult.fields) {
+				logger.error(
+					{ result: typedResult, projectKey },
+					"Invalid response: missing fields object",
+				);
+				throw new Error(
+					`Invalid response from jira_create_issue: missing fields object`,
+				);
+			}
 
-		const issue: JiraIssue = {
-			key: typedResult.key,
-			id: typedResult.id,
-			summary: typedResult.fields.summary || summary, // Fallback to input summary
-			description: typedResult.fields.description as string | undefined,
-			status: typedResult.fields.status?.name || "Unknown",
-			issueType: typedResult.fields.issuetype?.name || issueType, // Fallback to input issueType
-			created: typedResult.fields.created || new Date().toISOString(),
-			updated: typedResult.fields.updated || new Date().toISOString(),
-			fields: typedResult.fields,
-		};
+			const issue: JiraIssue = {
+				key: typedResult.key,
+				id: typedResult.id,
+				summary: typedResult.fields.summary || summary, // Fallback to input summary
+				description: typedResult.fields.description as string | undefined,
+				status: typedResult.fields.status?.name || "Unknown",
+				issueType: typedResult.fields.issuetype?.name || issueType, // Fallback to input issueType
+				created: typedResult.fields.created || new Date().toISOString(),
+				updated: typedResult.fields.updated || new Date().toISOString(),
+				fields: typedResult.fields,
+			};
 
 			logger.info(
 				{ issueKey: issue.key, projectKey, issueType },

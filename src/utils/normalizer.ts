@@ -130,20 +130,20 @@ export function mergeDescriptionWithAc(
 ): string {
 	const cleanDescription = stripAcceptanceCriteriaFromDescription(description);
 	const acSection = formatAcceptanceCriteriaForJira(acceptanceCriteria);
-	
+
 	// Build the full description with all sections
 	let fullDescription = cleanDescription + acSection;
-	
+
 	// Add Implementation Plan if present
 	if (implementationPlan && implementationPlan.trim()) {
 		fullDescription += `\n\nImplementation Plan:\n${implementationPlan.trim()}`;
 	}
-	
+
 	// Add Implementation Notes if present
 	if (implementationNotes && implementationNotes.trim()) {
 		fullDescription += `\n\nImplementation Notes:\n${implementationNotes.trim()}`;
 	}
-	
+
 	return fullDescription;
 }
 

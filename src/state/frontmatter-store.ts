@@ -1,4 +1,10 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync } from "node:fs";
+import {
+	existsSync,
+	mkdirSync,
+	readFileSync,
+	writeFileSync,
+	readdirSync,
+} from "node:fs";
 import { join } from "node:path";
 import { logger } from "../utils/logger.ts";
 import {
@@ -11,7 +17,7 @@ import type { Mapping, Snapshot, SyncState, OpLog } from "./types.ts";
 
 /**
  * FrontmatterStore provides file-based sync state storage
- * 
+ *
  * Storage architecture:
  * - Mappings: Stored in task frontmatter (jira_key field)
  * - Snapshots: Stored in .backlog-jira/snapshots/<backlog-id>-<side>.json
@@ -24,7 +30,7 @@ export class FrontmatterStore {
 
 	constructor(configDir?: string) {
 		const baseDir = configDir || join(process.cwd(), ".backlog-jira");
-		
+
 		// Ensure config directory exists
 		if (!existsSync(baseDir)) {
 			mkdirSync(baseDir, { recursive: true });
@@ -38,7 +44,10 @@ export class FrontmatterStore {
 			mkdirSync(this.snapshotsDir, { recursive: true });
 		}
 
-		logger.debug({ baseDir, snapshotsDir: this.snapshotsDir }, "FrontmatterStore initialized");
+		logger.debug(
+			{ baseDir, snapshotsDir: this.snapshotsDir },
+			"FrontmatterStore initialized",
+		);
 	}
 
 	// ===== Mapping methods =====
@@ -59,7 +68,7 @@ export class FrontmatterStore {
 		try {
 			const filePath = getTaskFilePath(backlogId);
 			const metadata = getJiraMetadata(filePath);
-			
+
 			if (!metadata.jiraKey) {
 				return null;
 			}
@@ -67,7 +76,7 @@ export class FrontmatterStore {
 			// Get created/updated timestamps from file metadata
 			const content = readFileSync(filePath, "utf-8");
 			const { frontmatter } = parseFrontmatter(content);
-			
+
 			return {
 				backlogId,
 				jiraKey: metadata.jiraKey,
@@ -84,7 +93,7 @@ export class FrontmatterStore {
 		try {
 			// Scan all task files to find the one with this jira_key
 			const tasksDir = join(process.cwd(), "backlog", "tasks");
-			const files = readdirSync(tasksDir).filter(f => f.endsWith(".md"));
+			const files = readdirSync(tasksDir).filter((f) => f.endsWith(".md"));
 
 			for (const file of files) {
 				const filePath = join(tasksDir, file);
@@ -98,8 +107,10 @@ export class FrontmatterStore {
 						return {
 							backlogId: match[1],
 							jiraKey,
-							createdAt: (frontmatter.created as string) || new Date().toISOString(),
-							updatedAt: (frontmatter.updated as string) || new Date().toISOString(),
+							createdAt:
+								(frontmatter.created as string) || new Date().toISOString(),
+							updatedAt:
+								(frontmatter.updated as string) || new Date().toISOString(),
 						};
 					}
 				}
@@ -117,7 +128,7 @@ export class FrontmatterStore {
 
 		try {
 			const tasksDir = join(process.cwd(), "backlog", "tasks");
-			const files = readdirSync(tasksDir).filter(f => f.endsWith(".md"));
+			const files = readdirSync(tasksDir).filter((f) => f.endsWith(".md"));
 
 			for (const file of files) {
 				const filePath = join(tasksDir, file);
@@ -142,7 +153,7 @@ export class FrontmatterStore {
 	deleteMapping(backlogId: string): void {
 		try {
 			const filePath = getTaskFilePath(backlogId);
-			updateJiraMetadata(filePath, { 
+			updateJiraMetadata(filePath, {
 				jiraKey: undefined,
 				jiraLastSync: undefined,
 				jiraSyncState: undefined,
@@ -232,7 +243,10 @@ export class FrontmatterStore {
 
 			logger.debug({ backlogId, updates }, "Updated sync state");
 		} catch (error) {
-			logger.error({ error, backlogId, updates }, "Failed to update sync state");
+			logger.error(
+				{ error, backlogId, updates },
+				"Failed to update sync state",
+			);
 			throw error;
 		}
 	}
@@ -290,11 +304,14 @@ export class FrontmatterStore {
 
 		try {
 			const content = readFileSync(this.opsLogPath, "utf-8");
-			const lines = content.trim().split("\n").filter(l => l.trim());
-			
+			const lines = content
+				.trim()
+				.split("\n")
+				.filter((l) => l.trim());
+
 			// Parse JSONL and return last N entries
 			const ops = lines
-				.map(line => {
+				.map((line) => {
 					try {
 						return JSON.parse(line) as OpLog;
 					} catch {
