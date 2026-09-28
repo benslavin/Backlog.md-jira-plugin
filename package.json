@@ -30,12 +30,13 @@
 	},
 	"files": ["dist", "README.md", "LICENSE"],
 	"scripts": {
-		"build": "bun build --target=bun --external pino --external pino-pretty src/cli.ts --outdir=dist",
+		"build": "bun build --target=node --external pino --external pino-pretty src/cli.ts --outdir=dist",
 		"dev": "bun run src/cli.ts",
 		"test": "bun test",
 		"test:integration": "./tests/integration/test-clean-install.sh",
 		"check": "biome check .",
 		"check:types": "tsc --noEmit",
+		"check:dist": "bun run build && git diff --exit-code --stat -- dist",
 		"prepublishOnly": "npm run build && npm run check && npm run test"
 	},
 	"dependencies": {
@@ -54,6 +55,6 @@
 		"typescript": "^5.9.3"
 	},
 	"engines": {
-		"bun": ">=1.0.0"
+		"node": ">=20"
 	}
 }

@@ -141,9 +141,9 @@ Before installing the plugin, ensure you have:
    - Install the MCP Atlassian server for Jira access
    - Configure with your Jira credentials (see Configuration section)
 
-3. **Bun Runtime** (recommended) or Node.js 20+
-   - Bun: `curl -fsSL https://bun.sh/install | bash`
-   - Or Node.js: https://nodejs.org/
+3. **Node.js 20+** (or Bun)
+   - Node.js: https://nodejs.org/
+   - Bun (also required for development): `curl -fsSL https://bun.sh/install | bash`
 
 4. **Active Backlog.md Project**
    - Navigate to a directory with `backlog/` folder
@@ -159,19 +159,22 @@ npm install -g backlog-jira
 
 ### From the Git Repository (Recommended)
 
-Install the CLI globally straight from GitHub:
+Install the CLI globally straight from GitHub with your package manager of choice:
 
 ```bash
+# npm
 npm install -g git+https://github.com/YOUR-USERNAME/Backlog.md-jira-plugin.git
+
+# pnpm
+pnpm add -g git+https://github.com/YOUR-USERNAME/Backlog.md-jira-plugin.git
+
+# bun
+bun add -g git+https://github.com/YOUR-USERNAME/Backlog.md-jira-plugin.git
 ```
 
-To pin a specific branch, tag, or commit, append `#<ref>`:
+To pin a specific branch, tag, or commit, append `#<ref>` (e.g. `...Backlog.md-jira-plugin.git#main`).
 
-```bash
-npm install -g git+https://github.com/YOUR-USERNAME/Backlog.md-jira-plugin.git#main
-```
-
-The package's `prepare` script builds the CLI during install, so [Bun](https://bun.sh) must be on your `PATH`.
+The prebuilt CLI (`dist/cli.js`) is committed to the repository, so installing runs no build scripts and works with pnpm's and bun's default script-blocking policies. It runs on Node.js 20+ (or Bun); Bun is only needed to develop the plugin.
 
 To upgrade, re-run the same install command.
 
@@ -182,11 +185,11 @@ To upgrade, re-run the same install command.
 git clone https://github.com/YOUR-USERNAME/Backlog.md-jira-plugin.git
 cd Backlog.md-jira-plugin
 
-# Install dependencies
-npm install
+# Install dependencies (Bun is required for building and testing)
+bun install
 
 # Build the CLI
-npm run build
+bun run build
 
 # Link globally (optional)
 npm link
@@ -982,6 +985,7 @@ This plugin follows Backlog.md's plugin architecture. When contributing:
 3. **External state**: Store all state in `.backlog-jira/`
 4. **Test thoroughly**: Add tests for new features
 5. **Document changes**: Update README and relevant docs
+6. **Commit the build**: `dist/cli.js` is checked in so git installs need no build step. Run `bun run build` and commit `dist/` with any source change; `bun run check:dist` fails if the committed build is stale
 
 **📚 For detailed development guidelines, see [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)**  
 Includes critical information about working with prompts, command structure, and common pitfalls.

@@ -1,8 +1,8 @@
-#!/usr/bin/env bun
+#!/usr/bin/env node
 
-// Note: Build target must match shebang (both should be 'bun' or both 'node')
-// Building with --target=node but running with bun causes UTF-8 double-encoding
-// Current: --target=bun with #!/usr/bin/env bun for correct UTF-8 handling
+// Note: Keep this shebang as 'node'. With a 'bun' shebang, `bun build` adds a
+// `// @bun` pragma to dist/cli.js, which makes Bun mis-decode UTF-8 when it runs
+// the Node-targeted build.
 
 import { Command } from "commander";
 import packageJson from "../package.json";

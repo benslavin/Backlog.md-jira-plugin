@@ -1,5 +1,4 @@
-# Build output
-dist/
+# Build output (dist/ is committed so git installs need no build step)
 node_modules/
 
 # Testing

@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { FrontmatterStore } from "../state/store.ts";
 import { logger } from "../utils/logger.ts";
@@ -31,12 +32,16 @@ async function exec(command: string, args: string[] = []): Promise<string> {
 	});
 }
 
-async function checkBunRuntime(): Promise<void> {
-	const version = await exec("bun", ["--version"]);
-	if (!version.startsWith("1.")) {
-		throw new Error(`Bun 1.x required, found: ${version}`);
+async function checkNodeRuntime(): Promise<void> {
+	const version = process.versions.node;
+	const major = Number.parseInt(version.split(".")[0], 10);
+	if (major < 20) {
+		throw new Error(`Node.js 20+ required, found: ${version}`);
 	}
-	logger.info(`  ✓ Bun runtime: ${version}`);
+	const runtime = process.versions.bun
+		? `Bun ${process.versions.bun} (Node.js ${version} compatible)`
+		: `Node.js ${version}`;
+	logger.info(`  ✓ Runtime: ${runtime}`);
 }
 
 async function checkBacklogCLI(): Promise<void> {
@@ -112,7 +117,9 @@ async function checkMCPConnectivity(): Promise<void> {
 async function checkNodeModules(): Promise<void> {
 	const nodeModulesPath = join(process.cwd(), "node_modules");
 	if (!existsSync(nodeModulesPath)) {
-		throw new Error("node_modules not found. Run 'bun install' first.");
+		throw new Error(
+			"node_modules not found. Install dependencies first (npm, pnpm or bun install).",
+		);
 	}
 	logger.info("  ✓ Dependencies installed");
 }
@@ -141,7 +148,7 @@ async function checkConfigFile(): Promise<void> {
 
 	// Validate config structure
 	try {
-		const configContent = await Bun.file(configPath).text();
+		const configContent = await readFile(configPath, "utf8");
 		const config = JSON.parse(configContent);
 
 		const requiredFields = ["jiraProjectKey", "mcpServerName"];
@@ -166,7 +173,7 @@ export async function doctorCommand(): Promise<void> {
 	logger.info("Running environment checks...\n");
 
 	const checks = [
-		{ name: "Bun runtime", fn: checkBunRuntime, critical: true },
+		{ name: "Node.js runtime", fn: checkNodeRuntime, critical: true },
 		{ name: "Backlog CLI", fn: checkBacklogCLI, critical: true },
 		{ name: "Dependencies", fn: checkNodeModules, critical: true },
 		{ name: "Configuration", fn: checkConfigFile, critical: true },
