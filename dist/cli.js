@@ -26110,7 +26110,8 @@ The plugin stores configuration in \`.backlog-jira/config.json\`:
 Set your Jira credentials via environment variables:
 
 \`\`\`bash
-export JIRA_USER_EMAIL="your-email@example.com"
+export JIRA_URL="https://your-domain.atlassian.net"
+export JIRA_EMAIL="your-email@example.com"
 export JIRA_API_TOKEN="your-api-token"
 \`\`\`
 
@@ -26247,7 +26248,8 @@ This project uses the \`backlog-jira\` MCP server for bidirectional synchronizat
 
 ### Environment Setup
 \`\`\`bash
-export JIRA_USER_EMAIL="your-email@example.com"
+export JIRA_URL="https://your-domain.atlassian.net"
+export JIRA_EMAIL="your-email@example.com"
 export JIRA_API_TOKEN="your-api-token"
 \`\`\`
 

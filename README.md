@@ -1,6 +1,6 @@
 # Backlog.md Jira Plugin
 
-**Bidirectional sync plugin between Backlog.md and Jira via MCP Atlassian server**
+**Bidirectional sync plugin between Backlog.md and Jira via [MCP Atlassian](https://github.com/sooperset/mcp-atlassian) server**
 
 [![Status](https://img.shields.io/badge/status-Phase%205%20Complete-success)](https://github.com/MrLesk/Backlog.md/pull/394)
 
@@ -137,8 +137,9 @@ Before installing the plugin, ensure you have:
    - Install from: https://github.com/MrLesk/Backlog.md
    - Verify: `backlog --version`
 
-2. **MCP Atlassian Server** configured
-   - Install the MCP Atlassian server for Jira access
+2. **MCP Atlassian Server** available
+   - Project: https://github.com/sooperset/mcp-atlassian
+   - Runs via Docker by default (`ghcr.io/sooperset/mcp-atlassian:latest`), or install it locally
    - Configure with your Jira credentials (see Configuration section)
 
 3. **Node.js 20+** (or Bun)
@@ -223,18 +224,31 @@ This creates `.backlog-jira/` directory with:
 
 ### 2. Configure MCP Atlassian Server
 
-The plugin requires MCP Atlassian server for Jira access. Configure it with environment variables or in your MCP settings:
+The plugin doesn't call Jira directly. Each command starts a local [mcp-atlassian](https://github.com/sooperset/mcp-atlassian) server (by default via Docker, using the `ghcr.io/sooperset/mcp-atlassian:latest` image) and passes it your Jira credentials from environment variables.
 
 **Environment Variables** (`.env` or shell):
 
 ```bash
-# Jira Configuration
-JIRA_BASE_URL=https://your-domain.atlassian.net
-JIRA_USER_EMAIL=your-email@example.com
+# Jira Cloud
+JIRA_URL=https://your-domain.atlassian.net
+JIRA_EMAIL=your-email@example.com        # JIRA_USERNAME also works
 JIRA_API_TOKEN=your-jira-api-token
 
-# Optional: MCP Server Path (if not in PATH)
-MCP_ATLASSIAN_PATH=/path/to/mcp-atlassian
+# Jira Server/Data Center (instead of JIRA_EMAIL + JIRA_API_TOKEN)
+# JIRA_PERSONAL_TOKEN=your-personal-access-token
+```
+
+**Running without Docker**: install `mcp-atlassian` yourself and point the plugin at it in `.backlog-jira/config.json`:
+
+```json
+{
+  "mcp": {
+    "useExternalServer": true,
+    "serverCommand": "uvx",
+    "serverArgs": ["mcp-atlassian"],
+    "fallbackToDocker": true
+  }
+}
 ```
 
 **Getting Jira API Token**:
@@ -789,8 +803,8 @@ backlog --version
 **Solution:**
 ```bash
 # Check MCP server is configured
-echo $JIRA_BASE_URL
-echo $JIRA_USER_EMAIL
+echo $JIRA_URL
+echo $JIRA_EMAIL
 
 # Verify API token is set
 echo $JIRA_API_TOKEN
@@ -1014,7 +1028,8 @@ Includes critical information about working with prompts, command structure, and
 
 - **PR #394**: [Backlog.md Plugin System](https://github.com/MrLesk/Backlog.md/pull/394)
 - **Backlog.md**: [Main Repository](https://github.com/MrLesk/Backlog.md)
-- **MCP Atlassian**: [Model Context Protocol for Atlassian](https://modelcontextprotocol.io)
+- **MCP Atlassian**: [sooperset/mcp-atlassian](https://github.com/sooperset/mcp-atlassian)
+- **Model Context Protocol**: [modelcontextprotocol.io](https://modelcontextprotocol.io)
 - **Status Mapping Guide**: [docs/status-mapping.md](docs/status-mapping.md)
 - **AC Sync Guide**: [docs/acceptance-criteria-sync.md](docs/acceptance-criteria-sync.md)
 
