@@ -1,5 +1,5 @@
 ---
-id: task-329
+id: TASK-340
 title: Replace SQLite with lightweight file-based alternative
 status: Done
 assignee:

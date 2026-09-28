@@ -1,5 +1,5 @@
 ---
-id: task-332
+id: TASK-341
 title: >-
   Fix parsing error when task title contains special YAML characters or
   multi-line format

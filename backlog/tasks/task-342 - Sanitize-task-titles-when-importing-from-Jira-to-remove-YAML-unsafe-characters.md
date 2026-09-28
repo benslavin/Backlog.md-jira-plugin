@@ -1,5 +1,5 @@
 ---
-id: task-333
+id: TASK-342
 title: Sanitize task titles when importing from Jira to remove YAML-unsafe characters
 status: Done
 assignee:
