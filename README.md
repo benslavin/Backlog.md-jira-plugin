@@ -377,6 +377,38 @@ editable. Manage mappings with
 [`backlog-jira map-fields`](#backlog-jira-map-fields); see the
 [Custom Field Mapping Guide](docs/custom-field-mapping.md) for details.
 
+#### Sprint Sync
+
+A `fieldMappings` entry of type `sprint` turns the Jira sprints of one board
+into Backlog milestones:
+
+```json
+{ "backlog": "milestone", "jira": "sprint", "type": "sprint", "direction": "both",
+  "boardId": 12, "createSprints": false, "archiveClosedSprints": true, "pullScope": "all" }
+```
+
+- **Pull** sets each task's milestone to its issue's open sprint (else the most
+  recently completed one, else none). It creates missing milestones (due date
+  from the sprint end date, description from the goal), follows renames, date
+  and goal changes, and archives milestones of closed sprints. The full sprint
+  history is stored in the task's link record.
+- **Push** moves the issue into the milestone's sprint, or back to the backlog
+  when the milestone is cleared. A milestone matching no future or active
+  sprint is reported, or creates a sprint when `createSprints` is `true`.
+  Closed sprints are never targeted and subtasks are skipped.
+- **Sync** compares sprints by Jira sprint id: one-sided changes propagate,
+  changes on both sides follow the conflict strategy, and sprint renames are
+  not changes.
+- `pullScope: "open"` limits `pull --import` to issues in open sprints.
+
+The Sprint field is discovered automatically. `.backlog-jira/sprints.json`
+links sprint ids to milestone ids so renames and duplicate names are safe.
+Set it up with `backlog-jira map-fields boards` and
+`backlog-jira map-fields add milestone sprint --type sprint --board <id>`,
+then run `backlog-jira doctor`. Sprint sync needs Jira Software and the MCP
+Atlassian `jira_agile` toolset. See the [Sprint Sync Guide](docs/sprint-sync.md)
+for behaviour and limitations.
+
 ### 4. Verify Configuration
 
 ```bash
@@ -542,6 +574,7 @@ Checks:
 - Configuration validity
 - Database connectivity
 - Field mappings: each mapped Jira field exists, and `push`/`both` fields are editable for the configured project and issue type
+- Sprint sync: the Sprint field exists and the board is reachable and has sprints; warns about linked tasks whose milestone matches no sprint (with `createSprints` off) and milestones the plugin could not update
 - Project structure
 - Git status
 
@@ -636,6 +669,10 @@ backlog-jira map-fields add priority priority --type option \
 # Or take priority from a custom field instead
 backlog-jira map-fields add priority customfield_10050 --type option --force \
   --value-map "Urgent=high" --value-map "Normal=medium"
+
+# Sync Jira sprints of a board as milestones
+backlog-jira map-fields boards --project PROJ
+backlog-jira map-fields add milestone sprint --type sprint --board 12 --direction both
 
 # Review and remove
 backlog-jira map-fields list

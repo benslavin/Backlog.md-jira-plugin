@@ -2,12 +2,15 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import chalk from "chalk";
 import type { Command } from "commander";
+import { SPRINT_FIELD_SCHEMA } from "../integrations/jira-sprints.ts";
 import { JiraClient } from "../integrations/jira.ts";
 import {
 	FIELD_MAPPING_DIRECTIONS,
 	FIELD_MAPPING_TYPES,
 	type FieldMapping,
 	FieldMappingConfigError,
+	SPRINT_MAPPING_TYPE,
+	type SprintMapping,
 	isBuiltInPriorityMapping,
 	suggestTypeForSchema,
 	validateFieldMappings,
@@ -70,6 +73,11 @@ export function addFieldMapping(
 		type: string;
 		direction?: string;
 		valueMap?: Record<string, string>;
+		/** Sprint mappings only */
+		boardId?: string | number;
+		createSprints?: boolean;
+		archiveClosedSprints?: boolean;
+		pullScope?: string;
 	},
 	options: { force?: boolean } = {},
 ): ConfigWithFieldMappings {
@@ -95,6 +103,20 @@ export function addFieldMapping(
 			(isBuiltInPriorityMapping(mapping) ? "both" : "pull"),
 	};
 	if (mapping.valueMap) entry.valueMap = mapping.valueMap;
+	if (mapping.type === SPRINT_MAPPING_TYPE) {
+		// Numeric board ids are written as numbers, as Jira shows them
+		entry.boardId =
+			typeof mapping.boardId === "string" && /^\d+$/.test(mapping.boardId)
+				? Number(mapping.boardId)
+				: mapping.boardId;
+		for (const key of [
+			"createSprints",
+			"archiveClosedSprints",
+			"pullScope",
+		] as const) {
+			if (mapping[key] !== undefined) entry[key] = mapping[key];
+		}
+	}
 
 	if (index >= 0) existing[index] = entry;
 	else existing.push(entry);
@@ -143,12 +165,34 @@ function describeMapping(mapping: FieldMapping): string {
 	return `  ${chalk.cyan(mapping.backlog)} ${arrow} ${chalk.yellow(mapping.jira)} ${chalk.gray(`(${mapping.type}, ${mapping.direction})`)}${valueMap}`;
 }
 
+function describeSprintMapping(mapping: SprintMapping): string {
+	const arrow =
+		mapping.direction === "both"
+			? "↔"
+			: mapping.direction === "push"
+				? "→"
+				: "←";
+	const options = [
+		`board ${mapping.boardId}`,
+		mapping.direction,
+		`createSprints: ${mapping.createSprints}`,
+		`archiveClosedSprints: ${mapping.archiveClosedSprints}`,
+		`pullScope: ${mapping.pullScope}`,
+	];
+	return `  ${chalk.cyan(mapping.backlog)} ${arrow} ${chalk.yellow("sprint")} ${chalk.gray(`(sprint, ${options.join(", ")})`)}`;
+}
+
 async function listFieldMappings(): Promise<void> {
 	const config = readConfig();
-	const { mappings, errors } = validateFieldMappings(config.fieldMappings);
+	const { mappings, errors, sprintMapping } = validateFieldMappings(
+		config.fieldMappings,
+	);
 
 	console.log(chalk.bold.cyan("\n📋 Field Mappings\n"));
-	if (mappings.length === 0 && errors.length === 0) {
+	if (sprintMapping) {
+		console.log(describeSprintMapping(sprintMapping));
+	}
+	if (mappings.length === 0 && errors.length === 0 && !sprintMapping) {
 		console.log(chalk.gray("  No field mappings configured."));
 		console.log(
 			chalk.gray(
@@ -198,12 +242,40 @@ async function discoverFields(options: {
 					? `${field.schema.type}<${field.schema.items}>`
 					: field.schema.type
 				: "unknown";
-			const suggested = suggestTypeForSchema(field.schema);
+			const suggested =
+				field.schema?.custom === SPRINT_FIELD_SCHEMA
+					? "sprint (map-fields add milestone sprint --type sprint --board <id>)"
+					: suggestTypeForSchema(field.schema);
 			console.log(
 				`  ${chalk.yellow(field.id.padEnd(idWidth))}  ${field.name} ${chalk.gray(`[${schemaType}]`)}${suggested ? chalk.green(` → --type ${suggested}`) : ""}`,
 			);
 		}
 		console.log();
+	} finally {
+		await jira.close();
+	}
+}
+
+async function listBoards(options: { project?: string }): Promise<void> {
+	const jira = new JiraClient({ ...getJiraClientOptions(), silentMode: true });
+	try {
+		const boards = await jira.listBoards({ projectKey: options.project });
+		if (boards.length === 0) {
+			console.log(chalk.yellow("No Jira boards found."));
+			return;
+		}
+		console.log(chalk.bold.cyan(`\n📋 Jira boards (${boards.length})\n`));
+		const idWidth = Math.max(...boards.map((b) => b.id.length), 2);
+		for (const board of boards) {
+			console.log(
+				`  ${chalk.yellow(board.id.padEnd(idWidth))}  ${board.name} ${chalk.gray(`[${board.type}]`)}${board.supportsSprints ? chalk.green(` → --board ${board.id}`) : chalk.gray(" (no sprints)")}`,
+			);
+		}
+		console.log(
+			chalk.gray(
+				"\n  Map sprints to milestones with: backlog-jira map-fields add milestone sprint --type sprint --board <id>\n",
+			),
+		);
 	} finally {
 		await jira.close();
 	}
@@ -250,11 +322,24 @@ export function registerMapFieldsCommand(program: Command): void {
 		)
 		.argument(
 			"<jira-field>",
-			"Jira field ID (customfield_NNNNN) or system field name (e.g. fixVersions)",
+			'Jira field ID (customfield_NNNNN), system field name (e.g. fixVersions), or "sprint" with --type sprint',
 		)
 		.requiredOption(
 			"--type <type>",
-			`One of: ${FIELD_MAPPING_TYPES.join(", ")}`,
+			`One of: ${[...FIELD_MAPPING_TYPES, SPRINT_MAPPING_TYPE].join(", ")} (sprint: Jira sprints of --board as milestones)`,
+		)
+		.option("--board <id>", "Sprint mappings: Jira board whose sprints sync")
+		.option(
+			"--create-sprints",
+			"Sprint mappings: pushing an unmatched milestone creates a Jira sprint",
+		)
+		.option(
+			"--no-archive-closed-sprints",
+			"Sprint mappings: keep milestones of closed sprints active",
+		)
+		.option(
+			"--pull-scope <scope>",
+			'Sprint mappings: "all" (default) or "open" (only issues in open sprints are imported)',
 		)
 		.option(
 			"--direction <direction>",
@@ -277,8 +362,13 @@ export function registerMapFieldsCommand(program: Command): void {
 						direction?: string;
 						valueMap?: string[];
 						force?: boolean;
+						board?: string;
+						createSprints?: boolean;
+						archiveClosedSprints?: boolean;
+						pullScope?: string;
 					},
 				) => {
+					const sprint = options.type === SPRINT_MAPPING_TYPE;
 					const config = addFieldMapping(
 						readConfig(),
 						{
@@ -287,6 +377,18 @@ export function registerMapFieldsCommand(program: Command): void {
 							type: options.type,
 							direction: options.direction,
 							valueMap: parseValueMapEntries(options.valueMap),
+							...(sprint
+								? {
+										boardId: options.board,
+										createSprints: options.createSprints || undefined,
+										// Commander defaults the --no- flag to true
+										archiveClosedSprints:
+											options.archiveClosedSprints === false
+												? false
+												: undefined,
+										pullScope: options.pullScope,
+									}
+								: {}),
 						},
 						{ force: options.force },
 					);
@@ -296,6 +398,14 @@ export function registerMapFieldsCommand(program: Command): void {
 							`✓ Added field mapping: ${backlogTarget} ← ${jiraField}`,
 						),
 					);
+					if (sprint) {
+						console.log(
+							chalk.gray(
+								"  Run 'backlog-jira doctor' to check the board, then 'backlog-jira pull' to create sprint milestones.",
+							),
+						);
+						return;
+					}
 					console.log(
 						chalk.gray(
 							"  Run 'backlog-jira pull' to apply it to mapped tasks.",
@@ -316,6 +426,12 @@ export function registerMapFieldsCommand(program: Command): void {
 				console.log(chalk.green(`✓ Removed field mapping: ${backlogTarget}`));
 			}),
 		);
+
+	mapFieldsCmd
+		.command("boards")
+		.description("List Jira boards and whether they have sprints")
+		.option("--project <key>", "Only boards of a project")
+		.action(run("List boards", listBoards));
 
 	mapFieldsCmd
 		.command("discover")

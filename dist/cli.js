@@ -24878,6 +24878,18 @@ var DUE_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 function getMilestoneRefusalsPath(cwd = process.cwd()) {
   return join5(cwd, ".backlog-jira", "milestone-refusals.json");
 }
+function readMilestoneRefusals(cwd = process.cwd()) {
+  const path = getMilestoneRefusalsPath(cwd);
+  if (!existsSync4(path))
+    return [];
+  try {
+    const parsed = JSON.parse(readFileSync6(path, "utf-8"));
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? Object.values(parsed) : [];
+  } catch (error) {
+    logger.debug({ error, path }, "Failed to read milestone refusals");
+    return [];
+  }
+}
 var spawnBacklogCli = (args, cwd) => new Promise((resolve, reject) => {
   logger.debug({ args, cwd }, "Executing Backlog CLI command");
   const proc = spawn2("backlog", args, {
@@ -25980,6 +25992,24 @@ Original error: ${message}`);
     }
     logger.debug({ boardId: id }, "Jira board not found");
     return null;
+  }
+  async listBoards(options) {
+    const limit = 50;
+    const boards = [];
+    for (let startAt = 0;startAt < MAX_AGILE_RESULTS; startAt += limit) {
+      const input = { start_at: startAt, limit };
+      if (options?.projectKey)
+        input.project_key = options.projectKey;
+      const values = agileValues(await this.callAgileTool("jira_get_agile_boards", input));
+      for (const value of values) {
+        const board = parseBoard(value);
+        if (board)
+          boards.push(board);
+      }
+      if (values.length < limit)
+        break;
+    }
+    return boards;
   }
   async getBoardSprints(boardId, options) {
     const limit = 50;
@@ -28846,6 +28876,101 @@ async function checkFieldMappings(jira, cwd = process.cwd()) {
   }
   return results;
 }
+async function checkSprintSync(jira, options = {}) {
+  const cwd = options.cwd ?? process.cwd();
+  const mapping = loadSprintMapping(cwd);
+  if (!mapping) {
+    logger.info("  ✓ Sprint sync not configured");
+    return 0;
+  }
+  const errors = [];
+  let warnings = 0;
+  const describe = (error) => error instanceof Error ? error.message.split(`
+`)[0] : String(error);
+  try {
+    const fieldId = await jira.getSprintFieldId();
+    if (fieldId) {
+      logger.info(`  ✓ Sprint field ${fieldId}`);
+      const stored = SprintRegistry.load(cwd).sprintFieldId;
+      if (stored && stored !== fieldId) {
+        logger.warn(`  ⚠ .backlog-jira/sprints.json records Sprint field ${stored} but Jira reports ${fieldId}; remove "sprintFieldId" from sprints.json so it is rediscovered`);
+        warnings++;
+      }
+    } else {
+      errors.push("Sprint field not found: this Jira site has no Jira Software Sprint field");
+    }
+  } catch (error) {
+    errors.push(`Could not discover the Sprint field: ${describe(error)}`);
+  }
+  let sprints = null;
+  try {
+    const board = await jira.getBoard(mapping.boardId);
+    if (!board) {
+      errors.push(`Board ${mapping.boardId} was not found or is not accessible (check "boardId" and board permissions)`);
+    } else if (!board.supportsSprints) {
+      errors.push(`Board ${mapping.boardId} (${board.name}) is a ${board.type} board without sprints; sprint sync needs a scrum board`);
+    } else {
+      sprints = await jira.getBoardSprints(mapping.boardId);
+      logger.info(`  ✓ Board ${board.id} (${board.name}, ${board.type}) with ${sprints.length} sprint${sprints.length === 1 ? "" : "s"}`);
+    }
+  } catch (error) {
+    errors.push(`Board ${mapping.boardId} is unreachable: ${describe(error)}`);
+  }
+  if (mapping.direction !== "pull") {
+    if (mapping.createSprints) {
+      logger.info(`  ℹ createSprints is on: pushing a task whose milestone matches no sprint creates a future sprint on board ${mapping.boardId}`);
+    } else if (sprints) {
+      const unmatched = findUnmatchedMilestones(options.taskIds ?? new FrontmatterStore().getAllMappings().keys(), sprints, cwd);
+      if (unmatched.length > 0) {
+        logger.warn(`  ⚠ ${unmatched.length} linked task${unmatched.length === 1 ? "" : "s"} ha${unmatched.length === 1 ? "s a milestone" : "ve milestones"} matching no future or active sprint on board ${mapping.boardId} (createSprints is off, so push will report them):`);
+        for (const { taskId, milestone } of unmatched) {
+          logger.warn(`      ${taskId}: ${milestone}`);
+        }
+        warnings++;
+      }
+    }
+  }
+  for (const refusal of readMilestoneRefusals(cwd)) {
+    logger.warn(`  ⚠ Milestone ${refusal.milestoneId}${refusal.title ? ` (${refusal.title})` : ""} was not updated (${refusal.fields.join(", ")}): ${refusal.reason}`);
+    warnings++;
+  }
+  if (errors.length > 0) {
+    for (const error of errors)
+      logger.error(`  ✗ ${error}`);
+    throw new Error(`${errors.length} sprint sync problem${errors.length === 1 ? "" : "s"}`);
+  }
+  return warnings;
+}
+function findUnmatchedMilestones(taskIds, sprints, cwd) {
+  const registry = SprintRegistry.load(cwd);
+  const milestones = new MilestoneAdapter({ cwd, registry });
+  const openNames = new Set(sprints.filter((s) => s.state !== "closed").map((s) => s.name.trim().toLowerCase()));
+  const unmatched = [];
+  for (const taskId of taskIds) {
+    const value = readTaskFrontmatter(taskId).milestone;
+    if (typeof value !== "string" || !value.trim())
+      continue;
+    const milestone = milestones.get(value) ?? milestones.findByTitle(value);
+    if (milestone && registry.findByMilestone(milestone.id))
+      continue;
+    const title = (milestone?.title ?? value).trim().toLowerCase();
+    if (openNames.has(title))
+      continue;
+    unmatched.push({
+      taskId,
+      milestone: milestone ? `${milestone.title} (${milestone.id})` : value
+    });
+  }
+  return unmatched;
+}
+async function checkSprintSyncWithJira() {
+  const jira = new JiraClient({ ...getJiraClientOptions(), silentMode: true });
+  try {
+    return await checkSprintSync(jira);
+  } finally {
+    await jira.close().catch(() => {});
+  }
+}
 async function checkFieldMappingsWithJira() {
   const jira = new JiraClient({ ...getJiraClientOptions(), silentMode: true });
   try {
@@ -28865,6 +28990,7 @@ async function doctorCommand() {
     { name: "Database", fn: checkDatabasePerms, critical: true },
     { name: "MCP Connectivity", fn: checkMCPConnectivity, critical: true },
     { name: "Field mappings", fn: checkFieldMappingsWithJira, critical: true },
+    { name: "Sprint sync", fn: checkSprintSyncWithJira, critical: true },
     { name: "Backlog.md project", fn: checkMCPServer, critical: false },
     { name: "Git status", fn: checkGitStatus, critical: false },
     { name: "Disk space", fn: checkDiskSpace, critical: false }
@@ -28873,7 +28999,9 @@ async function doctorCommand() {
   let warningCount = 0;
   for (const check of checks) {
     try {
-      await check.fn();
+      const warnings = await check.fn();
+      if (typeof warnings === "number")
+        warningCount += warnings;
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);
       if (check.critical) {
@@ -29633,6 +29761,17 @@ function addFieldMapping(config, mapping, options = {}) {
   };
   if (mapping.valueMap)
     entry.valueMap = mapping.valueMap;
+  if (mapping.type === SPRINT_MAPPING_TYPE) {
+    entry.boardId = typeof mapping.boardId === "string" && /^\d+$/.test(mapping.boardId) ? Number(mapping.boardId) : mapping.boardId;
+    for (const key of [
+      "createSprints",
+      "archiveClosedSprints",
+      "pullScope"
+    ]) {
+      if (mapping[key] !== undefined)
+        entry[key] = mapping[key];
+    }
+  }
   if (index >= 0)
     existing[index] = entry;
   else
@@ -29656,13 +29795,27 @@ function describeMapping(mapping) {
   const arrow = mapping.direction === "both" ? "↔" : mapping.direction === "push" ? "→" : "←";
   return `  ${source_default.cyan(mapping.backlog)} ${arrow} ${source_default.yellow(mapping.jira)} ${source_default.gray(`(${mapping.type}, ${mapping.direction})`)}${valueMap}`;
 }
+function describeSprintMapping(mapping) {
+  const arrow = mapping.direction === "both" ? "↔" : mapping.direction === "push" ? "→" : "←";
+  const options = [
+    `board ${mapping.boardId}`,
+    mapping.direction,
+    `createSprints: ${mapping.createSprints}`,
+    `archiveClosedSprints: ${mapping.archiveClosedSprints}`,
+    `pullScope: ${mapping.pullScope}`
+  ];
+  return `  ${source_default.cyan(mapping.backlog)} ${arrow} ${source_default.yellow("sprint")} ${source_default.gray(`(sprint, ${options.join(", ")})`)}`;
+}
 async function listFieldMappings() {
   const config = readConfig();
-  const { mappings, errors } = validateFieldMappings(config.fieldMappings);
+  const { mappings, errors, sprintMapping } = validateFieldMappings(config.fieldMappings);
   console.log(source_default.bold.cyan(`
 \uD83D\uDCCB Field Mappings
 `));
-  if (mappings.length === 0 && errors.length === 0) {
+  if (sprintMapping) {
+    console.log(describeSprintMapping(sprintMapping));
+  }
+  if (mappings.length === 0 && errors.length === 0 && !sprintMapping) {
     console.log(source_default.gray("  No field mappings configured."));
     console.log(source_default.gray("  Add one with: backlog-jira map-fields add <backlog-target> <jira-field> --type <type>"));
   }
@@ -29697,10 +29850,32 @@ async function discoverFields(options) {
     const idWidth = Math.max(...sorted.map((f) => f.id.length), 2);
     for (const field of sorted) {
       const schemaType = field.schema?.type ? field.schema.items ? `${field.schema.type}<${field.schema.items}>` : field.schema.type : "unknown";
-      const suggested = suggestTypeForSchema(field.schema);
+      const suggested = field.schema?.custom === SPRINT_FIELD_SCHEMA ? "sprint (map-fields add milestone sprint --type sprint --board <id>)" : suggestTypeForSchema(field.schema);
       console.log(`  ${source_default.yellow(field.id.padEnd(idWidth))}  ${field.name} ${source_default.gray(`[${schemaType}]`)}${suggested ? source_default.green(` → --type ${suggested}`) : ""}`);
     }
     console.log();
+  } finally {
+    await jira.close();
+  }
+}
+async function listBoards(options) {
+  const jira = new JiraClient({ ...getJiraClientOptions(), silentMode: true });
+  try {
+    const boards = await jira.listBoards({ projectKey: options.project });
+    if (boards.length === 0) {
+      console.log(source_default.yellow("No Jira boards found."));
+      return;
+    }
+    console.log(source_default.bold.cyan(`
+\uD83D\uDCCB Jira boards (${boards.length})
+`));
+    const idWidth = Math.max(...boards.map((b) => b.id.length), 2);
+    for (const board of boards) {
+      console.log(`  ${source_default.yellow(board.id.padEnd(idWidth))}  ${board.name} ${source_default.gray(`[${board.type}]`)}${board.supportsSprints ? source_default.green(` → --board ${board.id}`) : source_default.gray(" (no sprints)")}`);
+    }
+    console.log(source_default.gray(`
+  Map sprints to milestones with: backlog-jira map-fields add milestone sprint --type sprint --board <id>
+`));
   } finally {
     await jira.close();
   }
@@ -29717,22 +29892,34 @@ function registerMapFieldsCommand(program) {
     }
   };
   mapFieldsCmd.command("list").alias("show").description("List configured field mappings").action(run("List field mappings", listFieldMappings));
-  mapFieldsCmd.command("add").description("Add a field mapping").argument("<backlog-target>", "milestone, dependencies, references, priority, labels, or frontmatter:<key>").argument("<jira-field>", "Jira field ID (customfield_NNNNN) or system field name (e.g. fixVersions)").requiredOption("--type <type>", `One of: ${FIELD_MAPPING_TYPES.join(", ")}`).option("--direction <direction>", `One of: ${FIELD_MAPPING_DIRECTIONS.join(", ")} (pull: Jira → Backlog, push: Backlog → Jira; default: pull, or both for priority ↔ priority)`).option("--value-map <entry>", 'Translate a Jira value, e.g. "Highest=high" (repeatable)', (value, previous = []) => [...previous, value]).option("--force", "Replace an existing mapping for the same target").action(run("Add field mapping", async (backlogTarget, jiraField, options) => {
+  mapFieldsCmd.command("add").description("Add a field mapping").argument("<backlog-target>", "milestone, dependencies, references, priority, labels, or frontmatter:<key>").argument("<jira-field>", 'Jira field ID (customfield_NNNNN), system field name (e.g. fixVersions), or "sprint" with --type sprint').requiredOption("--type <type>", `One of: ${[...FIELD_MAPPING_TYPES, SPRINT_MAPPING_TYPE].join(", ")} (sprint: Jira sprints of --board as milestones)`).option("--board <id>", "Sprint mappings: Jira board whose sprints sync").option("--create-sprints", "Sprint mappings: pushing an unmatched milestone creates a Jira sprint").option("--no-archive-closed-sprints", "Sprint mappings: keep milestones of closed sprints active").option("--pull-scope <scope>", 'Sprint mappings: "all" (default) or "open" (only issues in open sprints are imported)').option("--direction <direction>", `One of: ${FIELD_MAPPING_DIRECTIONS.join(", ")} (pull: Jira → Backlog, push: Backlog → Jira; default: pull, or both for priority ↔ priority)`).option("--value-map <entry>", 'Translate a Jira value, e.g. "Highest=high" (repeatable)', (value, previous = []) => [...previous, value]).option("--force", "Replace an existing mapping for the same target").action(run("Add field mapping", async (backlogTarget, jiraField, options) => {
+    const sprint = options.type === SPRINT_MAPPING_TYPE;
     const config = addFieldMapping(readConfig(), {
       backlog: backlogTarget,
       jira: jiraField,
       type: options.type,
       direction: options.direction,
-      valueMap: parseValueMapEntries(options.valueMap)
+      valueMap: parseValueMapEntries(options.valueMap),
+      ...sprint ? {
+        boardId: options.board,
+        createSprints: options.createSprints || undefined,
+        archiveClosedSprints: options.archiveClosedSprints === false ? false : undefined,
+        pullScope: options.pullScope
+      } : {}
     }, { force: options.force });
     writeConfig(config);
     console.log(source_default.green(`✓ Added field mapping: ${backlogTarget} ← ${jiraField}`));
+    if (sprint) {
+      console.log(source_default.gray("  Run 'backlog-jira doctor' to check the board, then 'backlog-jira pull' to create sprint milestones."));
+      return;
+    }
     console.log(source_default.gray("  Run 'backlog-jira pull' to apply it to mapped tasks."));
   }));
   mapFieldsCmd.command("remove").alias("rm").description("Remove the field mapping for a Backlog target").argument("<backlog-target>", "Backlog target of the mapping to remove").action(run("Remove field mapping", async (backlogTarget) => {
     writeConfig(removeFieldMapping(readConfig(), backlogTarget));
     console.log(source_default.green(`✓ Removed field mapping: ${backlogTarget}`));
   }));
+  mapFieldsCmd.command("boards").description("List Jira boards and whether they have sprints").option("--project <key>", "Only boards of a project").action(run("List boards", listBoards));
   mapFieldsCmd.command("discover").description("List Jira fields with their IDs and types").option("--search <keyword>", "Only show fields matching a keyword").option("--custom-only", "Only show custom fields").action(run("Discover fields", discoverFields));
 }
 
@@ -31484,6 +31671,53 @@ function loadConfig2() {
   }
 }
 
+// src/utils/sprint-report.ts
+function day(value) {
+  return value?.match(/^(\d{4}-\d{2}-\d{2})/)?.[1] ?? null;
+}
+function formatSprintHistory(link) {
+  const sprints = link?.sprints ?? [];
+  if (sprints.length === 0) {
+    return [
+      "",
+      "Sprint History:",
+      "  (no sprints recorded; run backlog-jira pull)"
+    ];
+  }
+  const shown = link?.sprintSync?.sprintId ?? null;
+  const lines = ["", "Sprint History:"];
+  for (const sprint of sprints) {
+    const start = day(sprint.startDate);
+    const end = day(sprint.endDate);
+    const completed = day(sprint.completeDate);
+    const dates = [
+      start || end ? `${start ?? "?"} → ${end ?? "?"}` : null,
+      completed ? `completed ${completed}` : null
+    ].filter(Boolean).join(", ");
+    const marker = sprint.id === shown ? "*" : " ";
+    lines.push(` ${marker} ${sprint.name} (sprint ${sprint.id}, ${sprint.state})${dates ? ` ${dates}` : ""}`);
+  }
+  if (shown)
+    lines.push("  * shown as the task's milestone");
+  return lines;
+}
+function countTasksPerSprint(sprintIds, registry) {
+  const counts = new Map;
+  for (const id of sprintIds)
+    counts.set(id, (counts.get(id) ?? 0) + 1);
+  const rows = [...counts.entries()].filter(([id]) => id !== "").map(([id, count]) => {
+    const entry = registry.get(id);
+    return {
+      label: entry ? `${entry.name} (sprint ${id}, ${entry.state})` : `sprint ${id}`,
+      count
+    };
+  });
+  const none = counts.get("") ?? 0;
+  if (none > 0)
+    rows.push({ label: "(no sprint)", count: none });
+  return rows;
+}
+
 // src/commands/status.ts
 async function getStatus(options) {
   const store = new FrontmatterStore;
@@ -31498,6 +31732,7 @@ async function getStatus(options) {
     console.log(`\uD83D\uDCCA Checking sync status for ${mappings.size} mapped tasks...
 `);
     const statuses = [];
+    const sprintSource = loadSprintPayloadSource();
     for (const [taskId, jiraKey] of mappings.entries()) {
       try {
         const task = await backlog.getTask(taskId);
@@ -31529,7 +31764,8 @@ async function getStatus(options) {
           syncState: stateResult.state,
           backlogHash: stateResult.backlogHash,
           jiraHash: stateResult.jiraHash,
-          changedFields
+          changedFields,
+          ...sprintSource ? { sprintId: jiraPayload.mappedFields?.[SPRINT_PAYLOAD_KEY] ?? "" } : {}
         });
       } catch (error) {
         logger.error({ error, taskId, jiraKey }, "Failed to get status");
@@ -31568,6 +31804,14 @@ async function getStatus(options) {
       console.log(`   ⬇️  NeedsPull: ${counts.NeedsPull}`);
       console.log(`   ⚠️  Conflict: ${counts.Conflict}`);
       console.log(`   ❓ Unknown: ${counts.Unknown}`);
+      if (sprintSource) {
+        console.log(`
+\uD83C\uDFC3 Tasks per sprint:`);
+        const rows = countTasksPerSprint(statuses.map((s) => s.sprintId).filter((id) => id !== undefined), sprintSource.registry);
+        for (const row of rows) {
+          console.log(`   ${row.label}: ${row.count}`);
+        }
+      }
       if (counts.Conflict > 0) {
         console.log(`
 \uD83D\uDCA1 Tip: Use 'backlog-jira resolve' to handle conflicts`);
@@ -32589,6 +32833,11 @@ ${c}`;
       console.log(mappedLines.join(`
 `));
     }
+    const sprintLines = getSprintHistoryLines(taskId, !!mapping);
+    if (sprintLines.length > 0) {
+      console.log(sprintLines.join(`
+`));
+    }
   } catch (error) {
     logger.error({ error, taskId }, "Failed to view task");
     console.error(`Error viewing task ${taskId}: ${error}`);
@@ -32626,6 +32875,15 @@ async function getMappedFieldLines(taskId, jiraKey) {
     }
   }
   return formatMappedFieldsSection(mappings, readTaskFrontmatter(taskId), issue, unavailable);
+}
+function getSprintHistoryLines(taskId, linked) {
+  try {
+    if (!linked || !loadSprintMapping())
+      return [];
+  } catch {
+    return [];
+  }
+  return formatSprintHistory(readTaskLink(taskId));
 }
 function registerViewCommand(program) {
   program.command("view <taskId>").description("View task with Jira integration details").option("--plain", "Output plain text format").action(async (taskId, options) => {

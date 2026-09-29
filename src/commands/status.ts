@@ -11,6 +11,11 @@ import {
 	normalizeJiraIssue,
 } from "../utils/normalizer.ts";
 import type { NormalizedPayload } from "../utils/normalizer.ts";
+import {
+	SPRINT_PAYLOAD_KEY,
+	loadSprintPayloadSource,
+} from "../utils/sprint-payload.ts";
+import { countTasksPerSprint } from "../utils/sprint-report.ts";
 import { type SyncState, classifySyncState } from "../utils/sync-state.ts";
 
 interface TaskStatus {
@@ -21,6 +26,8 @@ interface TaskStatus {
 	backlogHash: string;
 	jiraHash: string;
 	changedFields?: string[];
+	/** Jira sprint id the issue shows ("" for none), with sprint sync on */
+	sprintId?: string;
 }
 
 /**
@@ -48,6 +55,7 @@ async function getStatus(options: {
 		);
 
 		const statuses: TaskStatus[] = [];
+		const sprintSource = loadSprintPayloadSource();
 
 		// Check each mapped task
 		for (const [taskId, jiraKey] of mappings.entries()) {
@@ -112,6 +120,9 @@ async function getStatus(options: {
 					backlogHash: stateResult.backlogHash,
 					jiraHash: stateResult.jiraHash,
 					changedFields,
+					...(sprintSource
+						? { sprintId: jiraPayload.mappedFields?.[SPRINT_PAYLOAD_KEY] ?? "" }
+						: {}),
 				});
 			} catch (error) {
 				logger.error({ error, taskId, jiraKey }, "Failed to get status");
@@ -160,6 +171,19 @@ async function getStatus(options: {
 			console.log(`   ⬇️  NeedsPull: ${counts.NeedsPull}`);
 			console.log(`   ⚠️  Conflict: ${counts.Conflict}`);
 			console.log(`   ❓ Unknown: ${counts.Unknown}`);
+
+			if (sprintSource) {
+				console.log("\n🏃 Tasks per sprint:");
+				const rows = countTasksPerSprint(
+					statuses
+						.map((s) => s.sprintId)
+						.filter((id): id is string => id !== undefined),
+					sprintSource.registry,
+				);
+				for (const row of rows) {
+					console.log(`   ${row.label}: ${row.count}`);
+				}
+			}
 
 			if (counts.Conflict > 0) {
 				console.log("\n💡 Tip: Use 'backlog-jira resolve' to handle conflicts");

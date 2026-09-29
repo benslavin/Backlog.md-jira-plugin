@@ -802,6 +802,27 @@ export class JiraClient {
 	}
 
 	/**
+	 * Agile boards, optionally only those of a project
+	 */
+	async listBoards(options?: { projectKey?: string }): Promise<JiraBoard[]> {
+		const limit = 50;
+		const boards: JiraBoard[] = [];
+		for (let startAt = 0; startAt < MAX_AGILE_RESULTS; startAt += limit) {
+			const input: Record<string, unknown> = { start_at: startAt, limit };
+			if (options?.projectKey) input.project_key = options.projectKey;
+			const values = agileValues(
+				await this.callAgileTool("jira_get_agile_boards", input),
+			);
+			for (const value of values) {
+				const board = parseBoard(value);
+				if (board) boards.push(board);
+			}
+			if (values.length < limit) break;
+		}
+		return boards;
+	}
+
+	/**
 	 * All sprints of a board (future, active and closed unless filtered by state)
 	 */
 	async getBoardSprints(

@@ -10,11 +10,14 @@ import {
 import {
 	type FieldMapping,
 	loadFieldMappings,
+	loadSprintMapping,
 	readTaskFrontmatter,
 } from "../utils/field-mapping.ts";
 import { getJiraClientOptions } from "../utils/jira-config.ts";
 import { logger } from "../utils/logger.ts";
 import { formatMappedFieldsSection } from "../utils/mapped-field-sync.ts";
+import { formatSprintHistory } from "../utils/sprint-report.ts";
+import { readTaskLink } from "../utils/task-links.ts";
 
 // Import core formatter from backlog.md
 // In the real implementation, this would need to be properly imported from core
@@ -82,6 +85,11 @@ async function viewTask(
 		if (mappedLines.length > 0) {
 			console.log(mappedLines.join("\n"));
 		}
+
+		const sprintLines = getSprintHistoryLines(taskId, !!mapping);
+		if (sprintLines.length > 0) {
+			console.log(sprintLines.join("\n"));
+		}
 	} catch (error) {
 		logger.error({ error, taskId }, "Failed to view task");
 		console.error(`Error viewing task ${taskId}: ${error}`);
@@ -131,6 +139,20 @@ async function getMappedFieldLines(
 		issue,
 		unavailable,
 	);
+}
+
+/**
+ * The task's sprint history, when sprint sync is configured and the task is
+ * linked to Jira
+ */
+function getSprintHistoryLines(taskId: string, linked: boolean): string[] {
+	try {
+		if (!linked || !loadSprintMapping()) return [];
+	} catch {
+		// Invalid mappings are reported with the mapped fields above
+		return [];
+	}
+	return formatSprintHistory(readTaskLink(taskId));
 }
 
 /**

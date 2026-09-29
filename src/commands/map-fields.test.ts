@@ -1,5 +1,8 @@
 import { describe, expect, it } from "bun:test";
-import { FieldMappingConfigError } from "../utils/field-mapping.ts";
+import {
+	FieldMappingConfigError,
+	validateFieldMappings,
+} from "../utils/field-mapping.ts";
 import {
 	addFieldMapping,
 	parseValueMapEntries,
@@ -127,6 +130,103 @@ describe("map-fields", () => {
 			expect(() => parseValueMapEntries(["nope"])).toThrow(
 				/Invalid --value-map entry/,
 			);
+		});
+	});
+
+	describe("sprint mappings", () => {
+		it("writes a valid sprint mapping with its options", () => {
+			const config = addFieldMapping(
+				{ jira: { projectKey: "PROJ" } },
+				{
+					backlog: "milestone",
+					jira: "sprint",
+					type: "sprint",
+					direction: "both",
+					boardId: "12",
+					createSprints: true,
+					archiveClosedSprints: false,
+					pullScope: "open",
+				},
+			);
+			expect(config.fieldMappings).toEqual([
+				{
+					backlog: "milestone",
+					jira: "sprint",
+					type: "sprint",
+					direction: "both",
+					boardId: 12,
+					createSprints: true,
+					archiveClosedSprints: false,
+					pullScope: "open",
+				},
+			]);
+			expect(validateFieldMappings(config.fieldMappings).sprintMapping).toEqual(
+				{
+					backlog: "milestone",
+					jira: "sprint",
+					type: "sprint",
+					direction: "both",
+					boardId: "12",
+					createSprints: true,
+					archiveClosedSprints: false,
+					pullScope: "open",
+				},
+			);
+		});
+
+		it("omits options left at their defaults", () => {
+			const config = addFieldMapping(
+				{},
+				{ backlog: "milestone", jira: "sprint", type: "sprint", boardId: "7" },
+			);
+			expect(config.fieldMappings).toEqual([
+				{
+					backlog: "milestone",
+					jira: "sprint",
+					type: "sprint",
+					direction: "pull",
+					boardId: 7,
+				},
+			]);
+		});
+
+		it("rejects a sprint mapping without a board", () => {
+			expect(() =>
+				addFieldMapping(
+					{},
+					{ backlog: "milestone", jira: "sprint", type: "sprint" },
+				),
+			).toThrow('requires "boardId"');
+		});
+
+		it("replaces an existing milestone mapping with a sprint mapping when forced", () => {
+			const config = addFieldMapping(
+				{},
+				{
+					backlog: "frontmatter:release",
+					jira: "fixVersions",
+					type: "version",
+				},
+			);
+			const withMilestone = {
+				...config,
+				fieldMappings: [
+					...(config.fieldMappings as unknown[]),
+					{ backlog: "milestone", jira: "customfield_1", type: "string" },
+				],
+			};
+			expect(() =>
+				addFieldMapping(
+					withMilestone,
+					{
+						backlog: "milestone",
+						jira: "sprint",
+						type: "sprint",
+						boardId: "7",
+					},
+					{ force: true },
+				),
+			).not.toThrow();
 		});
 	});
 });

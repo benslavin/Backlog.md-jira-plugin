@@ -354,6 +354,31 @@ describe("JiraClient sprint operations", () => {
 		});
 	});
 
+	it("lists boards across pages", async () => {
+		const client = new JiraClient();
+		const page = Array.from({ length: 50 }, (_, i) => ({
+			id: i + 1,
+			name: `Board ${i + 1}`,
+			type: "scrum",
+		}));
+		const calls = mockTools(client, (_tool, input) =>
+			input.start_at === 0 ? page : [{ id: 51, name: "Flow", type: "kanban" }],
+		);
+		const boards = await client.listBoards({ projectKey: "PROJ" });
+		expect(boards).toHaveLength(51);
+		expect(boards[50]).toEqual({
+			id: "51",
+			name: "Flow",
+			type: "kanban",
+			supportsSprints: false,
+		});
+		expect(calls).toHaveBeenCalledWith("jira_get_agile_boards", {
+			start_at: 50,
+			limit: 50,
+			project_key: "PROJ",
+		});
+	});
+
 	it("parses the sprints of an issue", async () => {
 		const client = new JiraClient();
 		mockTools(client, () => [

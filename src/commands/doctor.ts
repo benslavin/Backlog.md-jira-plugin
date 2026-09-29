@@ -2,9 +2,19 @@ import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
+import type { JiraSprint } from "../integrations/jira-sprints.ts";
 import { JiraClient } from "../integrations/jira.ts";
+import {
+	MilestoneAdapter,
+	readMilestoneRefusals,
+} from "../integrations/milestones.ts";
+import { SprintRegistry } from "../state/sprint-registry.ts";
 import { FrontmatterStore } from "../state/store.ts";
-import { loadFieldMappings } from "../utils/field-mapping.ts";
+import {
+	loadFieldMappings,
+	loadSprintMapping,
+	readTaskFrontmatter,
+} from "../utils/field-mapping.ts";
 import { getJiraClientOptions } from "../utils/jira-config.ts";
 import { logger } from "../utils/logger.ts";
 import {
@@ -266,6 +276,150 @@ export async function checkFieldMappings(
 	return results;
 }
 
+/**
+ * Verify sprint sync can work: the Sprint field exists and the board is
+ * reachable and has sprints (errors); flag linked tasks whose milestone
+ * matches no sprint when sprints are not created, and milestones the
+ * adapter refused to update (warnings). Returns the number of warnings.
+ */
+export async function checkSprintSync(
+	jira: Pick<JiraClient, "getSprintFieldId" | "getBoard" | "getBoardSprints">,
+	options: { cwd?: string; taskIds?: string[] } = {},
+): Promise<number> {
+	const cwd = options.cwd ?? process.cwd();
+	// Throws FieldMappingConfigError for invalid entries
+	const mapping = loadSprintMapping(cwd);
+	if (!mapping) {
+		logger.info("  ✓ Sprint sync not configured");
+		return 0;
+	}
+
+	const errors: string[] = [];
+	let warnings = 0;
+	const describe = (error: unknown) =>
+		error instanceof Error ? error.message.split("\n")[0] : String(error);
+
+	try {
+		const fieldId = await jira.getSprintFieldId();
+		if (fieldId) {
+			logger.info(`  ✓ Sprint field ${fieldId}`);
+			const stored = SprintRegistry.load(cwd).sprintFieldId;
+			if (stored && stored !== fieldId) {
+				logger.warn(
+					`  ⚠ .backlog-jira/sprints.json records Sprint field ${stored} but Jira reports ${fieldId}; remove "sprintFieldId" from sprints.json so it is rediscovered`,
+				);
+				warnings++;
+			}
+		} else {
+			errors.push(
+				"Sprint field not found: this Jira site has no Jira Software Sprint field",
+			);
+		}
+	} catch (error) {
+		errors.push(`Could not discover the Sprint field: ${describe(error)}`);
+	}
+
+	let sprints: JiraSprint[] | null = null;
+	try {
+		const board = await jira.getBoard(mapping.boardId);
+		if (!board) {
+			errors.push(
+				`Board ${mapping.boardId} was not found or is not accessible (check "boardId" and board permissions)`,
+			);
+		} else if (!board.supportsSprints) {
+			errors.push(
+				`Board ${mapping.boardId} (${board.name}) is a ${board.type} board without sprints; sprint sync needs a scrum board`,
+			);
+		} else {
+			sprints = await jira.getBoardSprints(mapping.boardId);
+			logger.info(
+				`  ✓ Board ${board.id} (${board.name}, ${board.type}) with ${sprints.length} sprint${sprints.length === 1 ? "" : "s"}`,
+			);
+		}
+	} catch (error) {
+		errors.push(`Board ${mapping.boardId} is unreachable: ${describe(error)}`);
+	}
+
+	if (mapping.direction !== "pull") {
+		if (mapping.createSprints) {
+			logger.info(
+				`  ℹ createSprints is on: pushing a task whose milestone matches no sprint creates a future sprint on board ${mapping.boardId}`,
+			);
+		} else if (sprints) {
+			const unmatched = findUnmatchedMilestones(
+				options.taskIds ?? new FrontmatterStore().getAllMappings().keys(),
+				sprints,
+				cwd,
+			);
+			if (unmatched.length > 0) {
+				logger.warn(
+					`  ⚠ ${unmatched.length} linked task${unmatched.length === 1 ? "" : "s"} ha${unmatched.length === 1 ? "s a milestone" : "ve milestones"} matching no future or active sprint on board ${mapping.boardId} (createSprints is off, so push will report them):`,
+				);
+				for (const { taskId, milestone } of unmatched) {
+					logger.warn(`      ${taskId}: ${milestone}`);
+				}
+				warnings++;
+			}
+		}
+	}
+
+	for (const refusal of readMilestoneRefusals(cwd)) {
+		logger.warn(
+			`  ⚠ Milestone ${refusal.milestoneId}${refusal.title ? ` (${refusal.title})` : ""} was not updated (${refusal.fields.join(", ")}): ${refusal.reason}`,
+		);
+		warnings++;
+	}
+
+	if (errors.length > 0) {
+		for (const error of errors) logger.error(`  ✗ ${error}`);
+		throw new Error(
+			`${errors.length} sprint sync problem${errors.length === 1 ? "" : "s"}`,
+		);
+	}
+	return warnings;
+}
+
+/**
+ * Linked tasks whose milestone stands for no registered sprint and matches
+ * no open sprint of the board by name
+ */
+function findUnmatchedMilestones(
+	taskIds: Iterable<string>,
+	sprints: JiraSprint[],
+	cwd: string,
+): Array<{ taskId: string; milestone: string }> {
+	const registry = SprintRegistry.load(cwd);
+	const milestones = new MilestoneAdapter({ cwd, registry });
+	const openNames = new Set(
+		sprints
+			.filter((s) => s.state !== "closed")
+			.map((s) => s.name.trim().toLowerCase()),
+	);
+	const unmatched: Array<{ taskId: string; milestone: string }> = [];
+	for (const taskId of taskIds) {
+		const value = readTaskFrontmatter(taskId).milestone;
+		if (typeof value !== "string" || !value.trim()) continue;
+		const milestone = milestones.get(value) ?? milestones.findByTitle(value);
+		if (milestone && registry.findByMilestone(milestone.id)) continue;
+		const title = (milestone?.title ?? value).trim().toLowerCase();
+		if (openNames.has(title)) continue;
+		unmatched.push({
+			taskId,
+			milestone: milestone ? `${milestone.title} (${milestone.id})` : value,
+		});
+	}
+	return unmatched;
+}
+
+async function checkSprintSyncWithJira(): Promise<number> {
+	const jira = new JiraClient({ ...getJiraClientOptions(), silentMode: true });
+	try {
+		return await checkSprintSync(jira);
+	} finally {
+		await jira.close().catch(() => {});
+	}
+}
+
 async function checkFieldMappingsWithJira(): Promise<void> {
 	const jira = new JiraClient({ ...getJiraClientOptions(), silentMode: true });
 	try {
@@ -278,7 +432,11 @@ async function checkFieldMappingsWithJira(): Promise<void> {
 export async function doctorCommand(): Promise<void> {
 	logger.info("Running environment checks...\n");
 
-	const checks = [
+	const checks: Array<{
+		name: string;
+		fn: () => Promise<unknown>;
+		critical: boolean;
+	}> = [
 		{ name: "Node.js runtime", fn: checkNodeRuntime, critical: true },
 		{ name: "Backlog CLI", fn: checkBacklogCLI, critical: true },
 		{ name: "Dependencies", fn: checkNodeModules, critical: true },
@@ -286,6 +444,7 @@ export async function doctorCommand(): Promise<void> {
 		{ name: "Database", fn: checkDatabasePerms, critical: true },
 		{ name: "MCP Connectivity", fn: checkMCPConnectivity, critical: true },
 		{ name: "Field mappings", fn: checkFieldMappingsWithJira, critical: true },
+		{ name: "Sprint sync", fn: checkSprintSyncWithJira, critical: true },
 		{ name: "Backlog.md project", fn: checkMCPServer, critical: false },
 		{ name: "Git status", fn: checkGitStatus, critical: false },
 		{ name: "Disk space", fn: checkDiskSpace, critical: false },
@@ -296,7 +455,9 @@ export async function doctorCommand(): Promise<void> {
 
 	for (const check of checks) {
 		try {
-			await check.fn();
+			// Checks may report warnings they logged themselves
+			const warnings = await check.fn();
+			if (typeof warnings === "number") warningCount += warnings;
 		} catch (error) {
 			const errorMsg = error instanceof Error ? error.message : String(error);
 			if (check.critical) {

@@ -27,7 +27,7 @@ backlog-jira watch          # Continuous sync mode
 ```bash
 backlog-jira status         # View sync status
 backlog-jira map            # Configure status mappings
-backlog-jira map-fields     # Map extra Jira fields onto Backlog tasks (pull, push or both)
+backlog-jira map-fields     # Map extra Jira fields (or a board's sprints) onto Backlog tasks
 backlog-jira configure      # Update configuration
 backlog-jira view <task-id> # View task sync details
 ```
@@ -58,6 +58,26 @@ The plugin stores configuration in `.backlog-jira/config.json`:
   }
 }
 ```
+
+## Sprint Sync
+
+A `fieldMappings` entry of type `sprint` represents the Jira sprints of one board as Backlog milestones:
+
+```json
+{ "backlog": "milestone", "jira": "sprint", "type": "sprint", "direction": "both",
+  "boardId": 12, "createSprints": false, "archiveClosedSprints": true, "pullScope": "all" }
+```
+
+- **Pull**: task milestone = the issue's open sprint, else its most recently completed sprint, else none. Missing milestones are created (due date from the end date, description from the goal). Renames, date and goal changes follow Jira, and closed sprints archive their milestone (`archiveClosedSprints`).
+- **Push**: changing a task's milestone moves the issue into the matching future or active sprint (by registry, then by name on the board). Clearing it moves the issue to the backlog. An unmatched milestone is reported, or creates a sprint with `createSprints: true`. Closed sprints are never targeted and subtasks are skipped.
+- **Sync**: sprints are compared by Jira sprint id, so renames are not changes. One-sided changes propagate, and changes on both sides follow the conflict strategy (`sprint` in the prompt).
+- `pullScope: "open"` limits `pull --import` to `sprint in openSprints()`.
+
+Set up with `backlog-jira map-fields boards` and `backlog-jira map-fields add milestone sprint --type sprint --board <id>`, then check with `backlog-jira doctor`. `backlog-jira view <task-id>` shows a task's sprint history and `backlog-jira status` counts tasks per sprint.
+
+To move a task to another sprint, change its milestone with `backlog task edit <id> -m <milestone>` and push. Do not create, rename or delete sprint milestones by hand: the plugin keeps them in step with Jira.
+
+Limitations: one board per config; Jira Software and the MCP Atlassian `jira_agile` toolset are required; archived milestones cannot be renamed or unarchived; created sprints get a start date just after creation (MCP Atlassian requires one). See `docs/sprint-sync.md`.
 
 ## Authentication
 
@@ -175,6 +195,8 @@ The plugin uses file-based storage for sync state:
 - **Link records**: Jira metadata (jira_key, jira_url, jira_last_sync, jira_sync_state) and mapped `frontmatter:<key>` values stored in `.backlog-jira/links/<task-id>.json` and mirrored into task file frontmatter. `backlog task edit` drops these frontmatter keys; the plugin reads them back from the link record and restores them after its own edits
 - **Snapshots**: Stored as JSON files in `.backlog-jira/snapshots/<task-id>-<side>.json`
 - **Operations log**: Append-only log in `.backlog-jira/ops-log.jsonl`
+- **Sprint registry**: `.backlog-jira/sprints.json` links Jira sprint ids to milestone ids with the last known sprint data and the discovered Sprint field id (version controlled). Link records also hold each issue's sprint history
+- **Milestone refusals**: `.backlog-jira/milestone-refusals.json` lists sprint milestones the plugin refused to update directly (reported by `doctor`)
 
 This approach:
 - ✅ Git-friendly (all metadata is version controlled)

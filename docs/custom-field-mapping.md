@@ -10,6 +10,8 @@ Each mapping has a direction:
 - `push`: `backlog-jira push` and `backlog-jira create-issue` send the Backlog value to Jira. The value is never written to Backlog; Jira-side edits are overwritten by the next push or sync.
 - `both`: values flow both ways, and `backlog-jira sync` detects conflicts per field.
 
+To sync Jira sprints as milestones, use a mapping of type `sprint`; see the [Sprint Sync Guide](sprint-sync.md).
+
 ## Configuration Location
 
 Mappings live in `.backlog-jira/config.json` under the top-level `fieldMappings` array. Edit the file directly or use `backlog-jira map-fields`.
