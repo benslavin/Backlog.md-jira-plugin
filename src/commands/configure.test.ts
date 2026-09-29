@@ -74,6 +74,30 @@ async function answer(answers: Record<string, Answer | Answer[]>) {
 	return asked;
 }
 
+/** Recently updated project issues with all fields, as MCP Atlassian returns them */
+const SAMPLE_ISSUES = [
+	{
+		key: "API-1",
+		status: "Open",
+		fields: {
+			summary: "One",
+			customfield_10016: { value: 3, name: "Story Points" },
+			customfield_10030: { value: "Acme", name: "Client" },
+			customfield_10040: { value: null, name: "Unused Text" },
+			watches: { watch_count: 1 },
+		},
+	},
+	{
+		key: "API-2",
+		status: "In Review",
+		fields: {
+			summary: "Two",
+			customfield_10016: { value: 5, name: "Story Points" },
+			customfield_10040: { value: "", name: "Unused Text" },
+		},
+	},
+];
+
 /** Statuses the fake Jira site knows (lower-cased) */
 const JIRA_STATUSES = [
 	"open",
@@ -95,7 +119,15 @@ function fakeJira(overrides: Partial<Record<keyof WizardJira, unknown>> = {}) {
 			{ id: "1", name: "Task" },
 			{ id: "2", name: "Story" },
 		]),
-		searchIssues: mock(async (jql: string) => {
+		searchIssues: mock(async (jql: string, options?: { fields?: string }) => {
+			if (options?.fields === "*all") {
+				return {
+					issues: SAMPLE_ISSUES,
+					total: SAMPLE_ISSUES.length,
+					startAt: 0,
+					maxResults: 50,
+				};
+			}
 			// Jira rejects status names that are not statuses
 			const inClause = jql.match(/status in \((.*)\)/);
 			if (inClause) {
@@ -141,6 +173,25 @@ function fakeJira(overrides: Partial<Record<keyof WizardJira, unknown>> = {}) {
 				custom: true,
 				schema: { type: "number" },
 			},
+			{
+				id: "customfield_10030",
+				name: "Client",
+				custom: true,
+				schema: { type: "string" },
+			},
+			{
+				id: "customfield_10040",
+				name: "Unused Text",
+				custom: true,
+				schema: { type: "string" },
+			},
+			{
+				id: "fixVersions",
+				name: "Fix versions",
+				schema: { type: "array", items: "version" },
+			},
+			{ id: "watches", name: "Watchers", schema: { type: "watches" } },
+			{ id: "summary", name: "Summary", schema: { type: "string" } },
 			{
 				id: "customfield_10020",
 				name: "Sprint",
@@ -399,42 +450,92 @@ describe("configure --step", () => {
 		expect(readConfig().jira).toMatchObject({ projectKey: "OPS" });
 	});
 
-	it("status: lists Jira statuses per issue type and covers each one", async () => {
+	it("status: picks statuses from one checkbox list and proposes the whole mapping", async () => {
 		writeExistingConfig();
 		const asked = await answer({
-			// Keep the suggested statuses and add one
-			extraStatuses: (q: PromptObject) => `${q.initial}, Blocked`,
-			// Leave Blocked unmapped, accept the suggestion for the others
-			backlogStatus: (q: PromptObject) =>
-				String(q.message).includes("Blocked")
-					? "__unmapped__"
-					: (q.choices as Array<{ value: string }>)[q.initial as number].value,
+			// Keep the ticked statuses
+			jiraStatuses: (q: PromptObject) =>
+				(q.choices as Array<{ value: string; selected?: boolean }>)
+					.filter((c) => c.selected)
+					.map((c) => c.value),
+			extraStatuses: "Blocked",
+			statusDecision: "change",
+			// Arrays queue answers, so a multiselect answer is wrapped
+			statusesToChange: [["Blocked"]],
+			backlogStatus: "__unmapped__",
 		});
 
 		const result = await run({ step: "status" });
 
 		expect(result.completed).toEqual(["status"]);
 		expect(printed()).toContain("Backlog statuses: To Do, In Progress, Done");
-		expect(printed()).toMatch(/Task\s+Open, In Review/);
-		// Transition names, Backlog statuses and the mapping, checked with Jira:
-		// "Start Progress" and "In Progress" are not statuses on this site.
-		// Only the transition name is pre-filled; the others may belong to
-		// another project's workflow.
-		expect(printed()).toContain("Statuses API issues can move to: Closed");
-		expect(printed()).toContain(
-			"Statuses used elsewhere on this Jira site: To Do, Done",
-		);
-		expect(asked.find((q) => q.name === "extraStatuses")?.initial).toBe(
-			"Closed",
-		);
+		const list = asked.find((q) => q.name === "jiraStatuses");
+		const choices = (
+			list?.choices as Array<{
+				title: string;
+				value: string;
+				selected: boolean;
+			}>
+		).map((c) => ({ value: c.value, selected: c.selected, title: c.title }));
+		// Issues, then checked transition names, then other statuses on the
+		// site; "Start Progress" and "In Progress" are not statuses there
+		expect(choices.map((c) => [c.value, c.selected])).toEqual([
+			["Open", true],
+			["In Review", true],
+			["Closed", true],
+			["To Do", false],
+			["Done", true],
+		]);
+		expect(choices[0].title).toContain("on Task issues");
+		expect(choices[2].title).toContain("reachable from Task");
+		expect(choices[3].title).toContain("used elsewhere on this Jira site");
+		// The whole proposal is shown; only the changed status is asked about
+		expect(printed()).toMatch(/In Review\s+→\s+In Progress/);
+		expect(asked.filter((q) => q.name === "backlogStatus")).toHaveLength(1);
+
 		const backlog = readConfig().backlog as RawConfig;
 		expect(backlog.statusMapping).toEqual({
 			"To Do": ["Open"],
 			"In Progress": ["In Review"],
-			Done: ["Done", "Closed"],
+			Done: ["Closed", "Done"],
 		});
 		expect(backlog.unmappedJiraStatuses).toEqual(["Blocked"]);
 		expect(backlog.assigneeMapping).toEqual({ "@dev": "dev@acme.test" });
+	});
+
+	it("status: accepting the proposal asks nothing per status and drops init's unused defaults", async () => {
+		await answer({ run_status: true });
+		// Default config from init with a project
+		await run({ nonInteractive: true, projectKey: "API" });
+		const asked = await answer({
+			jiraStatuses: (q: PromptObject) =>
+				(q.choices as Array<{ value: string; selected?: boolean }>)
+					.filter((c) => c.selected)
+					.map((c) => c.value),
+			extraStatuses: "",
+			statusDecision: "accept",
+		});
+
+		await run({ step: "status" });
+
+		// init's defaults are not ticked just because they are mapped
+		const list = asked.find((q) => q.name === "jiraStatuses");
+		expect(
+			(list?.choices as Array<{ value: string; selected: boolean }>)
+				.filter((c) => !c.selected)
+				.map((c) => c.value),
+		).toEqual(["To Do", "Done"]);
+		expect(asked.some((q) => q.name === "backlogStatus")).toBe(false);
+		// Unticked statuses and mapped names that are not statuses on the site
+		// (Backlog, In Progress, Resolved) are removed
+		expect((readConfig().backlog as RawConfig).statusMapping).toEqual({
+			"To Do": ["Open"],
+			"In Progress": ["In Review"],
+			Done: ["Closed"],
+		});
+		expect(printed()).toContain(
+			"Removed: To Do, Done, Backlog, In Progress, Resolved",
+		);
 	});
 
 	it("status: needs a project", async () => {
@@ -493,36 +594,85 @@ describe("configure --step", () => {
 		expect(readConfig().fieldMappings).toEqual([]);
 	});
 
-	it("fields: adds a mapping with a suggested type and validates like map-fields", async () => {
+	it("fields: offers fields the project uses, ranked, and adds the ticked ones", async () => {
 		writeExistingConfig({ fieldMappings: [] });
 		const asked = await answer({
-			addField: [true, true, false],
-			jiraField: "customfield_10016",
-			backlogTarget: ["frontmatter:story_points", "frontmatter:jira_key"],
-			fieldType: (q: PromptObject) =>
-				(q.choices as Array<{ value: string }>)[q.initial as number].value,
-			fieldDirection: "both",
+			fieldsToSync: (q: PromptObject) =>
+				(q.choices as Array<{ value: string; selected?: boolean }>)
+					.filter((c) => c.selected)
+					.map((c) => c.value),
+			fieldDecision: "accept",
 		});
+		const jira = fakeJira();
 
-		const result = await run({ step: "fields" });
+		const result = await run({ step: "fields" }, jira);
 
 		expect(result.completed).toEqual(["fields"]);
-		const fieldQuestion = asked.find((q) => q.name === "jiraField");
-		const titles = (fieldQuestion?.choices as Array<{ title: string }>).map(
-			(c) => c.title,
+		expect(jira.searchIssues).toHaveBeenCalledWith(
+			'project = "API" ORDER BY updated DESC',
+			{ maxResults: 50, fields: "*all" },
 		);
-		expect(titles).toEqual([
-			"Story Points (customfield_10016) [number] → number",
+		const list = asked.find((q) => q.name === "fieldsToSync");
+		const choices = list?.choices as Array<{
+			title: string;
+			value: string;
+			selected?: boolean;
+		}>;
+		// Most used first; unused only when commonly useful; no core-synced,
+		// sprint or watcher fields
+		expect(choices.map((c) => c.value)).toEqual([
+			"customfield_10016",
+			"customfield_10030",
+			"fixVersions",
+			"__search__",
 		]);
-		// The reserved key is rejected by the same validation as map-fields
-		expect(printed()).toMatch(/✗[^\n]*\n.*"frontmatter:jira_key" collides/);
-		const targetQuestion = asked.find((q) => q.name === "backlogTarget");
-		expect(targetQuestion?.initial).toBe("frontmatter:story_points");
+		expect(choices[0].title).toContain("2/2 issues");
+		expect(choices[0].title).toContain("frontmatter:story_points");
+		expect(choices[2].title).toContain("not used yet");
+		expect(choices.map((c) => Boolean(c.selected))).toEqual([
+			true,
+			false,
+			false,
+			false,
+		]);
+		expect(asked.some((q) => q.name === "backlogTarget")).toBe(false);
 		expect(readConfig().fieldMappings).toEqual([
 			{
 				backlog: "frontmatter:story_points",
 				jira: "customfield_10016",
 				type: "number",
+				direction: "pull",
+			},
+		]);
+	});
+
+	it("fields: adjusting and searching use the same validation as map-fields", async () => {
+		writeExistingConfig({ fieldMappings: [] });
+		await answer({
+			fieldsToSync: [["customfield_10030", "__search__"]],
+			jiraField: "customfield_10040",
+			backlogTarget: [
+				"frontmatter:unused",
+				"frontmatter:jira_key",
+				"frontmatter:client",
+			],
+			fieldType: (q: PromptObject) =>
+				(q.choices as Array<{ value: string }>)[q.initial as number].value,
+			fieldDirection: "both",
+			searchAnother: false,
+			fieldDecision: "adjust",
+		});
+
+		const result = await run({ step: "fields" });
+
+		expect(result.completed).toEqual(["fields"]);
+		// The reserved key is rejected by the same validation as map-fields
+		expect(printed()).toMatch(/✗ frontmatter:jira_key: [\s\S]*collides/);
+		expect(readConfig().fieldMappings).toEqual([
+			{
+				backlog: "frontmatter:client",
+				jira: "customfield_10040",
+				type: "string",
 				direction: "both",
 			},
 		]);

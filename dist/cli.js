@@ -27616,8 +27616,8 @@ function suggestBacklogStatus(jiraStatus, backlogStatuses, currentMapping = {}) 
     return first;
   return backlogStatuses.find((s) => /progress/i.test(s)) ?? backlogStatuses[Math.min(1, backlogStatuses.length - 1)] ?? first;
 }
-function buildStatusMappingConfig(choices, previous = {}, previousUnmapped = []) {
-  const chosen = new Set(Object.keys(choices).map((s) => s.toLowerCase()));
+function buildStatusMappingConfig(choices, previous = {}, previousUnmapped = [], dropped = []) {
+  const chosen = new Set([...Object.keys(choices), ...dropped].map((s) => s.toLowerCase()));
   const statusMapping = {};
   const add = (backlogStatus, jiraStatus) => {
     const list = statusMapping[backlogStatus] ?? [];
@@ -27654,6 +27654,145 @@ function uncoveredJiraStatuses(jiraStatuses, statusMapping, unmapped = []) {
   const covered = new Set([...Object.values(statusMapping).flat(), ...unmapped].map((s) => String(s).toLowerCase()));
   return jiraStatuses.filter((s) => !covered.has(s.toLowerCase()));
 }
+function isDefaultStatusMapping(mapping) {
+  const backlog = getSection(createDefaultConfig(), "backlog");
+  return JSON.stringify(mapping) === JSON.stringify(backlog.statusMapping);
+}
+function buildStatusOptions(perType, check, previous = {}, previousUnmapped = []) {
+  const options = [];
+  const find = (name) => options.find((o) => o.name.toLowerCase() === name.toLowerCase());
+  for (const { issueType, statuses } of perType) {
+    for (const status of statuses) {
+      const option = find(status);
+      if (option)
+        option.issueTypes.push(issueType);
+      else
+        options.push({
+          name: status,
+          source: "issues",
+          issueTypes: [issueType],
+          selected: true
+        });
+    }
+  }
+  const reachable = new Map;
+  for (const { issueType, candidates } of perType) {
+    for (const candidate of candidates) {
+      const key = candidate.toLowerCase();
+      reachable.set(key, [...reachable.get(key) ?? [], issueType]);
+    }
+  }
+  const configured = isDefaultStatusMapping(previous) ? new Set : new Set([...Object.values(previous).flat(), ...previousUnmapped].map((s) => String(s).toLowerCase()));
+  if (check?.checked) {
+    for (const status of check.statuses) {
+      if (find(status))
+        continue;
+      const types = reachable.get(status.toLowerCase());
+      options.push(types ? {
+        name: status,
+        source: "transitions",
+        issueTypes: types,
+        selected: true
+      } : {
+        name: status,
+        source: "site",
+        issueTypes: [],
+        selected: configured.has(status.toLowerCase())
+      });
+    }
+  } else {
+    for (const [key, types] of reachable) {
+      const name = perType.flatMap((t) => t.candidates).find((c) => c.toLowerCase() === key) ?? key;
+      if (!find(name)) {
+        options.push({
+          name,
+          source: "unverified",
+          issueTypes: types,
+          selected: false
+        });
+      }
+    }
+  }
+  return options;
+}
+function describeStatusOption(option) {
+  const types = option.issueTypes.join(", ");
+  switch (option.source) {
+    case "issues":
+      return `on ${types} issues`;
+    case "transitions":
+      return `reachable from ${types}`;
+    case "site":
+      return "used elsewhere on this Jira site";
+    case "unverified":
+      return `transition name on ${types}, not confirmed as a status`;
+  }
+}
+function hasValue(value) {
+  let v = value;
+  if (v && typeof v === "object" && !Array.isArray(v) && "value" in v) {
+    v = v.value;
+  }
+  if (v === null || v === undefined)
+    return false;
+  if (typeof v === "string")
+    return v.trim() !== "";
+  if (Array.isArray(v))
+    return v.length > 0;
+  if (typeof v === "object")
+    return Object.keys(v).length > 0;
+  return true;
+}
+function frontmatterTargetFor(name) {
+  const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+  return `frontmatter:${slug || "field"}`;
+}
+function suggestFieldMappings(fields, sampleIssues, options = {}) {
+  const mappedFields = new Set((options.mappedFields ?? []).map((f) => f.toLowerCase()));
+  const takenTargets = new Set((options.mappedTargets ?? []).map((t) => t.toLowerCase()));
+  const suggestions = [];
+  for (const field of fields) {
+    if (HIDDEN_FIELDS.has(field.id.toLowerCase()))
+      continue;
+    if (field.schema?.custom && HIDDEN_SCHEMAS.has(field.schema.custom))
+      continue;
+    if (mappedFields.has(field.id.toLowerCase()))
+      continue;
+    const type = suggestTypeForSchema(field.schema);
+    if (!type || !FIELD_MAPPING_TYPES.includes(type))
+      continue;
+    const used = sampleIssues.filter((issue) => hasValue(getJiraFieldValue(issue, field.id))).length;
+    const valuable = VALUABLE_FIELD.test(field.name);
+    if (used === 0 && !valuable)
+      continue;
+    const base = /^story ?points?( estimate)?$|^story point estimate$/i.test(field.name.trim()) ? "frontmatter:story_points" : frontmatterTargetFor(field.name);
+    let backlog = base;
+    for (let n = 2;takenTargets.has(backlog.toLowerCase()); n++) {
+      backlog = `${base}_${n}`;
+    }
+    suggestions.push({
+      field,
+      backlog,
+      type,
+      direction: "pull",
+      used,
+      valuable,
+      selected: valuable && used > 0
+    });
+  }
+  suggestions.sort((a, b) => b.used - a.used || Number(b.valuable) - Number(a.valuable) || a.field.name.localeCompare(b.field.name));
+  const limited = suggestions.slice(0, options.limit ?? 20);
+  const seen = new Set(takenTargets);
+  for (const s of limited) {
+    let target = s.backlog;
+    for (let n = 2;seen.has(target.toLowerCase()); n++) {
+      target = `${s.backlog}_${n}`;
+    }
+    s.backlog = target;
+    seen.add(target.toLowerCase());
+  }
+  return limited;
+}
 function mergeToolsets(existing) {
   const tokens = (existing ?? "").split(",").map((t) => t.trim()).filter(Boolean);
   if (tokens.some((t) => t.toLowerCase() === "all"))
@@ -27685,13 +27824,62 @@ function applySprintSettings(config, settings) {
   }, { force: true });
   return applyRequiredToolsets(updated);
 }
-var DONE_WORDS, TODO_WORDS, REQUIRED_TOOLSETS;
+var DONE_WORDS, TODO_WORDS, HIDDEN_FIELDS, HIDDEN_SCHEMAS, VALUABLE_FIELD, REQUIRED_TOOLSETS;
 var init_setup = __esm(() => {
   init_map_fields();
+  init_jira_sprints();
   init_config_file();
   init_field_mapping();
   DONE_WORDS = /\b(done|closed|resolved|complete|completed|released|shipped|fixed|won'?t|cancel+ed|rejected|duplicate)\b/i;
   TODO_WORDS = /\b(to ?do|open|backlog|new|reopened|selected|ready|triage|planned)\b/i;
+  HIDDEN_FIELDS = new Set([
+    "summary",
+    "description",
+    "status",
+    "statuscategorychangedate",
+    "assignee",
+    "reporter",
+    "creator",
+    "labels",
+    "priority",
+    "issuetype",
+    "project",
+    "created",
+    "updated",
+    "lastViewed",
+    "comment",
+    "attachment",
+    "issuelinks",
+    "subtasks",
+    "parent",
+    "watches",
+    "votes",
+    "worklog",
+    "timetracking",
+    "aggregatetimespent",
+    "aggregatetimeestimate",
+    "aggregatetimeoriginalestimate",
+    "aggregateprogress",
+    "progress",
+    "workratio",
+    "timespent",
+    "timeestimate",
+    "thumbnail",
+    "security",
+    "issuerestriction",
+    "resolution",
+    "resolutiondate"
+  ].map((id) => id.toLowerCase()));
+  HIDDEN_SCHEMAS = new Set([
+    SPRINT_FIELD_SCHEMA,
+    "com.pyxis.greenhopper.jira:gh-lexo-rank",
+    "com.pyxis.greenhopper.jira:gh-epic-link",
+    "com.pyxis.greenhopper.jira:gh-epic-status",
+    "com.pyxis.greenhopper.jira:gh-epic-color",
+    "com.atlassian.jira.plugins.jira-development-integration-plugin:devsummarycf",
+    "com.atlassian.jira.plugin.system.customfieldtypes:atlassian-team"
+  ]);
+  VALUABLE_FIELD = /story ?points?|story point estimate|due ?date|start date|components?|fix ?versions?|affects? versions?|target (start|end)|team|environment|severity/i;
   REQUIRED_TOOLSETS = ["jira_projects", "jira_agile"];
 });
 
@@ -28672,6 +28860,16 @@ async function ask(question) {
     throw new WizardCancelled;
   return answer;
 }
+function shortLabelsWhenDone(labels) {
+  return function() {
+    const prompt = this;
+    if (!prompt.done || !Array.isArray(prompt.value))
+      return;
+    for (const choice of prompt.value) {
+      choice.title = labels.get(choice.value) ?? choice.title;
+    }
+  };
+}
 function describeError(error) {
   return error instanceof Error ? error.message : String(error);
 }
@@ -28957,7 +29155,6 @@ async function statusStep(ctx) {
   const known = [...Object.values(previous).flat(), ...previousUnmapped].map(String);
   let perType = [];
   let check = null;
-  const unverified = [];
   try {
     await withJira(ctx, async (jira) => {
       let types = [issueType];
@@ -28983,59 +29180,44 @@ async function statusStep(ctx) {
       if (candidates.length === 0)
         return;
       check = await checkStatusNames(jira, projectKey, candidates);
-      if (!check.checked) {
-        unverified.push(...perType.flatMap((t) => t.candidates));
-      }
     });
   } catch (error) {
     console.log(source_default.yellow(`  ⚠ Could not read Jira statuses of ${projectKey}: ${describeError(error)}`));
   }
-  console.log(`  Backlog statuses: ${source_default.cyan(backlogStatuses.join(", "))}`);
+  const statusOptions = buildStatusOptions(perType, check, previous, previousUnmapped);
+  console.log(`  Backlog statuses: ${source_default.cyan(backlogStatuses.join(", "))}
+`);
   const jiraStatuses = [];
   const addStatus = (status) => {
     if (!jiraStatuses.some((s) => s.toLowerCase() === status.toLowerCase())) {
       jiraStatuses.push(status);
     }
   };
-  let suggested;
-  let message;
-  if (perType.length > 0) {
-    console.log(`  Jira statuses of ${projectKey} issues, by issue type:`);
-    for (const entry of perType) {
-      console.log(`    ${entry.issueType.padEnd(12)} ${source_default.yellow(entry.statuses.join(", "))}`);
-      for (const status of entry.statuses)
-        addStatus(status);
+  if (statusOptions.length > 0) {
+    const width = Math.max(...statusOptions.map((o) => o.name.length));
+    for (const status of await ask({
+      type: "multiselect",
+      name: "jiraStatuses",
+      message: `Jira statuses in ${projectKey}'s workflow`,
+      hint: "space toggles, enter confirms",
+      instructions: false,
+      choices: statusOptions.map((option) => ({
+        title: `${option.name.padEnd(width)}  ${source_default.gray(describeStatusOption(option))}`,
+        value: option.name,
+        selected: option.selected
+      })),
+      onRender: shortLabelsWhenDone(new Map(statusOptions.map((o) => [o.name, o.name])))
+    })) {
+      addStatus(status);
     }
-    const checked = check;
-    if (checked?.checked) {
-      const transitionNames = new Set(perType.flatMap((t) => t.candidates).map((c) => c.toLowerCase()));
-      suggested = checked.statuses.filter((s) => transitionNames.has(s.toLowerCase()));
-      const elsewhere = checked.statuses.filter((s) => !transitionNames.has(s.toLowerCase()));
-      if (suggested.length > 0) {
-        console.log(`  Statuses ${projectKey} issues can move to: ${source_default.yellow(suggested.join(", "))}`);
-        console.log(source_default.gray("  (Transition names of the project's issues that Jira confirms are statuses.)"));
-      }
-      if (elsewhere.length > 0) {
-        console.log(`  Statuses used elsewhere on this Jira site: ${source_default.gray(elsewhere.join(", "))}`);
-        console.log(source_default.gray(`  (Your Backlog statuses and current mapping. Add them below only if ${projectKey}'s workflow has them.)`));
-      }
-    } else {
-      suggested = unverified;
-      if (suggested.length > 0) {
-        console.log(`  Transition names (possibly statuses, not checked): ${source_default.yellow(suggested.join(", "))}`);
-      }
-    }
-    message = suggested.length > 0 ? "Other Jira statuses to map (edit the list; comma-separated):" : "Other Jira statuses to map (comma-separated, optional):";
   } else {
-    console.log(source_default.yellow(`  No Jira statuses found for ${projectKey}. Enter them manually.`));
-    suggested = known;
-    message = "Jira statuses (comma-separated):";
+    console.log(source_default.yellow(`  No Jira statuses found for ${projectKey}.`));
   }
   for (const status of splitList(await ask({
     type: "text",
     name: "extraStatuses",
-    message,
-    initial: suggested.join(", ")
+    message: statusOptions.length > 0 ? "Other Jira statuses, if any (comma-separated, Enter to skip):" : "Jira statuses (comma-separated):",
+    initial: statusOptions.length > 0 ? "" : known.join(", ")
   }))) {
     addStatus(status);
   }
@@ -29043,47 +29225,89 @@ async function statusStep(ctx) {
     console.log(source_default.yellow("  No statuses to map; keeping the current mapping."));
     return "skipped";
   }
-  const UNMAPPED = "__unmapped__";
+  const confirmed = check;
+  const isOffered = (name) => statusOptions.some((o) => o.name.toLowerCase() === name.toLowerCase());
+  const notStatuses = confirmed?.checked ? known.filter((name) => !isOffered(name) && !confirmed.statuses.some((s) => s.toLowerCase() === name.toLowerCase())) : [];
+  const dropped = [...statusOptions.map((o) => o.name), ...notStatuses].filter((name) => !jiraStatuses.some((s) => s.toLowerCase() === name.toLowerCase()));
   const choices = {};
   for (const status of jiraStatuses) {
     const wasUnmapped = previousUnmapped.some((s) => s.toLowerCase() === status.toLowerCase());
-    const suggestion = suggestBacklogStatus(status, backlogStatuses, previous);
-    const options = [
-      ...backlogStatuses.map((s) => ({ title: s, value: s })),
-      { title: "Leave unmapped (keep the Jira status name)", value: UNMAPPED }
-    ];
-    const answer = await ask({
-      type: "select",
-      name: "backlogStatus",
-      message: `Jira "${status}" →`,
-      choices: options,
-      initial: wasUnmapped ? options.length - 1 : Math.max(0, backlogStatuses.indexOf(suggestion))
+    choices[status] = wasUnmapped ? null : suggestBacklogStatus(status, backlogStatuses, previous);
+  }
+  const width = Math.max(...jiraStatuses.map((s) => s.length));
+  const describeChoice = (status) => choices[status] ?? source_default.gray("unmapped (pulled as-is)");
+  const printMapping = () => {
+    for (const status of jiraStatuses) {
+      console.log(`    ${status.padEnd(width)}  →  ${describeChoice(status)}`);
+    }
+  };
+  console.log(`
+  Proposed mapping (Jira → Backlog):`);
+  printMapping();
+  console.log();
+  const decision = await ask({
+    type: "select",
+    name: "statusDecision",
+    message: "Use this mapping?",
+    choices: [
+      { title: "Yes", value: "accept" },
+      { title: "Change some statuses", value: "change" }
+    ],
+    initial: 0
+  });
+  if (decision === "change") {
+    const UNMAPPED = "__unmapped__";
+    const toChange = await ask({
+      type: "multiselect",
+      name: "statusesToChange",
+      message: "Statuses to change",
+      hint: "space toggles, enter confirms",
+      instructions: false,
+      choices: jiraStatuses.map((status) => ({
+        title: `${status.padEnd(width)}  →  ${describeChoice(status)}`,
+        value: status
+      })),
+      onRender: shortLabelsWhenDone(new Map(jiraStatuses.map((j) => [j, j])))
     });
-    choices[status] = answer === UNMAPPED ? null : answer;
+    for (const status of toChange) {
+      const options = [
+        ...backlogStatuses.map((s) => ({ title: s, value: s })),
+        {
+          title: "Leave unmapped (pull the Jira status name as-is)",
+          value: UNMAPPED
+        }
+      ];
+      const current = choices[status];
+      const answer = await ask({
+        type: "select",
+        name: "backlogStatus",
+        message: `Jira "${status}" →`,
+        choices: options,
+        initial: current === null ? options.length - 1 : Math.max(0, backlogStatuses.indexOf(current))
+      });
+      choices[status] = answer === UNMAPPED ? null : answer;
+    }
+    if (toChange.length > 0) {
+      console.log(`
+  Mapping (Jira → Backlog):`);
+      printMapping();
+    }
   }
-  const { statusMapping, unmappedJiraStatuses } = buildStatusMappingConfig(choices, previous, previousUnmapped);
+  const { statusMapping, unmappedJiraStatuses } = buildStatusMappingConfig(choices, previous, previousUnmapped, dropped);
   const uncovered = uncoveredJiraStatuses(jiraStatuses, statusMapping, unmappedJiraStatuses);
-  const values = { statusMapping };
-  setSectionValues(ctx.config, "backlog", values);
+  setSectionValues(ctx.config, "backlog", { statusMapping });
   const section = getSection(ctx.config, "backlog");
-  if (unmappedJiraStatuses.length > 0) {
-    section.unmappedJiraStatuses = unmappedJiraStatuses;
-  } else {
-    section.unmappedJiraStatuses = undefined;
-  }
-  console.log(source_default.green("  ✓ Status mapping:"));
-  for (const [backlogStatus, list] of Object.entries(statusMapping)) {
-    console.log(`    ${backlogStatus.padEnd(14)} ← ${list.join(", ")}`);
-  }
-  if (unmappedJiraStatuses.length > 0) {
-    console.log(source_default.gray(`    Left unmapped: ${unmappedJiraStatuses.join(", ")}`));
+  section.unmappedJiraStatuses = unmappedJiraStatuses.length > 0 ? unmappedJiraStatuses : undefined;
+  console.log(source_default.green("  ✓ Status mapping saved"));
+  if (dropped.length > 0) {
+    console.log(source_default.gray(`    Removed: ${dropped.join(", ")}`));
   }
   if (uncovered.length > 0) {
     console.log(source_default.yellow(`    Not covered: ${uncovered.join(", ")}`));
   }
   const unused = backlogStatuses.filter((s) => !statusMapping[s]);
   if (unused.length > 0) {
-    console.log(source_default.gray(`    Backlog statuses without a Jira status (cannot be pushed): ${unused.join(", ")}`));
+    console.log(source_default.gray(`    Backlog statuses with no Jira status (cannot be pushed): ${unused.join(", ")}`));
   }
   return "done";
 }
@@ -29202,7 +29426,61 @@ async function sprintsStep(ctx) {
   console.log(source_default.gray(`    mcp.envVars.TOOLSETS=${String(toolsets)} keeps the jira_agile tools enabled`));
   return "done";
 }
+function describeField(f) {
+  const schema = f.schema?.type ? f.schema.items ? `${f.schema.type}<${f.schema.items}>` : f.schema.type : "unknown";
+  const suggested = suggestTypeForSchema(f.schema);
+  return `${f.name} (${f.id}) [${schema}]${suggested ? ` → ${suggested}` : ""}`;
+}
+async function promptFieldMapping(fields, preset) {
+  const jira = preset?.jira ?? (fields.length > 0 ? await ask({
+    type: "autocomplete",
+    name: "jiraField",
+    message: "Jira field (type to filter):",
+    choices: fields.map((f) => ({
+      title: describeField(f),
+      value: f.id
+    })),
+    suggest: filterChoices
+  }) : (await ask({
+    type: "text",
+    name: "jiraField",
+    message: "Jira field id (customfield_NNNNN or a system field):",
+    validate: (value) => value.trim() ? true : "Required"
+  })).trim());
+  const field = fields.find((f) => f.id === jira);
+  const label = preset?.label ?? (field ? `${field.name} (${field.id})` : jira);
+  if (preset)
+    console.log(source_default.bold(`
+  ${label}`));
+  const backlog = (await ask({
+    type: "text",
+    name: "backlogTarget",
+    message: "Backlog target (milestone, dependencies, references, priority, labels or frontmatter:<key>):",
+    initial: preset?.backlog ?? frontmatterTargetFor(field?.name ?? jira),
+    validate: (value) => validateBacklogTarget(value.trim()) ?? true
+  })).trim();
+  const suggested = preset?.type ?? suggestTypeForSchema(field?.schema);
+  const type = await ask({
+    type: "select",
+    name: "fieldType",
+    message: "Value type:",
+    choices: FIELD_MAPPING_TYPES.map((t) => ({ title: t, value: t })),
+    initial: Math.max(0, FIELD_MAPPING_TYPES.indexOf(suggested))
+  });
+  const direction = await ask({
+    type: "select",
+    name: "fieldDirection",
+    message: "Direction:",
+    choices: FIELD_MAPPING_DIRECTIONS.map((d) => ({
+      title: d === "pull" ? "pull - Jira → Backlog" : d === "push" ? "push - Backlog → Jira" : "both",
+      value: d
+    })),
+    initial: Math.max(0, FIELD_MAPPING_DIRECTIONS.indexOf(preset?.direction ?? "pull"))
+  });
+  return { backlog, jira, type, direction, label };
+}
 async function fieldsStep(ctx) {
+  const { projectKey } = jiraSection(ctx);
   const { mappings, sprintMapping } = validateFieldMappings(ctx.config.fieldMappings);
   if (mappings.length > 0 || sprintMapping) {
     console.log("  Current mappings:");
@@ -29212,77 +29490,136 @@ async function fieldsStep(ctx) {
     for (const m of mappings) {
       console.log(`    ${m.backlog} ← ${m.jira} (${m.type}, ${m.direction})`);
     }
+    console.log(source_default.gray(`    Remove one with: backlog-jira map-fields remove <target>
+`));
   }
   let fields = [];
+  let sample = [];
   try {
-    fields = await withJira(ctx, (jira) => jira.searchFields("", 1000));
+    await withJira(ctx, async (jira) => {
+      fields = await jira.searchFields("", 1000);
+      if (!projectKey)
+        return;
+      try {
+        sample = (await jira.searchIssues(`project = "${projectKey}" ORDER BY updated DESC`, { maxResults: FIELD_SAMPLE_SIZE, fields: "*all" })).issues;
+      } catch (error) {
+        logger.debug({ error }, "Could not sample project issues");
+      }
+    });
   } catch (error) {
     console.log(source_default.yellow(`  ⚠ Could not list Jira fields: ${describeError(error)}`));
   }
   fields = fields.filter((f) => f.schema?.custom !== SPRINT_FIELD_SCHEMA).sort((a, b) => a.name.localeCompare(b.name));
-  const byId = new Map(fields.map((f) => [f.id, f]));
-  const describe = (f) => {
-    const schema = f.schema?.type ? f.schema.items ? `${f.schema.type}<${f.schema.items}>` : f.schema.type : "unknown";
-    const suggested = suggestTypeForSchema(f.schema);
-    return `${f.name} (${f.id}) [${schema}]${suggested ? ` → ${suggested}` : ""}`;
-  };
-  let added = 0;
-  for (;; ) {
-    const more = await ask({
+  const suggestions = suggestFieldMappings(fields, sample, {
+    mappedTargets: [
+      ...mappings.map((m) => m.backlog),
+      ...sprintMapping ? ["milestone"] : []
+    ],
+    mappedFields: mappings.map((m) => m.jira)
+  });
+  const SEARCH = "__search__";
+  const plan = [];
+  let search = false;
+  if (suggestions.length > 0) {
+    console.log(source_default.gray(sample.length > 0 ? `  Fields with values on the ${sample.length} most recently updated ${projectKey} issues, most used first. Fields the plugin already syncs are not listed.` : "  Commonly useful fields (no project issues to sample). Fields the plugin already syncs are not listed."));
+    const width = Math.max(...suggestions.map((s) => s.field.name.length));
+    const usage = (used) => sample.length === 0 ? "" : used > 0 ? `${used}/${sample.length} issues` : "not used yet";
+    const usageWidth = Math.max(...suggestions.map((s) => usage(s.used).length));
+    const picked = await ask({
+      type: "multiselect",
+      name: "fieldsToSync",
+      message: "Fields to sync into Backlog",
+      hint: "space toggles, enter confirms",
+      instructions: false,
+      choices: [
+        ...suggestions.map((s) => ({
+          title: `${s.field.name.padEnd(width)}  ${source_default.gray(usage(s.used).padEnd(usageWidth))}  → ${s.backlog} ${source_default.gray(`(${s.type})`)}`,
+          value: s.field.id,
+          selected: s.selected
+        })),
+        { title: source_default.cyan("Search all fields…"), value: SEARCH }
+      ],
+      onRender: shortLabelsWhenDone(new Map([
+        ...suggestions.map((sg) => [sg.field.id, sg.field.name]),
+        [SEARCH, "search"]
+      ]))
+    });
+    search = picked.includes(SEARCH);
+    for (const s of suggestions) {
+      if (picked.includes(s.field.id)) {
+        plan.push({
+          backlog: s.backlog,
+          jira: s.field.id,
+          type: s.type,
+          direction: s.direction,
+          label: `${s.field.name} (${s.field.id})`
+        });
+      }
+    }
+  } else {
+    console.log(source_default.gray(sample.length > 0 ? `  None of the ${sample.length} sampled ${projectKey} issues have values in fields beyond what the plugin already syncs.` : "  No field suggestions."));
+    search = await ask({
       type: "confirm",
-      name: "addField",
-      message: added === 0 ? "Add a field mapping?" : "Add another field mapping?",
+      name: "searchFields",
+      message: "Search all Jira fields?",
       initial: false
     });
-    if (!more)
-      break;
-    const jiraField = fields.length > 0 ? await ask({
-      type: "autocomplete",
-      name: "jiraField",
-      message: "Jira field (type to filter):",
-      choices: fields.map((f) => ({ title: describe(f), value: f.id })),
-      suggest: filterChoices
-    }) : (await ask({
-      type: "text",
-      name: "jiraField",
-      message: "Jira field id (customfield_NNNNN or a system field):",
-      validate: (value) => value.trim() ? true : "Required"
-    })).trim();
-    const field = byId.get(jiraField);
-    const slug = (field?.name ?? jiraField).toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
-    const backlog = (await ask({
-      type: "text",
-      name: "backlogTarget",
-      message: "Backlog target (milestone, dependencies, references, priority, labels or frontmatter:<key>):",
-      initial: `frontmatter:${slug}`,
-      validate: (value) => validateBacklogTarget(value.trim()) ?? true
-    })).trim();
-    const suggested = suggestTypeForSchema(field?.schema);
-    const type = await ask({
-      type: "select",
-      name: "fieldType",
-      message: "Value type:",
-      choices: FIELD_MAPPING_TYPES.map((t) => ({ title: t, value: t })),
-      initial: suggested ? FIELD_MAPPING_TYPES.indexOf(suggested) : 0
+  }
+  while (search) {
+    plan.push(await promptFieldMapping(fields));
+    search = await ask({
+      type: "confirm",
+      name: "searchAnother",
+      message: "Search for another field?",
+      initial: false
     });
-    const direction = await ask({
-      type: "select",
-      name: "fieldDirection",
-      message: "Direction:",
-      choices: FIELD_MAPPING_DIRECTIONS.map((d) => ({
-        title: d === "pull" ? "pull - Jira → Backlog" : d === "push" ? "push - Backlog → Jira" : "both",
-        value: d
-      })),
-      initial: 0
-    });
-    const mapping = { backlog, jira: jiraField, type, direction };
+  }
+  if (plan.length === 0)
+    return "skipped";
+  const printPlan = () => {
+    const targetWidth = Math.max(...plan.map((p) => p.backlog.length));
+    for (const p of plan) {
+      console.log(`    ${p.backlog.padEnd(targetWidth)}  ←  ${p.label}  ${source_default.gray(`${p.type}, ${p.direction}`)}`);
+    }
+  };
+  console.log(`
+  Field mappings to add (Backlog ← Jira):`);
+  printPlan();
+  console.log(source_default.gray(`  pull copies Jira values into Backlog; choose Adjust to rename a target or sync both ways.
+`));
+  const decision = await ask({
+    type: "select",
+    name: "fieldDecision",
+    message: "Add these mappings?",
+    choices: [
+      { title: "Yes", value: "accept" },
+      { title: "Adjust target, type or direction", value: "adjust" },
+      { title: "Cancel", value: "cancel" }
+    ],
+    initial: 0
+  });
+  if (decision === "cancel")
+    return "skipped";
+  if (decision === "adjust") {
+    for (const [index, entry] of plan.entries()) {
+      plan[index] = await promptFieldMapping(fields, entry);
+    }
+  }
+  let added = 0;
+  for (const entry of plan) {
+    const mapping = {
+      backlog: entry.backlog,
+      jira: entry.jira,
+      type: entry.type,
+      direction: entry.direction
+    };
     try {
       let force = false;
-      if (Array.isArray(ctx.config.fieldMappings) && ctx.config.fieldMappings.some((m) => m?.backlog === backlog)) {
+      if (Array.isArray(ctx.config.fieldMappings) && ctx.config.fieldMappings.some((m) => m?.backlog === entry.backlog)) {
         force = await ask({
           type: "confirm",
           name: "replaceMapping",
-          message: `A mapping for "${backlog}" exists. Replace it?`,
+          message: `A mapping for "${entry.backlog}" exists. Replace it?`,
           initial: false
         });
         if (!force)
@@ -29290,13 +29627,13 @@ async function fieldsStep(ctx) {
       }
       ctx.config = addFieldMapping(ctx.config, mapping, { force });
       added++;
-      console.log(source_default.green(`  ✓ ${backlog} ← ${jiraField} (${type}, ${direction})`));
+      console.log(source_default.green(`  ✓ ${entry.backlog} ← ${entry.jira} (${entry.type}, ${entry.direction})`));
     } catch (error) {
-      console.log(source_default.red(`  ✗ ${describeError(error)}`));
+      console.log(source_default.red(`  ✗ ${entry.backlog}: ${describeError(error)}`));
     }
   }
   if (added > 0) {
-    console.log(source_default.gray("  Value maps: backlog-jira map-fields add <target> <field> --type <type> --value-map 'Jira=Backlog' --force"));
+    console.log(source_default.gray("  Values fill in on the next pull. Translate values with: backlog-jira map-fields add <target> <field> --type <type> --value-map 'Jira=Backlog' --force"));
   }
   return added > 0 ? "done" : "skipped";
 }
@@ -29533,7 +29870,7 @@ async function configureCommand(options = {}) {
   const result = await runConfigure(options);
   process.exit(result.failed ? 1 : 0);
 }
-var import_prompts, CONFIGURE_STEPS, STEP_INFO, IMPORT_LIMIT = 50, WizardCancelled, STEP_RUNNERS;
+var import_prompts, CONFIGURE_STEPS, STEP_INFO, FIELD_SAMPLE_SIZE = 50, IMPORT_LIMIT = 50, WizardCancelled, STEP_RUNNERS;
 var init_configure = __esm(() => {
   init_source();
   init_jira_sprints();

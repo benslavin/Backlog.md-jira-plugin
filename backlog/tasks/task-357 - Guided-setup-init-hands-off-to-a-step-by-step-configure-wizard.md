@@ -5,7 +5,7 @@ status: Done
 assignee:
   - '@claude'
 created_date: '2026-09-29 14:22'
-updated_date: '2026-09-29 15:08'
+updated_date: '2026-09-29 15:29'
 labels:
   - setup
   - cli
@@ -39,6 +39,8 @@ One guided path should take a user from an empty Backlog.md project to a verifie
 - [x] #13 Errors logged under an error key show their message instead of {} (connect, doctor and other commands)
 - [x] #14 README no longer claims .env files are read and documents configure, init and the guided steps; doctor no longer reports 'No field mappings configured' when a sprint mapping exists
 - [x] #15 The status step also offers Jira statuses no issue is in yet: transition names, Backlog statuses and current mappings are checked against Jira via JQL, shown with their source, and pre-filled for confirmation
+- [x] #16 The status step picks the project's Jira statuses from one checkbox list labelled by source and issue type, proposes the whole mapping at once and only asks per status for the ones chosen to change; unticked statuses are dropped from the mapping
+- [x] #17 The field mappings step ranks fields by how many sampled project issues use them, hides core-synced, unsupported and noise fields, and adds the ticked ones from one checkbox list with suggested target, type and direction (adjusting one by one and searching all fields stay available)
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -86,4 +88,13 @@ Status discovery for statuses no issue is in yet (AC #15):
 - Tests: discovery candidates, rejected-name parsing, retry, per-name fallback, unchecked and escaping; the wizard's status test uses a fake Jira that rejects unknown statuses. 662 pass
 
 - Checked statuses are split by source: transition names of the project's issues are pre-filled as "Statuses <KEY> issues can move to". Checked Backlog statuses and mapping entries (e.g. init's default Open, Backlog, Closed, Resolved) are listed as "used elsewhere on this Jira site" and not pre-filled, because Jira checks names site-wide
+
+Status and field steps reworked after a real run (AC #16, #17):
+- Status: one checkbox list of the project's Jira statuses, each labelled by source and issue type ("on Epic, Story issues", "reachable from Story", "used elsewhere on this Jira site"). Confirmed ones are ticked; site-only names are ticked only when they come from a mapping the user configured, not init's defaults. An optional prompt adds unlisted statuses
+- The whole mapping is proposed as a table with one "Use this mapping? Yes / Change some statuses" choice; per-status selects only for the statuses picked to change
+- Unticked statuses, and mapped names Jira rejects as statuses, are dropped from the mapping (`buildStatusMappingConfig` `dropped` parameter), so init's Open, Backlog, Closed and Resolved no longer linger
+- Fields: samples the 50 most recently updated project issues with `fields=*all` and lists fields with values, most used first, with usage ("2/2 issues"), suggested target and type (`suggestFieldMappings`). Hidden: fields the plugin already syncs, sprint/rank/epic/dev-panel fields, watchers and similar noise, unsupported types, fields already mapped. Unused fields are only offered when commonly useful (story points, due date, components, versions...). Commonly useful fields in use are pre-ticked; both story point field names map to frontmatter:story_points
+- The ticked fields are shown as one plan with "Yes / Adjust target, type or direction / Cancel". "Search all fields…" keeps the old per-field flow
+- Multiselect summary lines show short names (onRender hook) instead of full titles with labels
+- Checked by rendering both steps in a pseudo-terminal with a fake Jira; 672 tests pass
 <!-- SECTION:NOTES:END -->

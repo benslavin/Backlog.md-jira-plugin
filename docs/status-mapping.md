@@ -14,10 +14,13 @@ Status mappings are defined in `.backlog-jira/config.json` under the `backlog.st
 backlog-jira configure --step status
 ```
 
-lists the Jira statuses of the configured project per issue type next to the Backlog statuses from `backlog config get statuses`, and asks for the Backlog status of each Jira status (pre-selecting the current mapping or a likely match). MCP Atlassian has no workflow API, so statuses come from two sources:
+shows one checkbox list of the project's Jira statuses. MCP Atlassian has no workflow API, so they come from:
 
-- **Statuses the project's issues are in**, per issue type.
-- **Statuses no issue is in yet**: transition names (MCP Atlassian does not return transition targets, but transitions are often named after their target status), your Backlog statuses and the Jira statuses of the current mapping. The step checks them with a `status in (...)` JQL query, which Jira rejects naming every value that is not a status. Jira checks names across the whole site, so only checked transition names (which come from the project's own issues) are pre-filled; checked Backlog statuses and mapping entries are listed as "used elsewhere on this Jira site" for you to add if the project's workflow has them. A Jira status can be left unmapped on purpose: it is recorded in `backlog.unmappedJiraStatuses` and pulled as-is. Mappings for Jira statuses not shown are kept.
+- **on issues**: statuses the project's issues are in, per issue type (ticked)
+- **reachable**: transition names of those issues that Jira confirms are statuses (ticked). MCP Atlassian does not return transition targets, but transitions are often named after their target status
+- **used elsewhere on this Jira site**: your Backlog statuses and current mapping entries that Jira knows as statuses. Jira checks names across the whole site, so these are only ticked when they are in a mapping you configured
+
+Statuses not listed can be typed in. The step then proposes the whole mapping (the current mapping, a status of the same name, or a guess from common workflow names) and asks only about the statuses you choose to change; a status can be left unmapped on purpose (recorded in `backlog.unmappedJiraStatuses` and pulled as-is). Unticked statuses, and mapped names Jira does not know as statuses, are removed from the mapping.
 
 ## Configuration Format
 

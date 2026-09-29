@@ -233,9 +233,9 @@ This creates `.backlog-jira/` directory with:
 | `credentials` | Checks that `JIRA_URL` and `JIRA_EMAIL` + `JIRA_API_TOKEN` (or `JIRA_PERSONAL_TOKEN`) are exported, and explains the export, `.env` and direnv options when they are not. You can enter them for the current session (optionally writing a git-ignored `.env`); tokens are never written to `config.json`. |
 | `connection` | Starts the MCP Atlassian server and calls Jira, showing the underlying error (Docker, DNS, HTTP status, proxy) when it fails. |
 | `project` | Picks the project and the issue type from lists fetched from Jira. |
-| `status` | Lists the project's Jira statuses per issue type next to your Backlog statuses (from `backlog config`), suggests statuses no issue is in yet (checked with Jira), and maps each Jira status, or leaves it explicitly unmapped. |
+| `status` | One checkbox list of the project's Jira statuses, labelled by where they were found (on Epic/Story issues, reachable by a transition, or used elsewhere on the site) and checked with Jira. Proposes the whole mapping to your Backlog statuses (from `backlog config`); accept it, or change only the statuses you pick (including leaving one explicitly unmapped). Unticked statuses are removed from the mapping. |
 | `sprints` | Lists the project's boards, and for a board with sprints writes the sprint mapping (direction, `createSprints`, `archiveClosedSprints`, `pullScope`) and sets `mcp.envVars.TOOLSETS` so the `jira_agile` tools stay enabled. |
-| `fields` | Shows the discovered Jira fields with suggested types and adds field mappings with the same validation as `map-fields add`. |
+| `fields` | Samples the 50 most recently updated project issues and lists the fields they use, most used first, with a suggested target and type. Fields the plugin already syncs (summary, status, assignee…), the sprint and noise fields (watchers, rank) and unsupported types are left out. Tick the ones to sync, then accept or adjust; "Search all fields…" covers the rest. Mappings go through the same validation as `map-fields add`. |
 | `conflict` | Chooses the conflict strategy. |
 | `filter` | Sets the import JQL (default `project = KEY ORDER BY created DESC`) and shows how many issues match. |
 

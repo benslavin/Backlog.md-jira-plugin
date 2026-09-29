@@ -5,14 +5,18 @@ import {
 	applyRequiredToolsets,
 	applySprintSettings,
 	buildStatusMappingConfig,
+	buildStatusOptions,
 	checkStatusNames,
 	credentialHelpLines,
+	describeStatusOption,
 	detectCredentials,
 	discoverProjectStatuses,
+	isDefaultStatusMapping,
 	mergeEnvFile,
 	mergeToolsets,
 	rejectedStatusNames,
 	suggestBacklogStatus,
+	suggestFieldMappings,
 	uncoveredJiraStatuses,
 } from "./setup.ts";
 
@@ -390,5 +394,215 @@ describe("checkStatusNames", () => {
 		expect(jira.searchIssues.mock.calls[0][0]).toBe(
 			'project = "CR2" AND status in ("Won\\"t do")',
 		);
+	});
+});
+
+describe("buildStatusMappingConfig dropped statuses", () => {
+	it("removes dropped statuses from the previous mapping and unmapped list", () => {
+		const result = buildStatusMappingConfig(
+			{ "To Do": "To Do" },
+			{ "To Do": ["To Do", "Open", "Backlog"], Done: ["Done", "Resolved"] },
+			["Parked"],
+			["open", "Resolved", "Parked"],
+		);
+		expect(result).toEqual({
+			statusMapping: { "To Do": ["Backlog", "To Do"], Done: ["Done"] },
+			unmappedJiraStatuses: [],
+		});
+	});
+});
+
+describe("isDefaultStatusMapping", () => {
+	it("recognises the mapping init writes", () => {
+		expect(
+			isDefaultStatusMapping({
+				"To Do": ["To Do", "Open", "Backlog"],
+				"In Progress": ["In Progress"],
+				Done: ["Done", "Closed", "Resolved"],
+			}),
+		).toBe(true);
+		expect(isDefaultStatusMapping({ "To Do": ["Open"] })).toBe(false);
+	});
+});
+
+describe("buildStatusOptions", () => {
+	const perType = [
+		{
+			issueType: "Epic",
+			statuses: ["To Do"],
+			candidates: ["In Progress", "Done"],
+		},
+		{
+			issueType: "Story",
+			statuses: ["To Do"],
+			candidates: ["In Progress", "Client Review", "Start Work"],
+		},
+	];
+
+	it("orders by certainty, names issue types and ticks confirmed statuses", () => {
+		const options = buildStatusOptions(
+			perType,
+			{
+				statuses: ["In Progress", "Done", "Client Review", "Open"],
+				checked: true,
+			},
+			{ "To Do": ["Open"] },
+		);
+		expect(options).toEqual([
+			{
+				name: "To Do",
+				source: "issues",
+				issueTypes: ["Epic", "Story"],
+				selected: true,
+			},
+			{
+				name: "In Progress",
+				source: "transitions",
+				issueTypes: ["Epic", "Story"],
+				selected: true,
+			},
+			{
+				name: "Done",
+				source: "transitions",
+				issueTypes: ["Epic"],
+				selected: true,
+			},
+			{
+				name: "Client Review",
+				source: "transitions",
+				issueTypes: ["Story"],
+				selected: true,
+			},
+			// In the user's own mapping, so ticked
+			{ name: "Open", source: "site", issueTypes: [], selected: true },
+		]);
+		expect(describeStatusOption(options[0])).toBe("on Epic, Story issues");
+		expect(describeStatusOption(options[3])).toBe("reachable from Story");
+		expect(describeStatusOption(options[4])).toBe(
+			"used elsewhere on this Jira site",
+		);
+	});
+
+	it("does not tick site statuses that only come from init's default mapping", () => {
+		const options = buildStatusOptions(
+			perType,
+			{ statuses: ["Open", "Closed"], checked: true },
+			{
+				"To Do": ["To Do", "Open", "Backlog"],
+				"In Progress": ["In Progress"],
+				Done: ["Done", "Closed", "Resolved"],
+			},
+		);
+		expect(options.filter((o) => o.source === "site")).toEqual([
+			{ name: "Open", source: "site", issueTypes: [], selected: false },
+			{ name: "Closed", source: "site", issueTypes: [], selected: false },
+		]);
+	});
+
+	it("offers unticked transition names when Jira could not check them", () => {
+		const options = buildStatusOptions(perType, {
+			statuses: [],
+			checked: false,
+		});
+		expect(
+			options.filter((o) => o.source === "unverified").map((o) => o.name),
+		).toEqual(["In Progress", "Done", "Client Review", "Start Work"]);
+		expect(options.every((o) => o.source === "issues" || !o.selected)).toBe(
+			true,
+		);
+	});
+});
+
+describe("suggestFieldMappings", () => {
+	const fields = [
+		{ id: "customfield_1", name: "Story Points", schema: { type: "number" } },
+		{ id: "customfield_2", name: "Client", schema: { type: "string" } },
+		{ id: "customfield_3", name: "Empty Notes", schema: { type: "string" } },
+		{
+			id: "customfield_4",
+			name: "Rank",
+			schema: {
+				type: "any",
+				custom: "com.pyxis.greenhopper.jira:gh-lexo-rank",
+			},
+		},
+		{ id: "customfield_5", name: "Checklist Blob", schema: { type: "any" } },
+		{ id: "duedate", name: "Due date", schema: { type: "date" } },
+		{
+			id: "components",
+			name: "Components",
+			schema: { type: "array", items: "component" },
+		},
+		{ id: "watches", name: "Watchers", schema: { type: "watches" } },
+		{
+			id: "labels",
+			name: "Labels",
+			schema: { type: "array", items: "string" },
+		},
+		{ id: "customfield_6", name: "Client", schema: { type: "string" } },
+	];
+	const issue = (fieldValues: Record<string, unknown>) =>
+		({ key: "P-1", fields: fieldValues }) as unknown as JiraIssue;
+	const sample = [
+		issue({
+			customfield_1: { value: 3, name: "Story Points" },
+			customfield_2: { value: "Acme" },
+			customfield_3: { value: "  " },
+			customfield_5: { value: { x: 1 } },
+			customfield_6: { value: "B" },
+			components: [{ name: "API" }],
+			labels: ["a"],
+		}),
+		issue({
+			customfield_1: { value: 5 },
+			customfield_3: { value: null },
+			components: [],
+		}),
+	];
+
+	it("ranks used fields, keeps useful unused ones and hides the rest", () => {
+		const suggestions = suggestFieldMappings(fields, sample);
+		expect(
+			suggestions.map((s) => [
+				s.field.id,
+				s.used,
+				s.backlog,
+				s.type,
+				s.selected,
+			]),
+		).toEqual([
+			["customfield_1", 2, "frontmatter:story_points", "number", true],
+			["components", 1, "frontmatter:components", "array", true],
+			["customfield_2", 1, "frontmatter:client", "string", false],
+			["customfield_6", 1, "frontmatter:client_2", "string", false],
+			["duedate", 0, "frontmatter:due_date", "date", false],
+		]);
+		expect(suggestions.every((s) => s.direction === "pull")).toBe(true);
+	});
+
+	it("uses one target for both story point field names", () => {
+		const [suggestion] = suggestFieldMappings(
+			[
+				{
+					id: "customfield_9",
+					name: "Story point estimate",
+					schema: { type: "number" },
+				},
+			],
+			[],
+		);
+		expect(suggestion.backlog).toBe("frontmatter:story_points");
+	});
+
+	it("skips mapped fields and avoids mapped targets", () => {
+		const suggestions = suggestFieldMappings(fields, sample, {
+			mappedFields: ["customfield_1"],
+			mappedTargets: ["frontmatter:client"],
+			limit: 2,
+		});
+		expect(suggestions.map((s) => [s.field.id, s.backlog])).toEqual([
+			["components", "frontmatter:components"],
+			["customfield_2", "frontmatter:client_2"],
+		]);
 	});
 });

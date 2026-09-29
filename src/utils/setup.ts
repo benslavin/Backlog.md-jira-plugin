@@ -1,11 +1,21 @@
 import { spawnSync } from "node:child_process";
 import { addFieldMapping } from "../commands/map-fields.ts";
+import { SPRINT_FIELD_SCHEMA } from "../integrations/jira-sprints.ts";
 import type { JiraIssue, JiraTransition } from "../integrations/jira.ts";
-import { type RawConfig, getSection, setSectionValues } from "./config-file.ts";
 import {
+	type RawConfig,
+	createDefaultConfig,
+	getSection,
+	setSectionValues,
+} from "./config-file.ts";
+import {
+	FIELD_MAPPING_TYPES,
 	type FieldMappingDirection,
+	type FieldMappingType,
 	SPRINT_MAPPING_TYPE,
 	type SprintPullScope,
+	getJiraFieldValue,
+	suggestTypeForSchema,
 } from "./field-mapping.ts";
 
 // ===== Credentials =====
@@ -318,14 +328,19 @@ export function suggestBacklogStatus(
 /**
  * Build backlog.statusMapping from a choice per Jira status (null leaves the
  * status unmapped, so it is kept as-is on pull). Jira statuses not chosen now
- * keep their previous mapping.
+ * keep their previous mapping unless they are dropped.
  */
 export function buildStatusMappingConfig(
 	choices: Record<string, string | null>,
 	previous: Record<string, string[]> = {},
 	previousUnmapped: string[] = [],
+	/** Jira statuses to remove from the previous mapping */
+	dropped: string[] = [],
 ): { statusMapping: Record<string, string[]>; unmappedJiraStatuses: string[] } {
-	const chosen = new Set(Object.keys(choices).map((s) => s.toLowerCase()));
+	// Statuses chosen now or dropped do not keep their previous entry
+	const chosen = new Set(
+		[...Object.keys(choices), ...dropped].map((s) => s.toLowerCase()),
+	);
 	const statusMapping: Record<string, string[]> = {};
 	const add = (backlogStatus: string, jiraStatus: string) => {
 		const list = statusMapping[backlogStatus] ?? [];
@@ -371,6 +386,308 @@ export function uncoveredJiraStatuses(
 		),
 	);
 	return jiraStatuses.filter((s) => !covered.has(s.toLowerCase()));
+}
+
+/**
+ * Whether a status mapping is still the default `backlog-jira init` writes
+ */
+export function isDefaultStatusMapping(
+	mapping: Record<string, string[]>,
+): boolean {
+	const backlog = getSection(createDefaultConfig(), "backlog");
+	return JSON.stringify(mapping) === JSON.stringify(backlog.statusMapping);
+}
+
+export type StatusSource = "issues" | "transitions" | "site" | "unverified";
+
+/** A Jira status offered in the status step's checkbox list */
+export interface StatusOption {
+	name: string;
+	source: StatusSource;
+	/** Issue types it was found on (issues) or reachable from (transitions) */
+	issueTypes: string[];
+	/** Ticked by default */
+	selected: boolean;
+}
+
+/**
+ * The Jira statuses to offer, most certain first:
+ * - on issues: statuses the project's issues are in
+ * - transitions: checked transition names of the project's issues
+ * - site: checked Backlog statuses and mapping entries (any workflow on the
+ *   site may use them; ticked only when the user configured the mapping)
+ * - unverified: transition names Jira could not be asked about
+ */
+export function buildStatusOptions(
+	perType: IssueTypeStatuses[],
+	check: { statuses: string[]; checked: boolean } | null,
+	previous: Record<string, string[]> = {},
+	previousUnmapped: string[] = [],
+): StatusOption[] {
+	const options: StatusOption[] = [];
+	const find = (name: string) =>
+		options.find((o) => o.name.toLowerCase() === name.toLowerCase());
+	for (const { issueType, statuses } of perType) {
+		for (const status of statuses) {
+			const option = find(status);
+			if (option) option.issueTypes.push(issueType);
+			else
+				options.push({
+					name: status,
+					source: "issues",
+					issueTypes: [issueType],
+					selected: true,
+				});
+		}
+	}
+
+	const reachable = new Map<string, string[]>();
+	for (const { issueType, candidates } of perType) {
+		for (const candidate of candidates) {
+			const key = candidate.toLowerCase();
+			reachable.set(key, [...(reachable.get(key) ?? []), issueType]);
+		}
+	}
+	const configured = isDefaultStatusMapping(previous)
+		? new Set<string>()
+		: new Set(
+				[...Object.values(previous).flat(), ...previousUnmapped].map((s) =>
+					String(s).toLowerCase(),
+				),
+			);
+
+	if (check?.checked) {
+		for (const status of check.statuses) {
+			if (find(status)) continue;
+			const types = reachable.get(status.toLowerCase());
+			options.push(
+				types
+					? {
+							name: status,
+							source: "transitions",
+							issueTypes: types,
+							selected: true,
+						}
+					: {
+							name: status,
+							source: "site",
+							issueTypes: [],
+							selected: configured.has(status.toLowerCase()),
+						},
+			);
+		}
+	} else {
+		for (const [key, types] of reachable) {
+			const name =
+				perType
+					.flatMap((t) => t.candidates)
+					.find((c) => c.toLowerCase() === key) ?? key;
+			if (!find(name)) {
+				options.push({
+					name,
+					source: "unverified",
+					issueTypes: types,
+					selected: false,
+				});
+			}
+		}
+	}
+	return options;
+}
+
+/** Short label for where a status option came from */
+export function describeStatusOption(option: StatusOption): string {
+	const types = option.issueTypes.join(", ");
+	switch (option.source) {
+		case "issues":
+			return `on ${types} issues`;
+		case "transitions":
+			return `reachable from ${types}`;
+		case "site":
+			return "used elsewhere on this Jira site";
+		case "unverified":
+			return `transition name on ${types}, not confirmed as a status`;
+	}
+}
+
+// ===== Field mappings =====
+
+/**
+ * Fields the plugin already syncs, handles in another step, or that have no
+ * useful Backlog representation
+ */
+const HIDDEN_FIELDS = new Set(
+	[
+		"summary",
+		"description",
+		"status",
+		"statuscategorychangedate",
+		"assignee",
+		"reporter",
+		"creator",
+		"labels",
+		"priority",
+		"issuetype",
+		"project",
+		"created",
+		"updated",
+		"lastViewed",
+		"comment",
+		"attachment",
+		"issuelinks",
+		"subtasks",
+		"parent",
+		"watches",
+		"votes",
+		"worklog",
+		"timetracking",
+		"aggregatetimespent",
+		"aggregatetimeestimate",
+		"aggregatetimeoriginalestimate",
+		"aggregateprogress",
+		"progress",
+		"workratio",
+		"timespent",
+		"timeestimate",
+		"thumbnail",
+		"security",
+		"issuerestriction",
+		"resolution",
+		"resolutiondate",
+	].map((id) => id.toLowerCase()),
+);
+
+/** Custom field schemas that are noise or handled elsewhere */
+const HIDDEN_SCHEMAS = new Set([
+	SPRINT_FIELD_SCHEMA,
+	"com.pyxis.greenhopper.jira:gh-lexo-rank",
+	"com.pyxis.greenhopper.jira:gh-epic-link",
+	"com.pyxis.greenhopper.jira:gh-epic-status",
+	"com.pyxis.greenhopper.jira:gh-epic-color",
+	"com.atlassian.jira.plugins.jira-development-integration-plugin:devsummarycf",
+	"com.atlassian.jira.plugin.system.customfieldtypes:atlassian-team",
+]);
+
+/** Names of fields most teams want in Backlog, when the project uses them */
+const VALUABLE_FIELD =
+	/story ?points?|story point estimate|due ?date|start date|components?|fix ?versions?|affects? versions?|target (start|end)|team|environment|severity/i;
+
+type DiscoveredField = {
+	id: string;
+	name: string;
+	custom?: boolean;
+	schema?: { type?: string; items?: string; system?: string; custom?: string };
+};
+
+export interface FieldSuggestion {
+	field: DiscoveredField;
+	backlog: string;
+	type: FieldMappingType;
+	direction: FieldMappingDirection;
+	/** Sampled project issues with a value */
+	used: number;
+	/** Well-known useful field */
+	valuable: boolean;
+	/** Ticked by default */
+	selected: boolean;
+}
+
+function hasValue(value: unknown): boolean {
+	let v = value;
+	// MCP Atlassian wraps custom field values as { value, name }
+	if (v && typeof v === "object" && !Array.isArray(v) && "value" in v) {
+		v = (v as { value: unknown }).value;
+	}
+	if (v === null || v === undefined) return false;
+	if (typeof v === "string") return v.trim() !== "";
+	if (Array.isArray(v)) return v.length > 0;
+	if (typeof v === "object") return Object.keys(v).length > 0;
+	return true;
+}
+
+export function frontmatterTargetFor(name: string): string {
+	const slug = name
+		.toLowerCase()
+		.replace(/[^a-z0-9]+/g, "_")
+		.replace(/^_+|_+$/g, "");
+	return `frontmatter:${slug || "field"}`;
+}
+
+/**
+ * Fields worth offering for a project: supported by a mapping type, not
+ * already synced or mapped, ranked by how many sampled issues use them.
+ * Unused fields are only offered when they are well-known useful fields.
+ */
+export function suggestFieldMappings(
+	fields: DiscoveredField[],
+	sampleIssues: JiraIssue[],
+	options: {
+		/** Backlog targets and Jira fields already mapped */
+		mappedTargets?: string[];
+		mappedFields?: string[];
+		limit?: number;
+	} = {},
+): FieldSuggestion[] {
+	const mappedFields = new Set(
+		(options.mappedFields ?? []).map((f) => f.toLowerCase()),
+	);
+	const takenTargets = new Set(
+		(options.mappedTargets ?? []).map((t) => t.toLowerCase()),
+	);
+	const suggestions: FieldSuggestion[] = [];
+	for (const field of fields) {
+		if (HIDDEN_FIELDS.has(field.id.toLowerCase())) continue;
+		if (field.schema?.custom && HIDDEN_SCHEMAS.has(field.schema.custom))
+			continue;
+		if (mappedFields.has(field.id.toLowerCase())) continue;
+		const type = suggestTypeForSchema(field.schema);
+		if (!type || !FIELD_MAPPING_TYPES.includes(type)) continue;
+
+		const used = sampleIssues.filter((issue) =>
+			hasValue(getJiraFieldValue(issue, field.id)),
+		).length;
+		const valuable = VALUABLE_FIELD.test(field.name);
+		if (used === 0 && !valuable) continue;
+
+		// Jira Cloud calls story points "Story point estimate" in team-managed
+		// projects; use one key for both
+		const base = /^story ?points?( estimate)?$|^story point estimate$/i.test(
+			field.name.trim(),
+		)
+			? "frontmatter:story_points"
+			: frontmatterTargetFor(field.name);
+		let backlog = base;
+		for (let n = 2; takenTargets.has(backlog.toLowerCase()); n++) {
+			backlog = `${base}_${n}`;
+		}
+		suggestions.push({
+			field,
+			backlog,
+			type,
+			direction: "pull",
+			used,
+			valuable,
+			selected: valuable && used > 0,
+		});
+	}
+	suggestions.sort(
+		(a, b) =>
+			b.used - a.used ||
+			Number(b.valuable) - Number(a.valuable) ||
+			a.field.name.localeCompare(b.field.name),
+	);
+	const limited = suggestions.slice(0, options.limit ?? 20);
+	// Distinct targets among the suggestions themselves
+	const seen = new Set(takenTargets);
+	for (const s of limited) {
+		let target = s.backlog;
+		for (let n = 2; seen.has(target.toLowerCase()); n++) {
+			target = `${s.backlog}_${n}`;
+		}
+		s.backlog = target;
+		seen.add(target.toLowerCase());
+	}
+	return limited;
 }
 
 // ===== Sprints =====
