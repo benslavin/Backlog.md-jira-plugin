@@ -10,12 +10,14 @@ import {
 } from "./config-file.ts";
 import {
 	FIELD_MAPPING_TYPES,
+	FRONTMATTER_PREFIX,
 	type FieldMappingDirection,
 	type FieldMappingType,
 	SPRINT_MAPPING_TYPE,
 	type SprintPullScope,
 	getJiraFieldValue,
 	suggestTypeForSchema,
+	validateBacklogTarget,
 } from "./field-mapping.ts";
 
 // ===== Credentials =====
@@ -614,6 +616,52 @@ export function frontmatterTargetFor(name: string): string {
 }
 
 /**
+ * A frontmatter target for a Jira field that validation accepts and that is
+ * not taken: keys owned by Backlog.md (e.g. due_date, priority) get a _jira
+ * suffix, plugin-owned jira_* prefixes are dropped, and taken keys get _2, _3…
+ */
+export function suggestBacklogTarget(
+	fieldName: string,
+	taken: Iterable<string> = [],
+): string {
+	const takenTargets = new Set([...taken].map((t) => t.toLowerCase()));
+	// Jira Cloud calls story points "Story point estimate" in team-managed
+	// projects; use one key for both
+	let key = /^story ?points?( estimate)?$|^story point estimate$/i.test(
+		fieldName.trim(),
+	)
+		? "story_points"
+		: frontmatterTargetFor(fieldName).slice(FRONTMATTER_PREFIX.length);
+	key = key.replace(/^jira(_|$)/, "") || "field";
+	if (!/^[a-z_]/.test(key)) key = `field_${key}`;
+	if (validateBacklogTarget(`${FRONTMATTER_PREFIX}${key}`)) {
+		key = `${key}_jira`;
+	}
+	const base = `${FRONTMATTER_PREFIX}${key}`;
+	let target = base;
+	for (let n = 2; takenTargets.has(target.toLowerCase()); n++) {
+		target = `${base}_${n}`;
+	}
+	return target;
+}
+
+/**
+ * Jira fields the core sync already carries, and the Backlog field each one
+ * syncs with
+ */
+export const DEFAULT_SYNCED_FIELDS: ReadonlyArray<{
+	jira: string;
+	backlog: string;
+}> = [
+	{ jira: "summary", backlog: "title" },
+	{ jira: "description", backlog: "description" },
+	{ jira: "status", backlog: "status" },
+	{ jira: "assignee", backlog: "assignee" },
+	{ jira: "labels", backlog: "labels" },
+	{ jira: "priority", backlog: "priority" },
+];
+
+/**
  * Fields worth offering for a project: supported by a mapping type, not
  * already synced or mapped, ranked by how many sampled issues use them.
  * Unused fields are only offered when they are well-known useful fields.
@@ -649,20 +697,9 @@ export function suggestFieldMappings(
 		const valuable = VALUABLE_FIELD.test(field.name);
 		if (used === 0 && !valuable) continue;
 
-		// Jira Cloud calls story points "Story point estimate" in team-managed
-		// projects; use one key for both
-		const base = /^story ?points?( estimate)?$|^story point estimate$/i.test(
-			field.name.trim(),
-		)
-			? "frontmatter:story_points"
-			: frontmatterTargetFor(field.name);
-		let backlog = base;
-		for (let n = 2; takenTargets.has(backlog.toLowerCase()); n++) {
-			backlog = `${base}_${n}`;
-		}
 		suggestions.push({
 			field,
-			backlog,
+			backlog: suggestBacklogTarget(field.name, takenTargets),
 			type,
 			direction: "pull",
 			used,

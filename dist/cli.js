@@ -27795,6 +27795,22 @@ function frontmatterTargetFor(name) {
   const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
   return `frontmatter:${slug || "field"}`;
 }
+function suggestBacklogTarget(fieldName, taken = []) {
+  const takenTargets = new Set([...taken].map((t) => t.toLowerCase()));
+  let key = /^story ?points?( estimate)?$|^story point estimate$/i.test(fieldName.trim()) ? "story_points" : frontmatterTargetFor(fieldName).slice(FRONTMATTER_PREFIX.length);
+  key = key.replace(/^jira(_|$)/, "") || "field";
+  if (!/^[a-z_]/.test(key))
+    key = `field_${key}`;
+  if (validateBacklogTarget(`${FRONTMATTER_PREFIX}${key}`)) {
+    key = `${key}_jira`;
+  }
+  const base = `${FRONTMATTER_PREFIX}${key}`;
+  let target = base;
+  for (let n = 2;takenTargets.has(target.toLowerCase()); n++) {
+    target = `${base}_${n}`;
+  }
+  return target;
+}
 function suggestFieldMappings(fields, sampleIssues, options = {}) {
   const mappedFields = new Set((options.mappedFields ?? []).map((f) => f.toLowerCase()));
   const takenTargets = new Set((options.mappedTargets ?? []).map((t) => t.toLowerCase()));
@@ -27813,14 +27829,9 @@ function suggestFieldMappings(fields, sampleIssues, options = {}) {
     const valuable = VALUABLE_FIELD.test(field.name);
     if (used === 0 && !valuable)
       continue;
-    const base = /^story ?points?( estimate)?$|^story point estimate$/i.test(field.name.trim()) ? "frontmatter:story_points" : frontmatterTargetFor(field.name);
-    let backlog = base;
-    for (let n = 2;takenTargets.has(backlog.toLowerCase()); n++) {
-      backlog = `${base}_${n}`;
-    }
     suggestions.push({
       field,
-      backlog,
+      backlog: suggestBacklogTarget(field.name, takenTargets),
       type,
       direction: "pull",
       used,
@@ -27872,7 +27883,7 @@ function applySprintSettings(config, settings) {
   }, { force: true });
   return applyRequiredToolsets(updated);
 }
-var DONE_WORDS, TODO_WORDS, HIDDEN_FIELDS, HIDDEN_SCHEMAS, VALUABLE_FIELD, REQUIRED_TOOLSETS;
+var DONE_WORDS, TODO_WORDS, HIDDEN_FIELDS, HIDDEN_SCHEMAS, VALUABLE_FIELD, DEFAULT_SYNCED_FIELDS, REQUIRED_TOOLSETS;
 var init_setup = __esm(() => {
   init_map_fields();
   init_jira_sprints();
@@ -27928,6 +27939,14 @@ var init_setup = __esm(() => {
     "com.atlassian.jira.plugin.system.customfieldtypes:atlassian-team"
   ]);
   VALUABLE_FIELD = /story ?points?|story point estimate|due ?date|start date|components?|fix ?versions?|affects? versions?|target (start|end)|team|environment|severity/i;
+  DEFAULT_SYNCED_FIELDS = [
+    { jira: "summary", backlog: "title" },
+    { jira: "description", backlog: "description" },
+    { jira: "status", backlog: "status" },
+    { jira: "assignee", backlog: "assignee" },
+    { jira: "labels", backlog: "labels" },
+    { jira: "priority", backlog: "priority" }
+  ];
   REQUIRED_TOOLSETS = ["jira_projects", "jira_agile"];
 });
 
@@ -28902,10 +28921,28 @@ import { existsSync as existsSync11, readFileSync as readFileSync12, writeFileSy
 import { join as join12 } from "node:path";
 async function ask(question) {
   const name = String(question.name);
-  const response = await import_prompts.default(question);
+  let escaped = false;
+  const onRender = question.onRender;
+  const response = await import_prompts.default({
+    ...question,
+    onRender(...args) {
+      const prompt = this;
+      if (!prompt.escPatched) {
+        prompt.escPatched = true;
+        prompt.exit = () => {
+          escaped = true;
+          prompt.abort?.();
+        };
+      }
+      return onRender?.apply(this, args);
+    }
+  });
   const answer = response?.[name];
-  if (answer === undefined)
+  if (answer === undefined) {
+    if (escaped)
+      throw new WizardBack;
     throw new WizardCancelled;
+  }
   return answer;
 }
 function shortLabelsWhenDone(labels) {
@@ -29479,68 +29516,313 @@ function describeField(f) {
   const suggested = suggestTypeForSchema(f.schema);
   return `${f.name} (${f.id}) [${schema}]${suggested ? ` → ${suggested}` : ""}`;
 }
-async function promptFieldMapping(fields, preset) {
-  const jira = preset?.jira ?? (fields.length > 0 ? await ask({
+function fieldLabel(fields, id) {
+  const field = fields.find((f) => f.id === id);
+  return field ? `${field.name} (${field.id})` : id;
+}
+function arrowFor(direction) {
+  return direction === "both" ? "↔" : direction === "push" ? "→" : "←";
+}
+function describePlanned(p) {
+  const valueMap = p.valueMap ? ` ${source_default.gray(`values: ${Object.entries(p.valueMap).map(([from, to]) => `${from}=${to}`).join(", ")}`)}` : "";
+  return `${p.backlog} ${arrowFor(p.direction)} ${p.label}  ${source_default.gray(`${p.type}, ${p.direction}`)}${valueMap}`;
+}
+function draftChanges(draft) {
+  return draft.pending.length + draft.removals.size;
+}
+function keptConfigured(draft) {
+  return draft.configured.filter((c) => !draft.removals.has(c.backlog) && !draft.pending.some((p) => p.replaces === c.backlog));
+}
+function takenTargets(draft, editing) {
+  const own = new Set([editing?.backlog, editing?.replaces].filter((t) => t !== undefined));
+  return [
+    ...keptConfigured(draft).map((c) => c.backlog),
+    ...draft.pending.filter((p) => p !== editing).map((p) => p.backlog)
+  ].filter((t) => !own.has(t));
+}
+function printDraft(draft) {
+  console.log(`
+  ${source_default.bold("Synced by default:")} ${DEFAULT_SYNCED_FIELDS.map((f) => f.jira === f.backlog ? f.jira : `${f.backlog} ↔ ${f.jira}`).join(", ")}`);
+  console.log(`  ${source_default.bold("Configured:")}`);
+  if (draft.configured.length === 0)
+    console.log(source_default.gray("    none"));
+  for (const c of draft.configured) {
+    const note = draft.removals.has(c.backlog) ? source_default.red("  (removing)") : draft.pending.some((p) => p.replaces === c.backlog) ? source_default.yellow("  (changing)") : "";
+    console.log(`    ${describePlanned(c)}${note}`);
+  }
+  if (draft.pending.length > 0) {
+    console.log(`  ${source_default.bold("Pending, not saved yet:")}`);
+    for (const p of draft.pending) {
+      console.log(source_default.green(`    + ${describePlanned(p)}`));
+    }
+  }
+  console.log("");
+}
+function stageMapping(draft, entry, original) {
+  const pendingIndex = original ? draft.pending.indexOf(original) : -1;
+  if (pendingIndex >= 0) {
+    draft.pending[pendingIndex] = { ...entry, replaces: original?.replaces };
+    return;
+  }
+  if (original && draft.configured.includes(original)) {
+    const unchanged = entry.backlog === original.backlog && entry.type === original.type && entry.direction === original.direction && JSON.stringify(entry.valueMap) === JSON.stringify(original.valueMap);
+    if (unchanged)
+      return;
+    draft.removals.delete(original.backlog);
+    draft.pending.push({ ...entry, replaces: original.backlog });
+    return;
+  }
+  draft.pending.push(entry);
+}
+async function editMapping(draft, start) {
+  const entry = { ...start };
+  for (;; ) {
+    const action = await ask({
+      type: "select",
+      name: "fieldAction",
+      message: `${entry.label}: ${entry.backlog}, ${entry.type}, ${entry.direction}`,
+      hint: "Esc goes back",
+      choices: [
+        { title: "Accept", value: "accept" },
+        { title: "Change Backlog target", value: "target" },
+        { title: "Change value type", value: "type" },
+        { title: "Change direction", value: "direction" }
+      ],
+      initial: 0
+    });
+    if (action === "accept")
+      return entry;
+    try {
+      if (action === "target") {
+        const taken = takenTargets(draft, start);
+        entry.backlog = (await ask({
+          type: "text",
+          name: "backlogTarget",
+          message: `Backlog target (milestone, dependencies, references, priority, labels or frontmatter:<key>)${taken.length > 0 ? `; taken: ${taken.join(", ")}` : ""}:`,
+          initial: entry.backlog,
+          validate: (value) => {
+            const target = value.trim();
+            const error = validateBacklogTarget(target);
+            if (error)
+              return error;
+            if (taken.includes(target)) {
+              return `"${target}" is already mapped; choose another target or remove that mapping first`;
+            }
+            return true;
+          }
+        })).trim();
+      } else if (action === "type") {
+        entry.type = await ask({
+          type: "select",
+          name: "fieldType",
+          message: "Value type:",
+          choices: FIELD_MAPPING_TYPES.map((t) => ({ title: t, value: t })),
+          initial: Math.max(0, FIELD_MAPPING_TYPES.indexOf(entry.type))
+        });
+      } else {
+        entry.direction = await ask({
+          type: "select",
+          name: "fieldDirection",
+          message: "Direction:",
+          choices: FIELD_MAPPING_DIRECTIONS.map((d) => ({
+            title: d === "pull" ? "pull - Jira → Backlog" : d === "push" ? "push - Backlog → Jira" : "both",
+            value: d
+          })),
+          initial: Math.max(0, FIELD_MAPPING_DIRECTIONS.indexOf(entry.direction))
+        });
+      }
+    } catch (error) {
+      if (!(error instanceof WizardBack))
+        throw error;
+    }
+  }
+}
+async function editPriorityValueMap(draft) {
+  const other = [...keptConfigured(draft), ...draft.pending].find((m) => m.backlog === "priority" && m.jira !== PRIORITY_SYSTEM_FIELD);
+  if (other) {
+    console.log(source_default.yellow(`  Backlog priority is mapped to ${other.label}; remove that mapping to use Jira's priority again.`));
+    return;
+  }
+  const isOverride = (m) => m.backlog === "priority" && m.jira === PRIORITY_SYSTEM_FIELD;
+  const original = draft.pending.find(isOverride) ?? draft.configured.find(isOverride);
+  const current = original?.valueMap ?? {};
+  console.log(source_default.gray(`  Jira priority syncs with Backlog priority (${BACKLOG_PRIORITIES.join(", ")}) by default: ${Object.entries(DEFAULT_PRIORITY_MAPPING.valueMap ?? {}).map(([from, to]) => `${from}=${to}`).join(", ")}.`));
+  const parse = (value) => parseValueMapEntries(value.split(",").map((e) => e.trim()).filter(Boolean));
+  const input = await ask({
+    type: "text",
+    name: "priorityValueMap",
+    message: "Extra or changed translations, as Jira priority=Backlog priority, comma separated (empty keeps the defaults):",
+    initial: Object.entries(current).map(([from, to]) => `${from}=${to}`).join(", "),
+    validate: (value) => {
+      try {
+        for (const to of Object.values(parse(value) ?? {})) {
+          if (!BACKLOG_PRIORITIES.includes(to)) {
+            return `"${to}" is not a Backlog priority (${BACKLOG_PRIORITIES.join(", ")})`;
+          }
+        }
+        return true;
+      } catch (error) {
+        return describeError(error);
+      }
+    }
+  });
+  const valueMap = parse(input);
+  if (!valueMap) {
+    if (original && draft.pending.includes(original)) {
+      draft.pending.splice(draft.pending.indexOf(original), 1);
+    }
+    const configured = draft.configured.find(isOverride);
+    if (configured)
+      draft.removals.add(configured.backlog);
+    return;
+  }
+  stageMapping(draft, {
+    backlog: "priority",
+    jira: PRIORITY_SYSTEM_FIELD,
+    type: "option",
+    direction: "both",
+    label: "Priority (priority)",
+    valueMap
+  }, original);
+}
+async function searchField(draft, fields) {
+  const defaults = new Map(DEFAULT_SYNCED_FIELDS.map((f) => [f.jira, f]));
+  const mappedTo = (id) => draft.pending.find((p) => p.jira === id) ?? keptConfigured(draft).find((c) => c.jira === id && !c.sprint);
+  const jira = fields.length > 0 ? await ask({
     type: "autocomplete",
     name: "jiraField",
-    message: "Jira field (type to filter):",
-    choices: fields.map((f) => ({
-      title: describeField(f),
-      value: f.id
-    })),
+    message: "Jira field (type to filter, Esc goes back):",
+    choices: fields.map((f) => {
+      const synced = defaults.get(f.id);
+      const mapped = mappedTo(f.id);
+      const note = synced ? f.id === PRIORITY_SYSTEM_FIELD ? "synced by default; edit its value map" : `synced by default as ${synced.backlog}` : mapped ? `mapped to ${mapped.backlog}${draft.pending.includes(mapped) ? " (pending)" : ""}` : "";
+      return {
+        title: `${describeField(f)}${note ? `  ${source_default.gray(`· ${note}`)}` : ""}`,
+        value: f.id
+      };
+    }),
     suggest: filterChoices
   }) : (await ask({
     type: "text",
     name: "jiraField",
     message: "Jira field id (customfield_NNNNN or a system field):",
     validate: (value) => value.trim() ? true : "Required"
-  })).trim());
-  const field = fields.find((f) => f.id === jira);
-  const label = preset?.label ?? (field ? `${field.name} (${field.id})` : jira);
-  if (preset)
-    console.log(source_default.bold(`
-  ${label}`));
-  const backlog = (await ask({
-    type: "text",
-    name: "backlogTarget",
-    message: "Backlog target (milestone, dependencies, references, priority, labels or frontmatter:<key>):",
-    initial: preset?.backlog ?? frontmatterTargetFor(field?.name ?? jira),
-    validate: (value) => validateBacklogTarget(value.trim()) ?? true
   })).trim();
-  const suggested = preset?.type ?? suggestTypeForSchema(field?.schema);
-  const type = await ask({
-    type: "select",
-    name: "fieldType",
-    message: "Value type:",
-    choices: FIELD_MAPPING_TYPES.map((t) => ({ title: t, value: t })),
-    initial: Math.max(0, FIELD_MAPPING_TYPES.indexOf(suggested))
-  });
-  const direction = await ask({
-    type: "select",
-    name: "fieldDirection",
-    message: "Direction:",
-    choices: FIELD_MAPPING_DIRECTIONS.map((d) => ({
-      title: d === "pull" ? "pull - Jira → Backlog" : d === "push" ? "push - Backlog → Jira" : "both",
-      value: d
+  if (jira === PRIORITY_SYSTEM_FIELD)
+    return editPriorityValueMap(draft);
+  const synced = defaults.get(jira);
+  if (synced) {
+    console.log(source_default.gray(`  ${fieldLabel(fields, jira)} already syncs with the Backlog ${synced.backlog}.`));
+    return;
+  }
+  const existing = mappedTo(jira);
+  if (existing) {
+    stageMapping(draft, await editMapping(draft, existing), existing);
+    return;
+  }
+  const field = fields.find((f) => f.id === jira);
+  const entry = {
+    backlog: suggestBacklogTarget(field?.name ?? jira, takenTargets(draft)),
+    jira,
+    type: suggestTypeForSchema(field?.schema) ?? "string",
+    direction: "pull",
+    label: fieldLabel(fields, jira)
+  };
+  stageMapping(draft, await editMapping(draft, entry));
+}
+async function addSuggestedFields(draft, suggestions, sampleSize) {
+  const width = Math.max(...suggestions.map((s) => s.field.name.length));
+  const usage = (used) => sampleSize === 0 ? "" : used > 0 ? `${used}/${sampleSize} issues` : "not used yet";
+  const usageWidth = Math.max(...suggestions.map((s) => usage(s.used).length));
+  const picked = await ask({
+    type: "multiselect",
+    name: "fieldsToSync",
+    message: "Fields to sync into Backlog",
+    hint: "space toggles, enter adds them as pending, Esc goes back",
+    instructions: false,
+    choices: suggestions.map((s) => ({
+      title: `${s.field.name.padEnd(width)}  ${source_default.gray(usage(s.used).padEnd(usageWidth))}  → ${s.backlog} ${source_default.gray(`(${s.type})`)}`,
+      value: s.field.id,
+      selected: s.selected
     })),
-    initial: Math.max(0, FIELD_MAPPING_DIRECTIONS.indexOf(preset?.direction ?? "pull"))
+    onRender: shortLabelsWhenDone(new Map(suggestions.map((sg) => [sg.field.id, sg.field.name])))
   });
-  return { backlog, jira, type, direction, label };
+  for (const s of suggestions) {
+    if (picked.includes(s.field.id)) {
+      draft.pending.push({
+        backlog: s.backlog,
+        jira: s.field.id,
+        type: s.type,
+        direction: s.direction,
+        label: `${s.field.name} (${s.field.id})`
+      });
+    }
+  }
+}
+async function removeMapping(draft) {
+  const choices = [
+    ...draft.pending.map((p, i) => ({
+      title: `${describePlanned(p)} ${source_default.gray("(pending)")}`,
+      value: `pending:${i}`
+    })),
+    ...keptConfigured(draft).map((c) => ({
+      title: describePlanned(c),
+      value: `configured:${c.backlog}`
+    }))
+  ];
+  const picked = await ask({
+    type: "select",
+    name: "removeMapping",
+    message: "Remove which mapping? (Esc goes back)",
+    choices
+  });
+  const [kind, ref] = [
+    picked.slice(0, picked.indexOf(":")),
+    picked.slice(picked.indexOf(":") + 1)
+  ];
+  if (kind === "pending") {
+    const [removed] = draft.pending.splice(Number(ref), 1);
+    if (removed?.replaces) {
+      console.log(source_default.gray(`  Change dropped; ${removed.replaces} stays as configured.`));
+    }
+  } else {
+    draft.removals.add(ref);
+  }
+}
+function saveDraft(ctx, draft) {
+  let saved = 0;
+  for (const target of draft.removals) {
+    try {
+      ctx.config = removeFieldMapping(ctx.config, target);
+      saved++;
+      console.log(source_default.green(`  ✓ removed ${target}`));
+    } catch (error) {
+      console.log(source_default.red(`  ✗ ${target}: ${describeError(error)}`));
+    }
+  }
+  for (const entry of draft.pending) {
+    try {
+      let config = ctx.config;
+      if (entry.replaces && entry.replaces !== entry.backlog) {
+        config = removeFieldMapping(config, entry.replaces);
+      }
+      ctx.config = addFieldMapping(config, {
+        backlog: entry.backlog,
+        jira: entry.jira,
+        type: entry.type,
+        direction: entry.direction,
+        valueMap: entry.valueMap
+      }, { force: true });
+      saved++;
+      console.log(source_default.green(`  ✓ ${entry.backlog} ${arrowFor(entry.direction)} ${entry.jira} (${entry.type}, ${entry.direction})`));
+    } catch (error) {
+      console.log(source_default.red(`  ✗ ${entry.backlog}: ${describeError(error)}`));
+    }
+  }
+  return saved;
 }
 async function fieldsStep(ctx) {
   const { projectKey } = jiraSection(ctx);
-  const { mappings, sprintMapping } = validateFieldMappings(ctx.config.fieldMappings);
-  if (mappings.length > 0 || sprintMapping) {
-    console.log("  Current mappings:");
-    if (sprintMapping) {
-      console.log(`    milestone ↔ sprint (board ${sprintMapping.boardId})`);
-    }
-    for (const m of mappings) {
-      console.log(`    ${m.backlog} ← ${m.jira} (${m.type}, ${m.direction})`);
-    }
-    console.log(source_default.gray(`    Remove one with: backlog-jira map-fields remove <target>
-`));
-  }
   let fields = [];
   let sample = [];
   try {
@@ -29558,132 +29840,150 @@ async function fieldsStep(ctx) {
     console.log(source_default.yellow(`  ⚠ Could not list Jira fields: ${describeError(error)}`));
   }
   fields = fields.filter((f) => f.schema?.custom !== SPRINT_FIELD_SCHEMA).sort((a, b) => a.name.localeCompare(b.name));
-  const suggestions = suggestFieldMappings(fields, sample, {
-    mappedTargets: [
-      ...mappings.map((m) => m.backlog),
-      ...sprintMapping ? ["milestone"] : []
+  const { mappings, sprintMapping } = validateFieldMappings(ctx.config.fieldMappings);
+  const draft = {
+    configured: [
+      ...sprintMapping ? [
+        {
+          backlog: "milestone",
+          jira: "sprint",
+          type: "sprint",
+          direction: sprintMapping.direction,
+          label: `Sprint (board ${sprintMapping.boardId})`,
+          sprint: true
+        }
+      ] : [],
+      ...mappings.map((m) => ({
+        backlog: m.backlog,
+        jira: m.jira,
+        type: m.type,
+        direction: m.direction,
+        label: fieldLabel(fields, m.jira),
+        valueMap: m.valueMap
+      }))
     ],
-    mappedFields: mappings.map((m) => m.jira)
-  });
-  const SEARCH = "__search__";
-  const plan = [];
-  let search = false;
-  if (suggestions.length > 0) {
-    console.log(source_default.gray(sample.length > 0 ? `  Fields with values on the ${sample.length} most recently updated ${projectKey} issues, most used first. Fields the plugin already syncs are not listed.` : "  Commonly useful fields (no project issues to sample). Fields the plugin already syncs are not listed."));
-    const width = Math.max(...suggestions.map((s) => s.field.name.length));
-    const usage = (used) => sample.length === 0 ? "" : used > 0 ? `${used}/${sample.length} issues` : "not used yet";
-    const usageWidth = Math.max(...suggestions.map((s) => usage(s.used).length));
-    const picked = await ask({
-      type: "multiselect",
-      name: "fieldsToSync",
-      message: "Fields to sync into Backlog",
-      hint: "space toggles, enter confirms",
-      instructions: false,
-      choices: [
-        ...suggestions.map((s) => ({
-          title: `${s.field.name.padEnd(width)}  ${source_default.gray(usage(s.used).padEnd(usageWidth))}  → ${s.backlog} ${source_default.gray(`(${s.type})`)}`,
-          value: s.field.id,
-          selected: s.selected
-        })),
-        { title: source_default.cyan("Search all fields…"), value: SEARCH }
-      ],
-      onRender: shortLabelsWhenDone(new Map([
-        ...suggestions.map((sg) => [sg.field.id, sg.field.name]),
-        [SEARCH, "search"]
-      ]))
-    });
-    search = picked.includes(SEARCH);
-    for (const s of suggestions) {
-      if (picked.includes(s.field.id)) {
-        plan.push({
-          backlog: s.backlog,
-          jira: s.field.id,
-          type: s.type,
-          direction: s.direction,
-          label: `${s.field.name} (${s.field.id})`
-        });
-      }
-    }
-  } else {
-    console.log(source_default.gray(sample.length > 0 ? `  None of the ${sample.length} sampled ${projectKey} issues have values in fields beyond what the plugin already syncs.` : "  No field suggestions."));
-    search = await ask({
-      type: "confirm",
-      name: "searchFields",
-      message: "Search all Jira fields?",
-      initial: false
-    });
-  }
-  while (search) {
-    plan.push(await promptFieldMapping(fields));
-    search = await ask({
-      type: "confirm",
-      name: "searchAnother",
-      message: "Search for another field?",
-      initial: false
-    });
-  }
-  if (plan.length === 0)
-    return "skipped";
-  const printPlan = () => {
-    const targetWidth = Math.max(...plan.map((p) => p.backlog.length));
-    for (const p of plan) {
-      console.log(`    ${p.backlog.padEnd(targetWidth)}  ←  ${p.label}  ${source_default.gray(`${p.type}, ${p.direction}`)}`);
-    }
+    removals: new Set,
+    pending: []
   };
-  console.log(`
-  Field mappings to add (Backlog ← Jira):`);
-  printPlan();
-  console.log(source_default.gray(`  pull copies Jira values into Backlog; choose Adjust to rename a target or sync both ways.
-`));
-  const decision = await ask({
-    type: "select",
-    name: "fieldDecision",
-    message: "Add these mappings?",
-    choices: [
-      { title: "Yes", value: "accept" },
-      { title: "Adjust target, type or direction", value: "adjust" },
-      { title: "Cancel", value: "cancel" }
-    ],
-    initial: 0
-  });
-  if (decision === "cancel")
-    return "skipped";
-  if (decision === "adjust") {
-    for (const [index, entry] of plan.entries()) {
-      plan[index] = await promptFieldMapping(fields, entry);
+  const save = () => {
+    if (draftChanges(draft) === 0)
+      return "skipped";
+    const saved = saveDraft(ctx, draft);
+    if (draft.pending.length > 0 && saved > 0) {
+      console.log(source_default.gray("  Values fill in on the next pull. Translate values with: backlog-jira map-fields add <target> <field> --type <type> --value-map 'Jira=Backlog' --force"));
     }
-  }
-  let added = 0;
-  for (const entry of plan) {
-    const mapping = {
-      backlog: entry.backlog,
-      jira: entry.jira,
-      type: entry.type,
-      direction: entry.direction
-    };
-    try {
-      let force = false;
-      if (Array.isArray(ctx.config.fieldMappings) && ctx.config.fieldMappings.some((m) => m?.backlog === entry.backlog)) {
-        force = await ask({
-          type: "confirm",
-          name: "replaceMapping",
-          message: `A mapping for "${entry.backlog}" exists. Replace it?`,
-          initial: false
-        });
-        if (!force)
-          continue;
+    return saved > 0 ? "done" : "skipped";
+  };
+  let first = true;
+  try {
+    for (;; ) {
+      const suggestions = suggestFieldMappings(fields, sample, {
+        mappedTargets: takenTargets(draft),
+        mappedFields: [
+          ...keptConfigured(draft).map((c) => c.jira),
+          ...draft.pending.map((p) => p.jira)
+        ]
+      });
+      printDraft(draft);
+      if (first && suggestions.length > 0) {
+        console.log(source_default.gray(sample.length > 0 ? `  ${suggestions.length} more fields have values on the ${sample.length} most recently updated ${projectKey} issues.` : "  No project issues to sample; commonly useful fields are suggested."));
       }
-      ctx.config = addFieldMapping(ctx.config, mapping, { force });
-      added++;
-      console.log(source_default.green(`  ✓ ${entry.backlog} ← ${entry.jira} (${entry.type}, ${entry.direction})`));
-    } catch (error) {
-      console.log(source_default.red(`  ✗ ${entry.backlog}: ${describeError(error)}`));
+      first = false;
+      const changes = draftChanges(draft);
+      const editable = [
+        ...draft.pending,
+        ...keptConfigured(draft).filter((c) => !c.sprint)
+      ];
+      const removable = draft.pending.length + keptConfigured(draft).length;
+      const action = await ask({
+        type: "select",
+        name: "fieldsMenu",
+        message: "Field mappings",
+        hint: "Esc leaves the step",
+        choices: [
+          ...suggestions.length > 0 ? [
+            {
+              title: `Add suggested fields (${suggestions.length})…`,
+              value: "suggested"
+            }
+          ] : [],
+          { title: "Search all Jira fields…", value: "search" },
+          ...editable.length > 0 ? [{ title: "Edit a mapping…", value: "edit" }] : [],
+          ...removable > 0 ? [{ title: "Remove a mapping…", value: "remove" }] : [],
+          {
+            title: changes > 0 ? `Save ${changes} change${changes === 1 ? "" : "s"} and continue` : "Done, no changes",
+            value: "save"
+          },
+          ...changes > 0 ? [{ title: "Discard changes and continue", value: "discard" }] : []
+        ],
+        initial: 0
+      }).catch(async (error) => {
+        if (!(error instanceof WizardBack))
+          throw error;
+        if (draftChanges(draft) === 0)
+          return "discard";
+        return ask({
+          type: "select",
+          name: "leaveFields",
+          message: `Save ${draftChanges(draft)} pending change${draftChanges(draft) === 1 ? "" : "s"} before leaving?`,
+          choices: [
+            { title: "Save", value: "save" },
+            { title: "Discard", value: "discard" },
+            { title: "Keep editing", value: "menu" }
+          ]
+        }).catch((inner) => {
+          if (inner instanceof WizardBack)
+            return "menu";
+          throw inner;
+        });
+      });
+      if (action === "save")
+        return save();
+      if (action === "discard")
+        return "skipped";
+      try {
+        if (action === "suggested") {
+          await addSuggestedFields(draft, suggestions, sample.length);
+        } else if (action === "search") {
+          await searchField(draft, fields);
+        } else if (action === "edit") {
+          const picked = await ask({
+            type: "select",
+            name: "editMapping",
+            message: "Edit which mapping? (Esc goes back)",
+            choices: editable.map((m, i) => ({
+              title: `${describePlanned(m)}${draft.pending.includes(m) ? source_default.gray(" (pending)") : ""}`,
+              value: i
+            }))
+          });
+          const original = editable[picked];
+          if (isBuiltInPriorityMapping(original)) {
+            await editPriorityValueMap(draft);
+          } else {
+            stageMapping(draft, await editMapping(draft, original), original);
+          }
+        } else if (action === "remove") {
+          await removeMapping(draft);
+        }
+      } catch (error) {
+        if (!(error instanceof WizardBack))
+          throw error;
+      }
     }
+  } catch (error) {
+    if (!(error instanceof WizardCancelled) || draftChanges(draft) === 0) {
+      throw error;
+    }
+    const keep = await ask({
+      type: "confirm",
+      name: "savePending",
+      message: `Save ${draftChanges(draft)} pending field mapping change${draftChanges(draft) === 1 ? "" : "s"} before quitting?`,
+      initial: true
+    }).catch(() => false);
+    if (keep)
+      save();
+    throw error;
   }
-  if (added > 0) {
-    console.log(source_default.gray("  Values fill in on the next pull. Translate values with: backlog-jira map-fields add <target> <field> --type <type> --value-map 'Jira=Backlog' --force"));
-  }
-  return added > 0 ? "done" : "skipped";
 }
 async function conflictStep(ctx) {
   const current = getSection(ctx.config, "sync").conflictStrategy;
@@ -29800,63 +30100,88 @@ async function runConfigure(options = {}) {
       console.log(source_default.gray(`${steps.length} steps; skip any of them and come back later with --step <name>. Each step is saved as it completes.`));
     }
     try {
-      const result = {
-        completed: [],
-        skipped: [],
-        failed: false
-      };
-      for (const [index, name] of steps.entries()) {
+      const outcomes = new Map;
+      const summary = () => ({
+        completed: steps.filter((s) => outcomes.get(s) === "done"),
+        skipped: steps.filter((s) => outcomes.has(s) && outcomes.get(s) !== "done"),
+        failed: [...outcomes.values()].includes("failed")
+      });
+      let index = 0;
+      while (index < steps.length) {
+        const name = steps[index];
         const info = STEP_INFO[name];
         console.log(source_default.bold.green(`
 ${step ? "" : `Step ${index + 1}/${steps.length}: `}${info.title}`));
         console.log(source_default.gray(`  ${info.about}
 `));
+        const before = structuredClone(ctx.config);
         try {
           if (!step) {
-            const run = await ask({
-              type: "confirm",
-              name: `run_${name}`,
-              message: `Set up ${info.title.toLowerCase()} now?`,
-              initial: true
-            });
+            let run;
+            try {
+              run = await ask({
+                type: "confirm",
+                name: `run_${name}`,
+                message: `Set up ${info.title.toLowerCase()} now?`,
+                initial: true
+              });
+            } catch (error) {
+              if (!(error instanceof WizardBack))
+                throw error;
+              if (index > 0)
+                index--;
+              else
+                console.log(source_default.gray("  First step; Ctrl+C quits."));
+              continue;
+            }
             if (!run) {
               console.log(source_default.gray(`  Skipped. Later: backlog-jira configure --step ${name}`));
-              result.skipped.push(name);
+              outcomes.set(name, "skipped");
+              index++;
               continue;
             }
           }
           const outcome = await STEP_RUNNERS[name](ctx);
           writeConfigFile(ctx.config, cwd);
-          if (outcome === "done")
-            result.completed.push(name);
-          else
-            result.skipped.push(name);
-          if (outcome === "failed") {
-            result.failed = true;
-            if (!step && name === "connection") {
-              const proceed = await ask({
-                type: "confirm",
-                name: "continueOffline",
-                message: "Continue without a connection? (later steps fall back to manual entry)",
-                initial: true
-              });
-              if (!proceed) {
-                console.log(source_default.gray("  Fix the connection, then run: backlog-jira configure"));
-                return result;
-              }
+          outcomes.set(name, outcome);
+          if (outcome === "failed" && !step && name === "connection") {
+            const proceed = await ask({
+              type: "confirm",
+              name: "continueOffline",
+              message: "Continue without a connection? (later steps fall back to manual entry)",
+              initial: true
+            });
+            if (!proceed) {
+              console.log(source_default.gray("  Fix the connection, then run: backlog-jira configure"));
+              return summary();
             }
           }
+          index++;
         } catch (error) {
+          if (error instanceof WizardBack) {
+            ctx.config = before;
+            writeConfigFile(ctx.config, cwd);
+            outcomes.delete(name);
+            if (step) {
+              console.log(source_default.gray("  Left unchanged."));
+              outcomes.set(name, "skipped");
+              index++;
+            } else {
+              console.log(source_default.gray("  Back: nothing from this step was saved."));
+            }
+            continue;
+          }
           if (error instanceof WizardCancelled) {
             writeConfigFile(ctx.config, cwd);
             console.log(source_default.yellow(`
 ✗ Setup cancelled. Completed steps are saved; resume with: backlog-jira configure --step ${name}
 `));
-            return { ...result, cancelledAt: name };
+            return { ...summary(), cancelledAt: name };
           }
           throw error;
         }
       }
+      const result = summary();
       console.log(source_default.gray(`
   Saved ${join12(getConfigDir(cwd), "config.json")}`));
       if (!step) {
@@ -29926,7 +30251,7 @@ async function configureCommand(options = {}) {
   const result = await runConfigure(options);
   process.exit(result.failed ? 1 : 0);
 }
-var import_prompts, CONFIGURE_STEPS, STEP_INFO, FIELD_SAMPLE_SIZE = 50, WizardCancelled, STEP_RUNNERS;
+var import_prompts, CONFIGURE_STEPS, STEP_INFO, FIELD_SAMPLE_SIZE = 50, WizardCancelled, WizardBack, STEP_RUNNERS;
 var init_configure = __esm(() => {
   init_source();
   init_jira_sprints();
@@ -29987,6 +30312,12 @@ var init_configure = __esm(() => {
     constructor() {
       super("Configuration cancelled");
       this.name = "WizardCancelled";
+    }
+  };
+  WizardBack = class WizardBack extends Error {
+    constructor() {
+      super("Back");
+      this.name = "WizardBack";
     }
   };
   STEP_RUNNERS = {
@@ -31438,7 +31769,7 @@ async function addMapping(backlogUser, jiraUser, options = {}) {
   console.log(source_default.green(`✓ Added mapping: @${cleanBacklogUser} → ${jiraUser}`));
   logger.info({ backlogUser: cleanBacklogUser, jiraUser }, "Added assignee mapping");
 }
-async function removeMapping(backlogUser) {
+async function removeMapping2(backlogUser) {
   const configPath = join16(process.cwd(), ".backlog-jira", "config.json");
   if (!existsSync15(configPath)) {
     console.error(source_default.red("❌ Configuration not found"));
@@ -31573,7 +31904,7 @@ function registerMapAssigneesCommand(program) {
   });
   mapAssigneesCmd.command("remove").alias("rm").description("Remove an assignee mapping").argument("<backlog-user>", "Backlog assignee (e.g., @john.doe)").action(async (backlogUser) => {
     try {
-      await removeMapping(backlogUser);
+      await removeMapping2(backlogUser);
     } catch (error) {
       logger.error({ error }, "Remove mapping failed");
       console.error(source_default.red(`Error: ${error}`));

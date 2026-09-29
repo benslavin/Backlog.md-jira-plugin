@@ -1,6 +1,9 @@
 import { describe, expect, it, mock } from "bun:test";
 import type { JiraIssue } from "../integrations/jira.ts";
-import { FieldMappingConfigError } from "./field-mapping.ts";
+import {
+	FieldMappingConfigError,
+	validateBacklogTarget,
+} from "./field-mapping.ts";
 import {
 	applyRequiredToolsets,
 	applySprintSettings,
@@ -16,6 +19,7 @@ import {
 	mergeToolsets,
 	rejectedStatusNames,
 	suggestBacklogStatus,
+	suggestBacklogTarget,
 	suggestFieldMappings,
 	uncoveredJiraStatuses,
 } from "./setup.ts";
@@ -575,7 +579,7 @@ describe("suggestFieldMappings", () => {
 			["components", 1, "frontmatter:components", "array", true],
 			["customfield_2", 1, "frontmatter:client", "string", false],
 			["customfield_6", 1, "frontmatter:client_2", "string", false],
-			["duedate", 0, "frontmatter:due_date", "date", false],
+			["duedate", 0, "frontmatter:due_date_jira", "date", false],
 		]);
 		expect(suggestions.every((s) => s.direction === "pull")).toBe(true);
 	});
@@ -604,5 +608,47 @@ describe("suggestFieldMappings", () => {
 			["components", "frontmatter:components"],
 			["customfield_2", "frontmatter:client_2"],
 		]);
+	});
+});
+
+describe("suggestBacklogTarget", () => {
+	it("suggests a frontmatter key named after the field", () => {
+		expect(suggestBacklogTarget("Original estimate")).toBe(
+			"frontmatter:original_estimate",
+		);
+		expect(suggestBacklogTarget("Story Points")).toBe(
+			"frontmatter:story_points",
+		);
+	});
+
+	it("never suggests a key that validation rejects", () => {
+		for (const name of [
+			"Priority",
+			"Due date",
+			"Status",
+			"Labels",
+			"Type",
+			"Jira Key",
+			"Jira",
+			"2nd reviewer",
+			"!!!",
+		]) {
+			const target = suggestBacklogTarget(name);
+			expect(validateBacklogTarget(target)).toBeNull();
+		}
+		expect(suggestBacklogTarget("Priority")).toBe("frontmatter:priority_jira");
+		expect(suggestBacklogTarget("Jira Key")).toBe("frontmatter:key");
+		expect(suggestBacklogTarget("2nd reviewer")).toBe(
+			"frontmatter:field_2nd_reviewer",
+		);
+	});
+
+	it("avoids taken targets, ignoring case", () => {
+		expect(
+			suggestBacklogTarget("Funding", [
+				"frontmatter:Funding",
+				"frontmatter:funding_2",
+			]),
+		).toBe("frontmatter:funding_3");
 	});
 });

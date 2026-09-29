@@ -47,8 +47,14 @@ const CLOUD_ENV = {
 	JIRA_API_TOKEN: "super-secret-token",
 };
 
+/** Answer that presses Esc */
+const ESC = Symbol("Esc");
+/** Answer that presses Ctrl+C */
+const CANCEL = Symbol("Ctrl+C");
+
 /**
- * Answer prompts by question name; unanswered questions cancel (Ctrl+C)
+ * Answer prompts by question name; unanswered questions cancel (Ctrl+C).
+ * A list answers one question at a time and repeats its last answer.
  */
 async function answer(answers: Record<string, Answer | Answer[]>) {
 	const prompts = await import("prompts");
@@ -67,6 +73,16 @@ async function answer(answers: Record<string, Answer | Answer[]>) {
 		const queue = queues.get(name);
 		if (!queue || queue.length === 0) return {};
 		const next = queue.length > 1 ? queue.shift() : queue[0];
+		if (next === CANCEL) return {};
+		if (next === ESC) {
+			// What prompts does on Esc: render, then exit(), which aborts
+			const prompt = { exit() {}, abort() {} };
+			(question.onRender as ((this: unknown) => void) | undefined)?.call(
+				prompt,
+			);
+			prompt.exit();
+			return {};
+		}
 		return {
 			[name]: typeof next === "function" ? next(question) : next,
 		};
@@ -317,6 +333,18 @@ describe("configure --step", () => {
 		const config = readConfig();
 		expect((config.sync as RawConfig).conflictStrategy).toBe("prefer-backlog");
 		expectUnmanagedKept(config);
+	});
+
+	it("Esc in a single step leaves it unchanged", async () => {
+		writeExistingConfig({ sync: { conflictStrategy: "prompt" } });
+		await answer({ conflictStrategy: ESC });
+
+		const result = await run({ step: "conflict" });
+
+		expect(result.cancelledAt).toBeUndefined();
+		expect(result.skipped).toEqual(["conflict"]);
+		expect(printed()).toContain("Left unchanged.");
+		expect(readConfig().sync).toMatchObject({ conflictStrategy: "prompt" });
 	});
 
 	describe("credentials", () => {
@@ -597,11 +625,11 @@ describe("configure --step", () => {
 	it("fields: offers fields the project uses, ranked, and adds the ticked ones", async () => {
 		writeExistingConfig({ fieldMappings: [] });
 		const asked = await answer({
+			fieldsMenu: ["suggested", "save"],
 			fieldsToSync: (q: PromptObject) =>
 				(q.choices as Array<{ value: string; selected?: boolean }>)
 					.filter((c) => c.selected)
 					.map((c) => c.value),
-			fieldDecision: "accept",
 		});
 		const jira = fakeJira();
 
@@ -624,7 +652,6 @@ describe("configure --step", () => {
 			"customfield_10016",
 			"customfield_10030",
 			"fixVersions",
-			"__search__",
 		]);
 		expect(choices[0].title).toContain("2/2 issues");
 		expect(choices[0].title).toContain("frontmatter:story_points");
@@ -633,9 +660,15 @@ describe("configure --step", () => {
 			true,
 			false,
 			false,
-			false,
 		]);
 		expect(asked.some((q) => q.name === "backlogTarget")).toBe(false);
+		// The menu lists the pending mapping before it is saved
+		expect(printed()).toContain("Pending, not saved yet:");
+		const menus = asked.filter((q) => q.name === "fieldsMenu");
+		const saveTitle = (menus[1].choices as Array<{ title: string }>).find((c) =>
+			c.title.startsWith("Save"),
+		)?.title;
+		expect(saveTitle).toBe("Save 1 change and continue");
 		expect(readConfig().fieldMappings).toEqual([
 			{
 				backlog: "frontmatter:story_points",
@@ -646,36 +679,339 @@ describe("configure --step", () => {
 		]);
 	});
 
-	it("fields: adjusting and searching use the same validation as map-fields", async () => {
-		writeExistingConfig({ fieldMappings: [] });
-		await answer({
-			fieldsToSync: [["customfield_10030", "__search__"]],
-			jiraField: "customfield_10040",
-			backlogTarget: [
-				"frontmatter:unused",
-				"frontmatter:jira_key",
-				"frontmatter:client",
+	it("fields: lists fields synced by default and configured mappings, including the sprint mapping", async () => {
+		writeExistingConfig({
+			fieldMappings: [
+				{ backlog: "milestone", jira: "sprint", type: "sprint", boardId: 12 },
+				{
+					backlog: "frontmatter:client",
+					jira: "customfield_10030",
+					type: "string",
+					direction: "pull",
+				},
 			],
-			fieldType: (q: PromptObject) =>
-				(q.choices as Array<{ value: string }>)[q.initial as number].value,
-			fieldDirection: "both",
-			searchAnother: false,
-			fieldDecision: "adjust",
+		});
+		await answer({ fieldsMenu: "save" });
+
+		const result = await run({ step: "fields" });
+
+		expect(result.skipped).toEqual(["fields"]);
+		expect(printed()).toContain(
+			"Synced by default: title ↔ summary, description, status, assignee, labels, priority",
+		);
+		expect(printed()).toContain("milestone ← Sprint (board 12)");
+		expect(printed()).toContain(
+			"frontmatter:client ← Client (customfield_10030)",
+		);
+	});
+
+	it("fields: Esc while adding a field drops only that field and keeps the other pending ones", async () => {
+		writeExistingConfig({ fieldMappings: [] });
+		const asked = await answer({
+			fieldsMenu: ["suggested", "search", "search", "save"],
+			fieldsToSync: [["customfield_10030"]],
+			// Esc in the field search, then Esc on the second field's line
+			jiraField: [ESC, "customfield_10040"],
+			fieldAction: ESC,
 		});
 
 		const result = await run({ step: "fields" });
 
 		expect(result.completed).toEqual(["fields"]);
-		// The reserved key is rejected by the same validation as map-fields
-		expect(printed()).toMatch(/✗ frontmatter:jira_key: [\s\S]*collides/);
+		expect(asked.filter((q) => q.name === "fieldsMenu")).toHaveLength(4);
 		expect(readConfig().fieldMappings).toEqual([
 			{
 				backlog: "frontmatter:client",
+				jira: "customfield_10030",
+				type: "string",
+				direction: "pull",
+			},
+		]);
+	});
+
+	it("fields: Esc while changing an attribute returns to the field's line", async () => {
+		writeExistingConfig({ fieldMappings: [] });
+		await answer({
+			fieldsMenu: ["search", "save"],
+			jiraField: "customfield_10040",
+			fieldAction: ["type", "direction", "accept"],
+			fieldType: ESC,
+			fieldDirection: "both",
+		});
+
+		await run({ step: "fields" });
+
+		expect(readConfig().fieldMappings).toEqual([
+			{
+				backlog: "frontmatter:unused_text",
 				jira: "customfield_10040",
 				type: "string",
 				direction: "both",
 			},
 		]);
+	});
+
+	it("fields: the target prompt lists taken targets and rejects them and reserved keys", async () => {
+		writeExistingConfig({
+			fieldMappings: [
+				{
+					backlog: "frontmatter:client",
+					jira: "customfield_10030",
+					type: "string",
+					direction: "pull",
+				},
+			],
+		});
+		const asked = await answer({
+			fieldsMenu: ["search", "save"],
+			jiraField: "customfield_10040",
+			fieldAction: ["target", "accept"],
+			backlogTarget: (q: PromptObject) => {
+				const validate = q.validate as (v: string) => string | true;
+				expect(validate("frontmatter:client")).toMatch(/already mapped/);
+				expect(validate("frontmatter:priority")).toMatch(/collides/);
+				expect(validate("frontmatter:jira_key")).toMatch(/collides/);
+				return "frontmatter:notes_text";
+			},
+		});
+
+		await run({ step: "fields" });
+
+		const target = asked.find((q) => q.name === "backlogTarget");
+		expect(String(target?.message)).toContain("taken: frontmatter:client");
+		expect(readConfig().fieldMappings).toEqual([
+			{
+				backlog: "frontmatter:client",
+				jira: "customfield_10030",
+				type: "string",
+				direction: "pull",
+			},
+			{
+				backlog: "frontmatter:notes_text",
+				jira: "customfield_10040",
+				type: "string",
+				direction: "pull",
+			},
+		]);
+	});
+
+	it("fields: search marks default-synced and mapped fields, and Priority edits the priority value map", async () => {
+		writeExistingConfig({
+			fieldMappings: [
+				{
+					backlog: "frontmatter:client",
+					jira: "customfield_10030",
+					type: "string",
+					direction: "pull",
+				},
+			],
+		});
+		const priority = {
+			id: "priority",
+			name: "Priority",
+			schema: { type: "priority" },
+		};
+		const fields = await (
+			fakeJira().searchFields as () => Promise<unknown[]>
+		)();
+		const jira = fakeJira({
+			searchFields: mock(async () => [...fields, priority]),
+		});
+		const asked = await answer({
+			fieldsMenu: ["search", "save"],
+			jiraField: "priority",
+			priorityValueMap: "P1=high, P2=medium",
+		});
+
+		const result = await run({ step: "fields" }, jira);
+
+		expect(result.completed).toEqual(["fields"]);
+		const search = asked.find((q) => q.name === "jiraField");
+		const titles = new Map(
+			(search?.choices as Array<{ title: string; value: string }>).map((c) => [
+				c.value,
+				c.title,
+			]),
+		);
+		expect(titles.get("summary")).toContain("synced by default as title");
+		expect(titles.get("priority")).toContain("synced by default");
+		expect(titles.get("customfield_10030")).toContain(
+			"mapped to frontmatter:client",
+		);
+		// No frontmatter target is offered for Priority
+		expect(asked.some((q) => q.name === "backlogTarget")).toBe(false);
+		expect(asked.some((q) => q.name === "fieldAction")).toBe(false);
+		const validate = asked.find((q) => q.name === "priorityValueMap")
+			?.validate as (v: string) => string | true;
+		expect(validate("P1=urgent")).toMatch(/not a Backlog priority/);
+		expect(readConfig().fieldMappings).toContainEqual({
+			backlog: "priority",
+			jira: "priority",
+			type: "option",
+			direction: "both",
+			valueMap: { P1: "high", P2: "medium" },
+		});
+	});
+
+	it("fields: editing the priority value map twice keeps one override", async () => {
+		writeExistingConfig({
+			fieldMappings: [
+				{
+					backlog: "priority",
+					jira: "priority",
+					type: "option",
+					valueMap: { P1: "high" },
+				},
+			],
+		});
+		const asked = await answer({
+			fieldsMenu: ["edit", "edit", "save"],
+			editMapping: 0,
+			priorityValueMap: ["P1=high, P2=low", "P1=high, P3=low"],
+		});
+
+		await run({ step: "fields" });
+
+		expect(asked.find((q) => q.name === "priorityValueMap")?.initial).toBe(
+			"P1=high",
+		);
+		expect(printed()).toContain("(changing)");
+		expect(readConfig().fieldMappings).toEqual([
+			{
+				backlog: "priority",
+				jira: "priority",
+				type: "option",
+				direction: "both",
+				valueMap: { P1: "high", P3: "low" },
+			},
+		]);
+	});
+
+	it("fields: picking a configured field edits its mapping; a new target replaces the old one", async () => {
+		writeExistingConfig({
+			fieldMappings: [
+				{
+					backlog: "frontmatter:client",
+					jira: "customfield_10030",
+					type: "string",
+					direction: "pull",
+					valueMap: { Acme: "acme" },
+				},
+			],
+		});
+		await answer({
+			fieldsMenu: ["edit", "save"],
+			editMapping: 0,
+			fieldAction: ["target", "direction", "accept"],
+			backlogTarget: "frontmatter:customer",
+			fieldDirection: "both",
+		});
+
+		await run({ step: "fields" });
+
+		expect(printed()).toContain("(changing)");
+		expect(readConfig().fieldMappings).toEqual([
+			{
+				backlog: "frontmatter:customer",
+				jira: "customfield_10030",
+				type: "string",
+				direction: "both",
+				valueMap: { Acme: "acme" },
+			},
+		]);
+	});
+
+	it("fields: removes configured mappings, including the sprint mapping", async () => {
+		writeExistingConfig({
+			fieldMappings: [
+				{ backlog: "milestone", jira: "sprint", type: "sprint", boardId: 12 },
+				{
+					backlog: "frontmatter:client",
+					jira: "customfield_10030",
+					type: "string",
+					direction: "pull",
+				},
+			],
+		});
+		await answer({
+			fieldsMenu: ["remove", "remove", "save"],
+			removeMapping: ["configured:milestone", "configured:frontmatter:client"],
+		});
+
+		const result = await run({ step: "fields" });
+
+		expect(result.completed).toEqual(["fields"]);
+		expect(printed()).toContain("(removing)");
+		expect(readConfig().fieldMappings).toEqual([]);
+	});
+
+	it("fields: Esc at the menu with pending changes offers to save them", async () => {
+		writeExistingConfig({ fieldMappings: [] });
+		const asked = await answer({
+			fieldsMenu: ["suggested", ESC, ESC],
+			fieldsToSync: [["customfield_10030"]],
+			// Keep editing, then save
+			leaveFields: ["menu", "save"],
+		});
+
+		const result = await run({ step: "fields" });
+
+		expect(result.completed).toEqual(["fields"]);
+		expect(asked.filter((q) => q.name === "leaveFields")).toHaveLength(2);
+		expect(readConfig().fieldMappings).toEqual([
+			{
+				backlog: "frontmatter:client",
+				jira: "customfield_10030",
+				type: "string",
+				direction: "pull",
+			},
+		]);
+	});
+
+	it("fields: Esc at the menu without changes leaves the step", async () => {
+		writeExistingConfig({ fieldMappings: [] });
+		const asked = await answer({ fieldsMenu: ESC });
+
+		const result = await run({ step: "fields" });
+
+		expect(result.skipped).toEqual(["fields"]);
+		expect(asked.some((q) => q.name === "leaveFields")).toBe(false);
+		expect(readConfig().fieldMappings).toEqual([]);
+	});
+
+	it("fields: Ctrl+C with pending changes offers to save them before quitting", async () => {
+		writeExistingConfig({ fieldMappings: [] });
+		await answer({
+			fieldsMenu: ["suggested", CANCEL],
+			fieldsToSync: [["customfield_10030"]],
+			savePending: true,
+		});
+
+		const result = await run({ step: "fields" });
+
+		expect(result.cancelledAt).toBe("fields");
+		expect(readConfig().fieldMappings).toEqual([
+			{
+				backlog: "frontmatter:client",
+				jira: "customfield_10030",
+				type: "string",
+				direction: "pull",
+			},
+		]);
+	});
+
+	it("fields: declining to save on Ctrl+C discards pending changes", async () => {
+		writeExistingConfig({ fieldMappings: [] });
+		await answer({
+			fieldsMenu: ["suggested", CANCEL],
+			fieldsToSync: [["customfield_10030"]],
+			savePending: false,
+		});
+
+		const result = await run({ step: "fields" });
+
+		expect(result.cancelledAt).toBe("fields");
+		expect(readConfig().fieldMappings).toEqual([]);
 	});
 
 	it("filter: suggests the project JQL and shows how many issues match", async () => {
@@ -786,6 +1122,69 @@ describe("configure wizard", () => {
 		);
 		expect(printed()).toContain("git add .backlog-jira");
 		expectUnmanagedKept(readConfig());
+	});
+
+	it("Esc inside a step returns to its question without saving it; Esc there goes to the previous step", async () => {
+		writeExistingConfig();
+		const asked = await answer({
+			run_credentials: false,
+			run_connection: [false, false],
+			// Yes, then Esc on the question after Esc in the step, then skip
+			run_project: [true, ESC, false],
+			project: "WEB",
+			issueType: ESC,
+			run_status: false,
+			run_sprints: false,
+			run_fields: false,
+			run_conflict: false,
+			run_filter: false,
+		});
+
+		const result = await run();
+
+		expect(
+			asked.filter((q) => String(q.name).startsWith("run_")).map((q) => q.name),
+		).toEqual([
+			"run_credentials",
+			"run_connection",
+			"run_project",
+			"run_project",
+			"run_connection",
+			"run_project",
+			"run_status",
+			"run_sprints",
+			"run_fields",
+			"run_conflict",
+			"run_filter",
+		]);
+		expect(printed()).toContain("Back: nothing from this step was saved.");
+		expect(result.cancelledAt).toBeUndefined();
+		expect(result.completed).toEqual([]);
+		expect(result.skipped).toEqual([...CONFIGURE_STEPS]);
+		// The project picked before Esc was not kept
+		expect(readConfig().jira).toMatchObject({
+			projectKey: "API",
+			issueType: "Task",
+		});
+	});
+
+	it("Esc on the first step's question stays on it", async () => {
+		writeExistingConfig();
+		const asked = await answer({
+			run_credentials: [ESC, false],
+			run_connection: false,
+			run_project: false,
+			run_status: false,
+			run_sprints: false,
+			run_fields: false,
+			run_conflict: false,
+			run_filter: false,
+		});
+
+		const result = await run();
+
+		expect(asked.filter((q) => q.name === "run_credentials")).toHaveLength(2);
+		expect(result.cancelledAt).toBeUndefined();
 	});
 
 	it("saves completed steps when cancelled", async () => {

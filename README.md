@@ -226,7 +226,7 @@ This creates `.backlog-jira/` directory with:
 
 ### Guided Setup (`backlog-jira configure`)
 
-`backlog-jira configure` takes you from an empty Backlog.md project to a verified, ready-to-import configuration. Every step can be skipped, and each completed step is saved immediately:
+`backlog-jira configure` takes you from an empty Backlog.md project to a verified, ready-to-import configuration. Every step can be skipped, and each completed step is saved immediately. Esc goes back: inside a step it returns to the step's "Set up … now?" question without saving that step, and on that question it returns to the previous step (with `--step`, Esc leaves the step unchanged). Ctrl+C quits:
 
 | Step | What it does |
 |------|--------------|
@@ -235,7 +235,7 @@ This creates `.backlog-jira/` directory with:
 | `project` | Picks the project and the issue type from lists fetched from Jira. |
 | `status` | One checkbox list of the project's Jira statuses, labelled by where they were found (on Epic/Story issues, reachable by a transition, or used elsewhere on the site) and checked with Jira. Proposes the whole mapping to your Backlog statuses (from `backlog config`); accept it, or change only the statuses you pick (including leaving one explicitly unmapped). Unticked statuses are removed from the mapping. |
 | `sprints` | Lists the project's boards, and for a board with sprints writes the sprint mapping (direction, `createSprints`, `archiveClosedSprints`, `pullScope`) and sets `mcp.envVars.TOOLSETS` so the `jira_agile` tools stay enabled. |
-| `fields` | Samples the 50 most recently updated project issues and lists the fields they use, most used first, with a suggested target and type. Fields the plugin already syncs (summary, status, assignee…), the sprint and noise fields (watchers, rank) and unsupported types are left out. Tick the ones to sync, then accept or adjust; "Search all fields…" covers the rest. Mappings go through the same validation as `map-fields add`. |
+| `fields` | A menu that always shows the fields synced by default (summary, description, status, assignee, labels, priority), the configured mappings (including the sprint mapping) and the pending changes. **Add suggested fields** lists the fields used by the 50 most recently updated project issues, most used first, with a suggested target and type; noise fields (watchers, rank) and unsupported types are left out. **Search all Jira fields** marks fields that are synced by default or already mapped; picking a mapped field edits its mapping, and picking Priority edits how Jira priorities translate to Backlog priorities. Each field shows its target, type and direction on one line to accept or change one at a time; suggested targets always pass validation and the target question lists the targets already taken. **Edit** and **Remove** work on configured and pending mappings. Nothing is written until **Save**: Esc in a sub-menu returns to the menu, and leaving with pending changes (Esc or Ctrl+C) asks whether to save them. Mappings go through the same validation as `map-fields add`. |
 | `conflict` | Chooses the conflict strategy. |
 | `filter` | Sets the import JQL (default `project = KEY ORDER BY created DESC`) and shows how many issues match. `pull --import` pages through all matching issues (up to 1,000 per run). |
 

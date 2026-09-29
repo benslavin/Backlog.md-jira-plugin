@@ -20,10 +20,14 @@ import {
 	writeConfigFile,
 } from "../utils/config-file.ts";
 import {
+	BACKLOG_PRIORITIES,
+	DEFAULT_PRIORITY_MAPPING,
 	FIELD_MAPPING_DIRECTIONS,
 	FIELD_MAPPING_TYPES,
 	type FieldMappingDirection,
+	PRIORITY_SYSTEM_FIELD,
 	type SprintPullScope,
+	isBuiltInPriorityMapping,
 	suggestTypeForSchema,
 	validateBacklogTarget,
 	validateFieldMappings,
@@ -36,6 +40,8 @@ import {
 	setLogLevel,
 } from "../utils/logger.ts";
 import {
+	DEFAULT_SYNCED_FIELDS,
+	type FieldSuggestion,
 	type IssueTypeStatuses,
 	applyRequiredToolsets,
 	applySprintSettings,
@@ -47,15 +53,19 @@ import {
 	detectCredentials,
 	discoverProjectStatuses,
 	findSprintEntry,
-	frontmatterTargetFor,
 	mergeEnvFile,
 	readBacklogStatuses,
 	suggestBacklogStatus,
+	suggestBacklogTarget,
 	suggestFieldMappings,
 	uncoveredJiraStatuses,
 } from "../utils/setup.ts";
 import { runDoctor } from "./doctor.ts";
-import { addFieldMapping, removeFieldMapping } from "./map-fields.ts";
+import {
+	addFieldMapping,
+	parseValueMapEntries,
+	removeFieldMapping,
+} from "./map-fields.ts";
 
 /** Wizard steps, in the order the full wizard runs them */
 export const CONFIGURE_STEPS = [
@@ -173,14 +183,49 @@ class WizardCancelled extends Error {
 	}
 }
 
+/** Esc: go back to the previous question or menu */
+class WizardBack extends Error {
+	constructor() {
+		super("Back");
+		this.name = "WizardBack";
+	}
+}
+
 /**
- * Ask one question; Ctrl+C (an undefined answer) cancels the wizard
+ * Ask one question. Esc throws WizardBack; Ctrl+C (an undefined answer)
+ * cancels the wizard. prompts handles Esc like Ctrl+C, so each prompt's exit
+ * handler (Esc) is replaced once it renders to tell the two apart.
  */
 async function ask<T>(question: prompts.PromptObject): Promise<T> {
 	const name = String(question.name);
-	const response = await prompts(question);
+	let escaped = false;
+	const onRender = question.onRender;
+	const response = await prompts({
+		...question,
+		onRender(this: unknown, ...args: unknown[]) {
+			const prompt = this as {
+				exit?: () => void;
+				abort?: () => void;
+				escPatched?: boolean;
+			};
+			if (!prompt.escPatched) {
+				prompt.escPatched = true;
+				prompt.exit = () => {
+					escaped = true;
+					prompt.abort?.();
+				};
+			}
+			return (onRender as ((...a: unknown[]) => void) | undefined)?.apply(
+				this,
+				args,
+			);
+		},
+	});
 	const answer = response?.[name];
-	if (answer === undefined) throw new WizardCancelled();
+	if (answer === undefined) {
+		if (escaped) throw new WizardBack();
+		throw new WizardCancelled();
+	}
 	return answer as T;
 }
 
@@ -1010,6 +1055,19 @@ interface PlannedMapping {
 	direction: string;
 	/** Label of the Jira field */
 	label: string;
+	valueMap?: Record<string, string>;
+	/** Target of the configured mapping this one replaces */
+	replaces?: string;
+	/** The sprint mapping (set up in the sprints step) */
+	sprint?: boolean;
+}
+
+/** Unsaved changes of the field mappings menu */
+interface FieldsDraft {
+	configured: PlannedMapping[];
+	/** Targets of configured mappings to remove */
+	removals: Set<string>;
+	pending: PlannedMapping[];
 }
 
 function describeField(f: DiscoveredField): string {
@@ -1022,25 +1080,311 @@ function describeField(f: DiscoveredField): string {
 	return `${f.name} (${f.id}) [${schema}]${suggested ? ` → ${suggested}` : ""}`;
 }
 
+function fieldLabel(fields: DiscoveredField[], id: string): string {
+	const field = fields.find((f) => f.id === id);
+	return field ? `${field.name} (${field.id})` : id;
+}
+
+function arrowFor(direction: string): string {
+	return direction === "both" ? "↔" : direction === "push" ? "→" : "←";
+}
+
+function describePlanned(p: PlannedMapping): string {
+	const valueMap = p.valueMap
+		? ` ${chalk.gray(
+				`values: ${Object.entries(p.valueMap)
+					.map(([from, to]) => `${from}=${to}`)
+					.join(", ")}`,
+			)}`
+		: "";
+	return `${p.backlog} ${arrowFor(p.direction)} ${p.label}  ${chalk.gray(`${p.type}, ${p.direction}`)}${valueMap}`;
+}
+
+function draftChanges(draft: FieldsDraft): number {
+	return draft.pending.length + draft.removals.size;
+}
+
+/** Configured mappings that stay: not removed and not replaced */
+function keptConfigured(draft: FieldsDraft): PlannedMapping[] {
+	return draft.configured.filter(
+		(c) =>
+			!draft.removals.has(c.backlog) &&
+			!draft.pending.some((p) => p.replaces === c.backlog),
+	);
+}
+
 /**
- * Ask for a mapping's target, type and direction (and the Jira field when
- * none is given)
+ * Backlog targets in use once the draft is saved, except those of the
+ * mapping being edited
  */
-async function promptFieldMapping(
-	fields: DiscoveredField[],
-	preset?: PlannedMapping,
+function takenTargets(draft: FieldsDraft, editing?: PlannedMapping): string[] {
+	const own = new Set(
+		[editing?.backlog, editing?.replaces].filter(
+			(t): t is string => t !== undefined,
+		),
+	);
+	return [
+		...keptConfigured(draft).map((c) => c.backlog),
+		...draft.pending.filter((p) => p !== editing).map((p) => p.backlog),
+	].filter((t) => !own.has(t));
+}
+
+function printDraft(draft: FieldsDraft): void {
+	console.log(
+		`\n  ${chalk.bold("Synced by default:")} ${DEFAULT_SYNCED_FIELDS.map((f) =>
+			f.jira === f.backlog ? f.jira : `${f.backlog} ↔ ${f.jira}`,
+		).join(", ")}`,
+	);
+	console.log(`  ${chalk.bold("Configured:")}`);
+	if (draft.configured.length === 0) console.log(chalk.gray("    none"));
+	for (const c of draft.configured) {
+		const note = draft.removals.has(c.backlog)
+			? chalk.red("  (removing)")
+			: draft.pending.some((p) => p.replaces === c.backlog)
+				? chalk.yellow("  (changing)")
+				: "";
+		console.log(`    ${describePlanned(c)}${note}`);
+	}
+	if (draft.pending.length > 0) {
+		console.log(`  ${chalk.bold("Pending, not saved yet:")}`);
+		for (const p of draft.pending) {
+			console.log(chalk.green(`    + ${describePlanned(p)}`));
+		}
+	}
+	console.log("");
+}
+
+/**
+ * Put an edited mapping into the draft: replacing its pending entry, or
+ * pending as a change of a configured mapping, or as a new mapping
+ */
+function stageMapping(
+	draft: FieldsDraft,
+	entry: PlannedMapping,
+	original?: PlannedMapping,
+): void {
+	const pendingIndex = original ? draft.pending.indexOf(original) : -1;
+	if (pendingIndex >= 0) {
+		draft.pending[pendingIndex] = { ...entry, replaces: original?.replaces };
+		return;
+	}
+	if (original && draft.configured.includes(original)) {
+		const unchanged =
+			entry.backlog === original.backlog &&
+			entry.type === original.type &&
+			entry.direction === original.direction &&
+			JSON.stringify(entry.valueMap) === JSON.stringify(original.valueMap);
+		if (unchanged) return;
+		draft.removals.delete(original.backlog);
+		draft.pending.push({ ...entry, replaces: original.backlog });
+		return;
+	}
+	draft.pending.push(entry);
+}
+
+/**
+ * Show a mapping on one line and let the user accept it or change its
+ * target, type or direction. Esc on the line throws WizardBack; Esc in a
+ * change goes back to the line.
+ */
+async function editMapping(
+	draft: FieldsDraft,
+	start: PlannedMapping,
 ): Promise<PlannedMapping> {
+	const entry = { ...start };
+	for (;;) {
+		const action = await ask<string>({
+			type: "select",
+			name: "fieldAction",
+			message: `${entry.label}: ${entry.backlog}, ${entry.type}, ${entry.direction}`,
+			hint: "Esc goes back",
+			choices: [
+				{ title: "Accept", value: "accept" },
+				{ title: "Change Backlog target", value: "target" },
+				{ title: "Change value type", value: "type" },
+				{ title: "Change direction", value: "direction" },
+			],
+			initial: 0,
+		});
+		if (action === "accept") return entry;
+		try {
+			if (action === "target") {
+				const taken = takenTargets(draft, start);
+				entry.backlog = (
+					await ask<string>({
+						type: "text",
+						name: "backlogTarget",
+						message: `Backlog target (milestone, dependencies, references, priority, labels or frontmatter:<key>)${
+							taken.length > 0 ? `; taken: ${taken.join(", ")}` : ""
+						}:`,
+						initial: entry.backlog,
+						validate: (value: string) => {
+							const target = value.trim();
+							const error = validateBacklogTarget(target);
+							if (error) return error;
+							if (taken.includes(target)) {
+								return `"${target}" is already mapped; choose another target or remove that mapping first`;
+							}
+							return true;
+						},
+					})
+				).trim();
+			} else if (action === "type") {
+				entry.type = await ask<string>({
+					type: "select",
+					name: "fieldType",
+					message: "Value type:",
+					choices: FIELD_MAPPING_TYPES.map((t) => ({ title: t, value: t })),
+					initial: Math.max(
+						0,
+						FIELD_MAPPING_TYPES.indexOf(
+							entry.type as (typeof FIELD_MAPPING_TYPES)[number],
+						),
+					),
+				});
+			} else {
+				entry.direction = await ask<string>({
+					type: "select",
+					name: "fieldDirection",
+					message: "Direction:",
+					choices: FIELD_MAPPING_DIRECTIONS.map((d) => ({
+						title:
+							d === "pull"
+								? "pull - Jira → Backlog"
+								: d === "push"
+									? "push - Backlog → Jira"
+									: "both",
+						value: d,
+					})),
+					initial: Math.max(
+						0,
+						FIELD_MAPPING_DIRECTIONS.indexOf(
+							entry.direction as FieldMappingDirection,
+						),
+					),
+				});
+			}
+		} catch (error) {
+			if (!(error instanceof WizardBack)) throw error;
+		}
+	}
+}
+
+/**
+ * Jira's system priority syncs with Backlog priority by default; picking it
+ * edits how Jira priorities translate (the built-in mapping's value map)
+ */
+async function editPriorityValueMap(draft: FieldsDraft): Promise<void> {
+	const other = [...keptConfigured(draft), ...draft.pending].find(
+		(m) => m.backlog === "priority" && m.jira !== PRIORITY_SYSTEM_FIELD,
+	);
+	if (other) {
+		console.log(
+			chalk.yellow(
+				`  Backlog priority is mapped to ${other.label}; remove that mapping to use Jira's priority again.`,
+			),
+		);
+		return;
+	}
+	const isOverride = (m: PlannedMapping) =>
+		m.backlog === "priority" && m.jira === PRIORITY_SYSTEM_FIELD;
+	const original =
+		draft.pending.find(isOverride) ?? draft.configured.find(isOverride);
+	const current = original?.valueMap ?? {};
+	console.log(
+		chalk.gray(
+			`  Jira priority syncs with Backlog priority (${BACKLOG_PRIORITIES.join(", ")}) by default: ${Object.entries(
+				DEFAULT_PRIORITY_MAPPING.valueMap ?? {},
+			)
+				.map(([from, to]) => `${from}=${to}`)
+				.join(", ")}.`,
+		),
+	);
+	const parse = (value: string) =>
+		parseValueMapEntries(
+			value
+				.split(",")
+				.map((e) => e.trim())
+				.filter(Boolean),
+		);
+	const input = await ask<string>({
+		type: "text",
+		name: "priorityValueMap",
+		message:
+			"Extra or changed translations, as Jira priority=Backlog priority, comma separated (empty keeps the defaults):",
+		initial: Object.entries(current)
+			.map(([from, to]) => `${from}=${to}`)
+			.join(", "),
+		validate: (value: string) => {
+			try {
+				for (const to of Object.values(parse(value) ?? {})) {
+					if (!(BACKLOG_PRIORITIES as readonly string[]).includes(to)) {
+						return `"${to}" is not a Backlog priority (${BACKLOG_PRIORITIES.join(", ")})`;
+					}
+				}
+				return true;
+			} catch (error) {
+				return describeError(error);
+			}
+		},
+	});
+	const valueMap = parse(input);
+	if (!valueMap) {
+		// Back to the defaults
+		if (original && draft.pending.includes(original)) {
+			draft.pending.splice(draft.pending.indexOf(original), 1);
+		}
+		const configured = draft.configured.find(isOverride);
+		if (configured) draft.removals.add(configured.backlog);
+		return;
+	}
+	stageMapping(
+		draft,
+		{
+			backlog: "priority",
+			jira: PRIORITY_SYSTEM_FIELD,
+			type: "option",
+			direction: "both",
+			label: "Priority (priority)",
+			valueMap,
+		},
+		original,
+	);
+}
+
+/**
+ * Pick any Jira field; fields synced by default, configured or pending are
+ * marked, and picking one edits its mapping instead of adding another
+ */
+async function searchField(
+	draft: FieldsDraft,
+	fields: DiscoveredField[],
+): Promise<void> {
+	const defaults = new Map(DEFAULT_SYNCED_FIELDS.map((f) => [f.jira, f]));
+	const mappedTo = (id: string) =>
+		draft.pending.find((p) => p.jira === id) ??
+		keptConfigured(draft).find((c) => c.jira === id && !c.sprint);
 	const jira =
-		preset?.jira ??
-		(fields.length > 0
+		fields.length > 0
 			? await ask<string>({
 					type: "autocomplete",
 					name: "jiraField",
-					message: "Jira field (type to filter):",
-					choices: fields.map((f) => ({
-						title: describeField(f),
-						value: f.id,
-					})),
+					message: "Jira field (type to filter, Esc goes back):",
+					choices: fields.map((f) => {
+						const synced = defaults.get(f.id);
+						const mapped = mappedTo(f.id);
+						const note = synced
+							? f.id === PRIORITY_SYSTEM_FIELD
+								? "synced by default; edit its value map"
+								: `synced by default as ${synced.backlog}`
+							: mapped
+								? `mapped to ${mapped.backlog}${draft.pending.includes(mapped) ? " (pending)" : ""}`
+								: "";
+						return {
+							title: `${describeField(f)}${note ? `  ${chalk.gray(`· ${note}`)}` : ""}`,
+							value: f.id,
+						};
+					}),
 					suggest: filterChoices,
 				})
 			: (
@@ -1050,76 +1394,163 @@ async function promptFieldMapping(
 						message: "Jira field id (customfield_NNNNN or a system field):",
 						validate: (value: string) => (value.trim() ? true : "Required"),
 					})
-				).trim());
-	const field = fields.find((f) => f.id === jira);
-	const label = preset?.label ?? (field ? `${field.name} (${field.id})` : jira);
-	if (preset) console.log(chalk.bold(`\n  ${label}`));
-	const backlog = (
-		await ask<string>({
-			type: "text",
-			name: "backlogTarget",
-			message:
-				"Backlog target (milestone, dependencies, references, priority, labels or frontmatter:<key>):",
-			initial: preset?.backlog ?? frontmatterTargetFor(field?.name ?? jira),
-			validate: (value: string) => validateBacklogTarget(value.trim()) ?? true,
-		})
-	).trim();
-	const suggested = preset?.type ?? suggestTypeForSchema(field?.schema);
-	const type = await ask<string>({
-		type: "select",
-		name: "fieldType",
-		message: "Value type:",
-		choices: FIELD_MAPPING_TYPES.map((t) => ({ title: t, value: t })),
-		initial: Math.max(
-			0,
-			FIELD_MAPPING_TYPES.indexOf(
-				suggested as (typeof FIELD_MAPPING_TYPES)[number],
-			),
-		),
-	});
-	const direction = await ask<string>({
-		type: "select",
-		name: "fieldDirection",
-		message: "Direction:",
-		choices: FIELD_MAPPING_DIRECTIONS.map((d) => ({
-			title:
-				d === "pull"
-					? "pull - Jira → Backlog"
-					: d === "push"
-						? "push - Backlog → Jira"
-						: "both",
-			value: d,
-		})),
-		initial: Math.max(
-			0,
-			FIELD_MAPPING_DIRECTIONS.indexOf(
-				(preset?.direction ?? "pull") as FieldMappingDirection,
-			),
-		),
-	});
-	return { backlog, jira, type, direction, label };
-}
+				).trim();
 
-async function fieldsStep(ctx: WizardContext): Promise<StepOutcome> {
-	const { projectKey } = jiraSection(ctx);
-	const { mappings, sprintMapping } = validateFieldMappings(
-		ctx.config.fieldMappings,
-	);
-	if (mappings.length > 0 || sprintMapping) {
-		console.log("  Current mappings:");
-		if (sprintMapping) {
-			console.log(`    milestone ↔ sprint (board ${sprintMapping.boardId})`);
-		}
-		for (const m of mappings) {
-			console.log(`    ${m.backlog} ← ${m.jira} (${m.type}, ${m.direction})`);
-		}
+	if (jira === PRIORITY_SYSTEM_FIELD) return editPriorityValueMap(draft);
+	const synced = defaults.get(jira);
+	if (synced) {
 		console.log(
 			chalk.gray(
-				"    Remove one with: backlog-jira map-fields remove <target>\n",
+				`  ${fieldLabel(fields, jira)} already syncs with the Backlog ${synced.backlog}.`,
 			),
 		);
+		return;
 	}
+	const existing = mappedTo(jira);
+	if (existing) {
+		stageMapping(draft, await editMapping(draft, existing), existing);
+		return;
+	}
+	const field = fields.find((f) => f.id === jira);
+	const entry: PlannedMapping = {
+		backlog: suggestBacklogTarget(field?.name ?? jira, takenTargets(draft)),
+		jira,
+		type: suggestTypeForSchema(field?.schema) ?? "string",
+		direction: "pull",
+		label: fieldLabel(fields, jira),
+	};
+	stageMapping(draft, await editMapping(draft, entry));
+}
 
+/** Tick suggested fields; they are added as pending with their suggestions */
+async function addSuggestedFields(
+	draft: FieldsDraft,
+	suggestions: FieldSuggestion[],
+	sampleSize: number,
+): Promise<void> {
+	const width = Math.max(...suggestions.map((s) => s.field.name.length));
+	const usage = (used: number) =>
+		sampleSize === 0
+			? ""
+			: used > 0
+				? `${used}/${sampleSize} issues`
+				: "not used yet";
+	const usageWidth = Math.max(...suggestions.map((s) => usage(s.used).length));
+	const picked = await ask<string[]>({
+		type: "multiselect",
+		name: "fieldsToSync",
+		message: "Fields to sync into Backlog",
+		hint: "space toggles, enter adds them as pending, Esc goes back",
+		instructions: false,
+		choices: suggestions.map((s) => ({
+			title: `${s.field.name.padEnd(width)}  ${chalk.gray(usage(s.used).padEnd(usageWidth))}  → ${s.backlog} ${chalk.gray(`(${s.type})`)}`,
+			value: s.field.id,
+			selected: s.selected,
+		})),
+		onRender: shortLabelsWhenDone(
+			new Map(suggestions.map((sg) => [sg.field.id, sg.field.name] as const)),
+		),
+	});
+	for (const s of suggestions) {
+		if (picked.includes(s.field.id)) {
+			draft.pending.push({
+				backlog: s.backlog,
+				jira: s.field.id,
+				type: s.type,
+				direction: s.direction,
+				label: `${s.field.name} (${s.field.id})`,
+			});
+		}
+	}
+}
+
+async function removeMapping(draft: FieldsDraft): Promise<void> {
+	const choices = [
+		...draft.pending.map((p, i) => ({
+			title: `${describePlanned(p)} ${chalk.gray("(pending)")}`,
+			value: `pending:${i}`,
+		})),
+		...keptConfigured(draft).map((c) => ({
+			title: describePlanned(c),
+			value: `configured:${c.backlog}`,
+		})),
+	];
+	const picked = await ask<string>({
+		type: "select",
+		name: "removeMapping",
+		message: "Remove which mapping? (Esc goes back)",
+		choices,
+	});
+	const [kind, ref] = [
+		picked.slice(0, picked.indexOf(":")),
+		picked.slice(picked.indexOf(":") + 1),
+	];
+	if (kind === "pending") {
+		const [removed] = draft.pending.splice(Number(ref), 1);
+		// Removing a pending change of a configured mapping keeps the original
+		if (removed?.replaces) {
+			console.log(
+				chalk.gray(
+					`  Change dropped; ${removed.replaces} stays as configured.`,
+				),
+			);
+		}
+	} else {
+		draft.removals.add(ref);
+	}
+}
+
+/** Apply the draft to the config; returns how many changes were saved */
+function saveDraft(ctx: WizardContext, draft: FieldsDraft): number {
+	let saved = 0;
+	for (const target of draft.removals) {
+		try {
+			ctx.config = removeFieldMapping(ctx.config, target);
+			saved++;
+			console.log(chalk.green(`  ✓ removed ${target}`));
+		} catch (error) {
+			console.log(chalk.red(`  ✗ ${target}: ${describeError(error)}`));
+		}
+	}
+	for (const entry of draft.pending) {
+		try {
+			let config = ctx.config;
+			if (entry.replaces && entry.replaces !== entry.backlog) {
+				config = removeFieldMapping(config, entry.replaces);
+			}
+			ctx.config = addFieldMapping(
+				config,
+				{
+					backlog: entry.backlog,
+					jira: entry.jira,
+					type: entry.type,
+					direction: entry.direction,
+					valueMap: entry.valueMap,
+				},
+				// Targets were checked against the draft; replacing is intended
+				{ force: true },
+			);
+			saved++;
+			console.log(
+				chalk.green(
+					`  ✓ ${entry.backlog} ${arrowFor(entry.direction)} ${entry.jira} (${entry.type}, ${entry.direction})`,
+				),
+			);
+		} catch (error) {
+			console.log(chalk.red(`  ✗ ${entry.backlog}: ${describeError(error)}`));
+		}
+	}
+	return saved;
+}
+
+/**
+ * Field mappings are edited from a menu that lists the fields synced by
+ * default, the configured mappings and the pending changes. Nothing is
+ * written until Save; Esc in a sub-menu returns to the menu, and leaving
+ * with pending changes (Esc or Ctrl+C) offers to save them.
+ */
+async function fieldsStep(ctx: WizardContext): Promise<StepOutcome> {
+	const { projectKey } = jiraSection(ctx);
 	let fields: DiscoveredField[] = [];
 	let sample: JiraIssue[] = [];
 	try {
@@ -1147,171 +1578,171 @@ async function fieldsStep(ctx: WizardContext): Promise<StepOutcome> {
 		.filter((f) => f.schema?.custom !== SPRINT_FIELD_SCHEMA)
 		.sort((a, b) => a.name.localeCompare(b.name));
 
-	const suggestions = suggestFieldMappings(fields, sample, {
-		mappedTargets: [
-			...mappings.map((m) => m.backlog),
-			...(sprintMapping ? ["milestone"] : []),
-		],
-		mappedFields: mappings.map((m) => m.jira),
-	});
-	const SEARCH = "__search__";
-	const plan: PlannedMapping[] = [];
-	let search = false;
-
-	if (suggestions.length > 0) {
-		console.log(
-			chalk.gray(
-				sample.length > 0
-					? `  Fields with values on the ${sample.length} most recently updated ${projectKey} issues, most used first. Fields the plugin already syncs are not listed.`
-					: "  Commonly useful fields (no project issues to sample). Fields the plugin already syncs are not listed.",
-			),
-		);
-		const width = Math.max(...suggestions.map((s) => s.field.name.length));
-		const usage = (used: number) =>
-			sample.length === 0
-				? ""
-				: used > 0
-					? `${used}/${sample.length} issues`
-					: "not used yet";
-		const usageWidth = Math.max(
-			...suggestions.map((s) => usage(s.used).length),
-		);
-		const picked = await ask<string[]>({
-			type: "multiselect",
-			name: "fieldsToSync",
-			message: "Fields to sync into Backlog",
-			hint: "space toggles, enter confirms",
-			instructions: false,
-			choices: [
-				...suggestions.map((s) => ({
-					title: `${s.field.name.padEnd(width)}  ${chalk.gray(usage(s.used).padEnd(usageWidth))}  → ${s.backlog} ${chalk.gray(`(${s.type})`)}`,
-					value: s.field.id,
-					selected: s.selected,
-				})),
-				{ title: chalk.cyan("Search all fields…"), value: SEARCH },
-			],
-			onRender: shortLabelsWhenDone(
-				new Map([
-					...suggestions.map((sg) => [sg.field.id, sg.field.name] as const),
-					[SEARCH, "search"] as const,
-				]),
-			),
-		});
-		search = picked.includes(SEARCH);
-		for (const s of suggestions) {
-			if (picked.includes(s.field.id)) {
-				plan.push({
-					backlog: s.backlog,
-					jira: s.field.id,
-					type: s.type,
-					direction: s.direction,
-					label: `${s.field.name} (${s.field.id})`,
-				});
-			}
-		}
-	} else {
-		console.log(
-			chalk.gray(
-				sample.length > 0
-					? `  None of the ${sample.length} sampled ${projectKey} issues have values in fields beyond what the plugin already syncs.`
-					: "  No field suggestions.",
-			),
-		);
-		search = await ask<boolean>({
-			type: "confirm",
-			name: "searchFields",
-			message: "Search all Jira fields?",
-			initial: false,
-		});
-	}
-
-	while (search) {
-		plan.push(await promptFieldMapping(fields));
-		search = await ask<boolean>({
-			type: "confirm",
-			name: "searchAnother",
-			message: "Search for another field?",
-			initial: false,
-		});
-	}
-	if (plan.length === 0) return "skipped";
-
-	const printPlan = () => {
-		const targetWidth = Math.max(...plan.map((p) => p.backlog.length));
-		for (const p of plan) {
-			console.log(
-				`    ${p.backlog.padEnd(targetWidth)}  ←  ${p.label}  ${chalk.gray(`${p.type}, ${p.direction}`)}`,
-			);
-		}
-	};
-	console.log("\n  Field mappings to add (Backlog ← Jira):");
-	printPlan();
-	console.log(
-		chalk.gray(
-			"  pull copies Jira values into Backlog; choose Adjust to rename a target or sync both ways.\n",
-		),
+	const { mappings, sprintMapping } = validateFieldMappings(
+		ctx.config.fieldMappings,
 	);
-	const decision = await ask<string>({
-		type: "select",
-		name: "fieldDecision",
-		message: "Add these mappings?",
-		choices: [
-			{ title: "Yes", value: "accept" },
-			{ title: "Adjust target, type or direction", value: "adjust" },
-			{ title: "Cancel", value: "cancel" },
+	const draft: FieldsDraft = {
+		configured: [
+			...(sprintMapping
+				? [
+						{
+							backlog: "milestone",
+							jira: "sprint",
+							type: "sprint",
+							direction: sprintMapping.direction,
+							label: `Sprint (board ${sprintMapping.boardId})`,
+							sprint: true,
+						},
+					]
+				: []),
+			...mappings.map((m) => ({
+				backlog: m.backlog,
+				jira: m.jira,
+				type: m.type,
+				direction: m.direction,
+				label: fieldLabel(fields, m.jira),
+				valueMap: m.valueMap,
+			})),
 		],
-		initial: 0,
-	});
-	if (decision === "cancel") return "skipped";
-	if (decision === "adjust") {
-		for (const [index, entry] of plan.entries()) {
-			plan[index] = await promptFieldMapping(fields, entry);
-		}
-	}
+		removals: new Set(),
+		pending: [],
+	};
 
-	let added = 0;
-	for (const entry of plan) {
-		const mapping = {
-			backlog: entry.backlog,
-			jira: entry.jira,
-			type: entry.type,
-			direction: entry.direction,
-		};
-		try {
-			let force = false;
-			if (
-				Array.isArray(ctx.config.fieldMappings) &&
-				ctx.config.fieldMappings.some(
-					(m) => (m as { backlog?: unknown })?.backlog === entry.backlog,
-				)
-			) {
-				force = await ask<boolean>({
-					type: "confirm",
-					name: "replaceMapping",
-					message: `A mapping for "${entry.backlog}" exists. Replace it?`,
-					initial: false,
-				});
-				if (!force) continue;
-			}
-			ctx.config = addFieldMapping(ctx.config, mapping, { force });
-			added++;
+	const save = (): StepOutcome => {
+		if (draftChanges(draft) === 0) return "skipped";
+		const saved = saveDraft(ctx, draft);
+		if (draft.pending.length > 0 && saved > 0) {
 			console.log(
-				chalk.green(
-					`  ✓ ${entry.backlog} ← ${entry.jira} (${entry.type}, ${entry.direction})`,
+				chalk.gray(
+					"  Values fill in on the next pull. Translate values with: backlog-jira map-fields add <target> <field> --type <type> --value-map 'Jira=Backlog' --force",
 				),
 			);
-		} catch (error) {
-			console.log(chalk.red(`  ✗ ${entry.backlog}: ${describeError(error)}`));
 		}
+		return saved > 0 ? "done" : "skipped";
+	};
+
+	let first = true;
+	try {
+		for (;;) {
+			const suggestions = suggestFieldMappings(fields, sample, {
+				mappedTargets: takenTargets(draft),
+				mappedFields: [
+					...keptConfigured(draft).map((c) => c.jira),
+					...draft.pending.map((p) => p.jira),
+				],
+			});
+			printDraft(draft);
+			if (first && suggestions.length > 0) {
+				console.log(
+					chalk.gray(
+						sample.length > 0
+							? `  ${suggestions.length} more fields have values on the ${sample.length} most recently updated ${projectKey} issues.`
+							: "  No project issues to sample; commonly useful fields are suggested.",
+					),
+				);
+			}
+			first = false;
+			const changes = draftChanges(draft);
+			const editable = [
+				...draft.pending,
+				...keptConfigured(draft).filter((c) => !c.sprint),
+			];
+			const removable = draft.pending.length + keptConfigured(draft).length;
+			const action = await ask<string>({
+				type: "select",
+				name: "fieldsMenu",
+				message: "Field mappings",
+				hint: "Esc leaves the step",
+				choices: [
+					...(suggestions.length > 0
+						? [
+								{
+									title: `Add suggested fields (${suggestions.length})…`,
+									value: "suggested",
+								},
+							]
+						: []),
+					{ title: "Search all Jira fields…", value: "search" },
+					...(editable.length > 0
+						? [{ title: "Edit a mapping…", value: "edit" }]
+						: []),
+					...(removable > 0
+						? [{ title: "Remove a mapping…", value: "remove" }]
+						: []),
+					{
+						title:
+							changes > 0
+								? `Save ${changes} change${changes === 1 ? "" : "s"} and continue`
+								: "Done, no changes",
+						value: "save",
+					},
+					...(changes > 0
+						? [{ title: "Discard changes and continue", value: "discard" }]
+						: []),
+				],
+				initial: 0,
+			}).catch(async (error) => {
+				if (!(error instanceof WizardBack)) throw error;
+				if (draftChanges(draft) === 0) return "discard";
+				return ask<string>({
+					type: "select",
+					name: "leaveFields",
+					message: `Save ${draftChanges(draft)} pending change${draftChanges(draft) === 1 ? "" : "s"} before leaving?`,
+					choices: [
+						{ title: "Save", value: "save" },
+						{ title: "Discard", value: "discard" },
+						{ title: "Keep editing", value: "menu" },
+					],
+				}).catch((inner) => {
+					if (inner instanceof WizardBack) return "menu";
+					throw inner;
+				});
+			});
+
+			if (action === "save") return save();
+			if (action === "discard") return "skipped";
+			try {
+				if (action === "suggested") {
+					await addSuggestedFields(draft, suggestions, sample.length);
+				} else if (action === "search") {
+					await searchField(draft, fields);
+				} else if (action === "edit") {
+					const picked = await ask<number>({
+						type: "select",
+						name: "editMapping",
+						message: "Edit which mapping? (Esc goes back)",
+						choices: editable.map((m, i) => ({
+							title: `${describePlanned(m)}${draft.pending.includes(m) ? chalk.gray(" (pending)") : ""}`,
+							value: i,
+						})),
+					});
+					const original = editable[picked];
+					if (isBuiltInPriorityMapping(original)) {
+						await editPriorityValueMap(draft);
+					} else {
+						stageMapping(draft, await editMapping(draft, original), original);
+					}
+				} else if (action === "remove") {
+					await removeMapping(draft);
+				}
+			} catch (error) {
+				// Esc in a sub-menu returns to the menu, keeping the draft
+				if (!(error instanceof WizardBack)) throw error;
+			}
+		}
+	} catch (error) {
+		if (!(error instanceof WizardCancelled) || draftChanges(draft) === 0) {
+			throw error;
+		}
+		const keep = await ask<boolean>({
+			type: "confirm",
+			name: "savePending",
+			message: `Save ${draftChanges(draft)} pending field mapping change${draftChanges(draft) === 1 ? "" : "s"} before quitting?`,
+			initial: true,
+		}).catch(() => false);
+		if (keep) save();
+		throw error;
 	}
-	if (added > 0) {
-		console.log(
-			chalk.gray(
-				"  Values fill in on the next pull. Translate values with: backlog-jira map-fields add <target> <field> --type <type> --value-map 'Jira=Backlog' --force",
-			),
-		);
-	}
-	return added > 0 ? "done" : "skipped";
 }
 
 async function conflictStep(ctx: WizardContext): Promise<StepOutcome> {
@@ -1493,12 +1924,17 @@ export async function runConfigure(
 		}
 
 		try {
-			const result: ConfigureResult = {
-				completed: [],
-				skipped: [],
-				failed: false,
-			};
-			for (const [index, name] of steps.entries()) {
+			const outcomes = new Map<ConfigureStep, StepOutcome>();
+			const summary = (): ConfigureResult => ({
+				completed: steps.filter((s) => outcomes.get(s) === "done"),
+				skipped: steps.filter(
+					(s) => outcomes.has(s) && outcomes.get(s) !== "done",
+				),
+				failed: [...outcomes.values()].includes("failed"),
+			});
+			let index = 0;
+			while (index < steps.length) {
+				const name = steps[index];
 				const info = STEP_INFO[name];
 				console.log(
 					chalk.bold.green(
@@ -1506,49 +1942,73 @@ export async function runConfigure(
 					),
 				);
 				console.log(chalk.gray(`  ${info.about}\n`));
+				// Esc inside a step drops what the step changed so far
+				const before = structuredClone(ctx.config);
 				try {
 					if (!step) {
-						const run = await ask<boolean>({
-							type: "confirm",
-							name: `run_${name}`,
-							message: `Set up ${info.title.toLowerCase()} now?`,
-							initial: true,
-						});
+						let run: boolean;
+						try {
+							run = await ask<boolean>({
+								type: "confirm",
+								name: `run_${name}`,
+								message: `Set up ${info.title.toLowerCase()} now?`,
+								initial: true,
+							});
+						} catch (error) {
+							if (!(error instanceof WizardBack)) throw error;
+							// Esc here goes back to the previous step
+							if (index > 0) index--;
+							else console.log(chalk.gray("  First step; Ctrl+C quits."));
+							continue;
+						}
 						if (!run) {
 							console.log(
 								chalk.gray(
 									`  Skipped. Later: backlog-jira configure --step ${name}`,
 								),
 							);
-							result.skipped.push(name);
+							outcomes.set(name, "skipped");
+							index++;
 							continue;
 						}
 					}
 					const outcome = await STEP_RUNNERS[name](ctx);
 					writeConfigFile(ctx.config, cwd);
-					if (outcome === "done") result.completed.push(name);
-					else result.skipped.push(name);
-					if (outcome === "failed") {
-						result.failed = true;
-						if (!step && name === "connection") {
-							const proceed = await ask<boolean>({
-								type: "confirm",
-								name: "continueOffline",
-								message:
-									"Continue without a connection? (later steps fall back to manual entry)",
-								initial: true,
-							});
-							if (!proceed) {
-								console.log(
-									chalk.gray(
-										"  Fix the connection, then run: backlog-jira configure",
-									),
-								);
-								return result;
-							}
+					outcomes.set(name, outcome);
+					if (outcome === "failed" && !step && name === "connection") {
+						const proceed = await ask<boolean>({
+							type: "confirm",
+							name: "continueOffline",
+							message:
+								"Continue without a connection? (later steps fall back to manual entry)",
+							initial: true,
+						});
+						if (!proceed) {
+							console.log(
+								chalk.gray(
+									"  Fix the connection, then run: backlog-jira configure",
+								),
+							);
+							return summary();
 						}
 					}
+					index++;
 				} catch (error) {
+					if (error instanceof WizardBack) {
+						ctx.config = before;
+						writeConfigFile(ctx.config, cwd);
+						outcomes.delete(name);
+						if (step) {
+							console.log(chalk.gray("  Left unchanged."));
+							outcomes.set(name, "skipped");
+							index++;
+						} else {
+							console.log(
+								chalk.gray("  Back: nothing from this step was saved."),
+							);
+						}
+						continue;
+					}
 					if (error instanceof WizardCancelled) {
 						writeConfigFile(ctx.config, cwd);
 						console.log(
@@ -1556,11 +2016,12 @@ export async function runConfigure(
 								`\n✗ Setup cancelled. Completed steps are saved; resume with: backlog-jira configure --step ${name}\n`,
 							),
 						);
-						return { ...result, cancelledAt: name };
+						return { ...summary(), cancelledAt: name };
 					}
 					throw error;
 				}
 			}
+			const result = summary();
 
 			console.log(
 				chalk.gray(`\n  Saved ${join(getConfigDir(cwd), "config.json")}`),
