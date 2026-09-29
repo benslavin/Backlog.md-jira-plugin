@@ -1,6 +1,8 @@
 # Publishing to NPM
 
-This document describes how to publish the `backlog-jira` package to npm.
+This document describes how to publish the `@benslavin/backlog-jira` package to npm.
+
+This is a fork of [eciuca/Backlog.md-jira-plugin](https://github.com/eciuca/Backlog.md-jira-plugin), whose unscoped `backlog-jira` npm package (0.1.0–0.2.0) belongs to the upstream author. The fork publishes under its own scope with its own version line starting at 0.3.0; the CLI command is still `backlog-jira`. Treat changes to the `.backlog-jira/` file formats (config, link records, `sprints.json`) as breaking.
 
 ## Prerequisites
 
@@ -76,6 +78,14 @@ This will:
 - Create a git commit
 - Create a git tag
 
+`dist/cli.js` is committed and embeds `package.json`, so rebuild it and amend the version commit before pushing (`bun run check:dist` fails otherwise):
+
+```bash
+bun run build && git commit --amend --no-edit dist && git tag -f v$(node -p "require('./package.json').version")
+```
+
+Add the release to `CHANGELOG.md` in the same commit.
+
 ### 3. Run Pre-Publish Checks
 
 The `prepublishOnly` script automatically runs before publishing:
@@ -94,7 +104,7 @@ npm run prepublishOnly
 
 #### First-time Publication
 
-For the initial release:
+For the initial release (`publishConfig.access` is `public`, so the scoped package is published publicly):
 
 ```bash
 npm publish
@@ -122,11 +132,11 @@ npm publish
 
 After publishing:
 
-1. **Check npm website**: Visit https://www.npmjs.com/package/backlog-jira
+1. **Check npm website**: Visit https://www.npmjs.com/package/@benslavin/backlog-jira
 
 2. **Test installation globally**:
    ```bash
-   npm install -g backlog-jira
+   npm install -g @benslavin/backlog-jira
    ```
 
 3. **Verify CLI works**:
@@ -140,7 +150,7 @@ After publishing:
    ```bash
    mkdir test-install
    cd test-install
-   npm install -g backlog-jira
+   npm install -g @benslavin/backlog-jira
    backlog-jira --help
    ```
 
@@ -171,7 +181,7 @@ Run `npm login` and authenticate.
 Update the README.md to reflect the published npm package:
 
 ```bash
-npm install -g backlog-jira
+npm install -g @benslavin/backlog-jira
 ```
 
 ### Create GitHub Release
@@ -182,7 +192,7 @@ npm install -g backlog-jira
    ```
 
 2. Create a release on GitHub:
-   - Go to: https://github.com/eciuca/Backlog.md-jira-plugin/releases
+   - Go to: https://github.com/benslavin/Backlog.md-jira-plugin/releases
    - Click "Create a new release"
    - Select the version tag
    - Add release notes
@@ -199,16 +209,14 @@ npm install -g backlog-jira
 ⚠️ **Warning**: Unpublishing should only be used in emergencies (security issues, critical bugs)
 
 ```bash
-npm unpublish backlog-jira@<version>
+npm unpublish @benslavin/backlog-jira@<version>
 ```
 
 **Note**: npm has strict unpublishing policies. After 24 hours or if the package has downloads, unpublishing may be restricted. Instead, consider publishing a patched version.
 
 ## Version History
 
-| Version | Date | Notes |
-|---------|------|-------|
-| 0.1.0   | TBD  | Initial release |
+See [CHANGELOG.md](CHANGELOG.md).
 
 ## Resources
 

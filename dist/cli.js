@@ -30392,20 +30392,21 @@ var {
 } = exports_commander;
 // package.json
 var package_default = {
-  name: "backlog-jira",
-  version: "0.2.0",
+  name: "@benslavin/backlog-jira",
+  version: "0.3.0",
   description: "Bidirectional sync plugin between Backlog.md and Jira via MCP",
   type: "module",
   author: "Emanuel Ciuca <emanuel.ciuca@gmail.com>",
+  contributors: ["Ben Slavin <ben@benslavin.com>"],
   license: "MIT",
   repository: {
     type: "git",
-    url: "https://github.com/eciuca/Backlog.md-jira-plugin.git"
+    url: "https://github.com/benslavin/Backlog.md-jira-plugin.git"
   },
   bugs: {
-    url: "https://github.com/eciuca/Backlog.md-jira-plugin/issues"
+    url: "https://github.com/benslavin/Backlog.md-jira-plugin/issues"
   },
-  homepage: "https://github.com/eciuca/Backlog.md-jira-plugin#readme",
+  homepage: "https://github.com/benslavin/Backlog.md-jira-plugin#readme",
   keywords: [
     "backlog",
     "jira",
@@ -30421,7 +30422,10 @@ var package_default = {
   bin: {
     "backlog-jira": "dist/cli.js"
   },
-  files: ["dist", "README.md", "LICENSE"],
+  files: ["dist", "README.md", "LICENSE", "CHANGELOG.md"],
+  publishConfig: {
+    access: "public"
+  },
   scripts: {
     build: "bun build --target=node --external pino --external pino-pretty src/cli.ts --outdir=dist",
     dev: "bun run src/cli.ts",

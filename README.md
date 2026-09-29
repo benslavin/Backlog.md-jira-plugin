@@ -4,6 +4,8 @@
 
 [![Status](https://img.shields.io/badge/status-Phase%205%20Complete-success)](https://github.com/MrLesk/Backlog.md/pull/394)
 
+> This is a fork of [eciuca/Backlog.md-jira-plugin](https://github.com/eciuca/Backlog.md-jira-plugin), versioned independently from 0.3.0 on. See [CHANGELOG.md](CHANGELOG.md) for what changed since upstream 0.2.0.
+
 ## Table of Contents
 
 - [Overview](#overview)
@@ -154,8 +156,10 @@ Before installing the plugin, ensure you have:
 ### From npm (Future)
 
 ```bash
-npm install -g backlog-jira
+npm install -g @benslavin/backlog-jira
 ```
+
+This fork publishes under its own scope; the unscoped `backlog-jira` package on npm is the upstream 0.2.0 release. Either way the command is `backlog-jira`.
 
 ### From the Git Repository (Recommended)
 
@@ -163,16 +167,16 @@ Install the CLI globally straight from GitHub with your package manager of choic
 
 ```bash
 # npm
-npm install -g git+https://github.com/YOUR-USERNAME/Backlog.md-jira-plugin.git
+npm install -g git+https://github.com/benslavin/Backlog.md-jira-plugin.git
 
 # pnpm
-pnpm add -g git+https://github.com/YOUR-USERNAME/Backlog.md-jira-plugin.git
+pnpm add -g git+https://github.com/benslavin/Backlog.md-jira-plugin.git
 
 # bun
-bun add -g git+https://github.com/YOUR-USERNAME/Backlog.md-jira-plugin.git
+bun add -g git+https://github.com/benslavin/Backlog.md-jira-plugin.git
 ```
 
-To pin a specific branch, tag, or commit, append `#<ref>` (e.g. `...Backlog.md-jira-plugin.git#main`).
+To pin a specific branch, tag, or commit, append `#<ref>` (e.g. `...Backlog.md-jira-plugin.git#v0.3.0`).
 
 The prebuilt CLI (`dist/cli.js`) is committed to the repository, so installing runs no build scripts and works with pnpm's and bun's default script-blocking policies. It runs on Node.js 20+ (or Bun); Bun is only needed to develop the plugin.
 
@@ -182,7 +186,7 @@ To upgrade, re-run the same install command.
 
 ```bash
 # Clone the repository
-git clone https://github.com/YOUR-USERNAME/Backlog.md-jira-plugin.git
+git clone https://github.com/benslavin/Backlog.md-jira-plugin.git
 cd Backlog.md-jira-plugin
 
 # Install dependencies (Bun is required for building and testing)
@@ -1138,7 +1142,7 @@ tail -f .backlog-jira/logs/backlog-jira.log
 
 ```bash
 # Clone repository
-git clone https://github.com/YOUR-USERNAME/Backlog.md-jira-plugin.git
+git clone https://github.com/benslavin/Backlog.md-jira-plugin.git
 cd Backlog.md-jira-plugin
 
 # Install dependencies
