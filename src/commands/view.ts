@@ -13,6 +13,7 @@ import {
 	loadSprintMapping,
 	readTaskFrontmatter,
 } from "../utils/field-mapping.ts";
+import { formatIdPair, resolveTaskArg } from "../utils/id-resolver.ts";
 import { getJiraClientOptions } from "../utils/jira-config.ts";
 import { logger } from "../utils/logger.ts";
 import { formatMappedFieldsSection } from "../utils/mapped-field-sync.ts";
@@ -29,13 +30,16 @@ type CoreFormatter = (task: Task, content: string, filePath?: string) => string;
  * View a task with Jira metadata
  */
 async function viewTask(
-	taskId: string,
+	taskArg: string,
 	options: { plain?: boolean },
 ): Promise<void> {
 	const store = new FrontmatterStore();
 	const backlog = new BacklogClient();
+	let taskId = taskArg;
 
 	try {
+		// Accept the Jira key of a linked issue in place of its task ID
+		taskId = resolveTaskArg(taskArg, store);
 		// Get task from backlog
 		const task = await backlog.getTask(taskId);
 		// Create content from task fields for formatting
@@ -49,7 +53,7 @@ async function viewTask(
 			taskWithJira = {
 				...task,
 				jiraKey: mapping.jiraKey,
-				jiraUrl: `https://your-domain.atlassian.net/browse/${mapping.jiraKey}`,
+				jiraUrl: getIssueUrl(taskId, mapping.jiraKey),
 				jiraLastSync: syncState?.lastSyncAt || "Never",
 				jiraSyncState: (syncState?.conflictState ||
 					"Unknown") as JiraMetadata["jiraSyncState"],
@@ -63,7 +67,7 @@ async function viewTask(
 			// In real implementation, this would be:
 			// import { formatTaskPlainText } from 'backlog-md';
 			// const formatted = formatTaskPlainText(t, c, f);
-			return `[CORE FORMAT PLACEHOLDER]\nTask: ${t.id} - ${t.title}\nStatus: ${t.status}\n\nContent:\n${c}`;
+			return `[CORE FORMAT PLACEHOLDER]\nTask: ${formatIdPair(t.id, mapping?.jiraKey)} - ${t.title}\nStatus: ${t.status}\n\nContent:\n${c}`;
 		};
 
 		if (options.plain) {
@@ -97,6 +101,16 @@ async function viewTask(
 	} finally {
 		store.close();
 	}
+}
+
+/**
+ * Browse URL of the linked issue: as stored with the link, else from JIRA_URL
+ */
+function getIssueUrl(taskId: string, jiraKey: string): string | undefined {
+	const stored = readTaskLink(taskId)?.jiraUrl;
+	if (stored) return stored;
+	const base = process.env.JIRA_URL?.replace(/\/+$/, "");
+	return base ? `${base}/browse/${jiraKey}` : undefined;
 }
 
 /**
@@ -161,7 +175,9 @@ function getSprintHistoryLines(taskId: string, linked: boolean): string[] {
 export function registerViewCommand(program: Command): void {
 	program
 		.command("view <taskId>")
-		.description("View task with Jira integration details")
+		.description(
+			"View task with Jira integration details (by task ID or linked Jira key)",
+		)
 		.option("--plain", "Output plain text format")
 		.action(async (taskId, options) => {
 			try {

@@ -5,6 +5,7 @@ import { BacklogClient } from "../integrations/backlog.ts";
 import { JiraClient } from "../integrations/jira.ts";
 import { FrontmatterStore } from "../state/store.ts";
 import { getTaskFilePath, updateJiraMetadata } from "../utils/frontmatter.ts";
+import { formatIdPair, resolveTaskArg } from "../utils/id-resolver.ts";
 import { getJiraClientOptions } from "../utils/jira-config.ts";
 import { logger } from "../utils/logger.ts";
 import {
@@ -308,7 +309,7 @@ async function createMapping(
  * Link task command: directly link a Backlog task to a Jira issue by key
  */
 async function linkTask(
-	taskId: string,
+	taskArg: string,
 	jiraKey: string,
 	options: { force?: boolean } = {},
 ): Promise<void> {
@@ -317,6 +318,8 @@ async function linkTask(
 	const jira = new JiraClient(getJiraClientOptions());
 
 	try {
+		// The Jira key of a linked issue names its task (to relink with --force)
+		const taskId = resolveTaskArg(taskArg, store);
 		logger.info({ taskId, jiraKey }, "Starting link task operation");
 
 		// Validate taskId exists
@@ -371,10 +374,10 @@ async function linkTask(
 		}
 
 		// Create the mapping
-		console.log(`🔗 Creating mapping ${taskId} → ${jiraKey}...`);
+		console.log(`🔗 Creating mapping ${formatIdPair(taskId, jiraKey)}...`);
 		await createMapping(store, backlog, jira, taskId, jiraKey);
 
-		console.log(`\n✅ Successfully linked ${taskId} → ${jiraKey}`);
+		console.log(`\n✅ Successfully linked ${formatIdPair(taskId, jiraKey)}`);
 		logger.info({ taskId, jiraKey }, "Link task operation completed");
 		process.exit(0);
 	} catch (error) {
@@ -382,7 +385,10 @@ async function linkTask(
 			// Already logged, just rethrow
 			throw error;
 		}
-		logger.error({ error, taskId, jiraKey }, "Link task operation failed");
+		logger.error(
+			{ error, taskId: taskArg, jiraKey },
+			"Link task operation failed",
+		);
 		throw error;
 	} finally {
 		await jira.close();
@@ -432,7 +438,10 @@ export function registerMapCommand(program: Command): void {
 	mapCmd
 		.command("link")
 		.description("Directly link a Backlog task to a Jira issue by key")
-		.argument("<taskId>", "Backlog task ID (e.g., task-123)")
+		.argument(
+			"<taskId>",
+			"Backlog task ID (e.g., task-123), or the Jira key of its linked issue",
+		)
 		.argument("<jiraKey>", "Jira issue key (e.g., PROJ-456)")
 		.option("--force", "Overwrite existing mapping if present")
 		.action(

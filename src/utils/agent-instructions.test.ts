@@ -170,6 +170,17 @@ Footer`;
 			expect(content).toContain("backlog-jira push");
 			expect(content).toContain("backlog-jira sync");
 		});
+
+		it("explains Jira keys in task text and how to resolve them", () => {
+			for (const content of [getCliModeContent(), getMcpModeContent()]) {
+				expect(content).toContain("Task IDs and Jira Keys");
+				expect(content).toContain("in task text is a Jira key");
+				expect(content).toContain("backlog-jira resolve");
+				expect(content).toMatch(
+					/never pass it to `backlog`|never pass a Jira key/,
+				);
+			}
+		});
 	});
 
 	describe("getMcpModeContent", () => {

@@ -2,6 +2,7 @@ import type { Command } from "commander";
 import { BacklogClient } from "../integrations/backlog.ts";
 import { JiraClient } from "../integrations/jira.ts";
 import { FrontmatterStore } from "../state/store.ts";
+import { formatIdPair } from "../utils/id-resolver.ts";
 import { getJiraClientOptions } from "../utils/jira-config.ts";
 import { logger } from "../utils/logger.ts";
 import {
@@ -144,7 +145,8 @@ async function getStatus(options: {
 			filteredStatuses = statuses.filter(
 				(s) =>
 					s.syncState.toLowerCase().includes(grepLower) ||
-					s.taskId.toLowerCase().includes(grepLower),
+					s.taskId.toLowerCase().includes(grepLower) ||
+					s.jiraKey.toLowerCase().includes(grepLower),
 			);
 		}
 
@@ -186,7 +188,7 @@ async function getStatus(options: {
 			}
 
 			if (counts.Conflict > 0) {
-				console.log("\n💡 Tip: Use 'backlog-jira resolve' to handle conflicts");
+				console.log("\n💡 Tip: Use 'backlog-jira sync' to handle conflicts");
 			}
 		}
 	} finally {
@@ -199,34 +201,31 @@ async function getStatus(options: {
  * Display status in a formatted table
  */
 function displayStatusTable(statuses: TaskStatus[]): void {
+	// Linked tasks show as one "TASK-1 ⇄ CR2-77" pair
+	const pairs = statuses.map((s) => formatIdPair(s.taskId, s.jiraKey));
+	const width = Math.max("Task ⇄ Jira".length, ...pairs.map((p) => p.length));
+	const bar = "═".repeat(width + 2);
+
 	// Header
+	console.log(`╔${bar}╦═══════════════╦════════════════════════════════╗`);
 	console.log(
-		"╔═══════════════╦════════════╦═══════════════╦════════════════════════════════╗",
+		`║ ${"Task ⇄ Jira".padEnd(width)} ║ Sync State    ║ Changed Fields                 ║`,
 	);
-	console.log(
-		"║ Task ID       ║ Jira Key   ║ Sync State    ║ Changed Fields                 ║",
-	);
-	console.log(
-		"╠═══════════════╬════════════╬═══════════════╬════════════════════════════════╣",
-	);
+	console.log(`╠${bar}╬═══════════════╬════════════════════════════════╣`);
 
 	// Rows
-	for (const status of statuses) {
+	for (const [i, status] of statuses.entries()) {
 		const stateIcon = getStateIcon(status.syncState);
 		const stateStr = `${stateIcon} ${status.syncState}`.padEnd(13);
 		const fieldsStr = (status.changedFields?.join(", ") || "")
 			.slice(0, 30)
 			.padEnd(30);
 
-		console.log(
-			`║ ${status.taskId.padEnd(13)} ║ ${status.jiraKey.padEnd(10)} ║ ${stateStr} ║ ${fieldsStr} ║`,
-		);
+		console.log(`║ ${pairs[i].padEnd(width)} ║ ${stateStr} ║ ${fieldsStr} ║`);
 	}
 
 	// Footer
-	console.log(
-		"╚═══════════════╩════════════╩═══════════════╩════════════════════════════════╝",
-	);
+	console.log(`╚${bar}╩═══════════════╩════════════════════════════════╝`);
 }
 
 /**
@@ -257,7 +256,10 @@ export function registerStatusCommand(program: Command): void {
 		.command("status")
 		.description("Show sync status of mapped tasks")
 		.option("--json", "Output in JSON format")
-		.option("--grep <pattern>", "Filter results by sync state or task ID")
+		.option(
+			"--grep <pattern>",
+			"Filter results by sync state, task ID or Jira key",
+		)
 		.action(async (options) => {
 			try {
 				await getStatus(options);

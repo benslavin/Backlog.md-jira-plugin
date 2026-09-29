@@ -15,8 +15,9 @@ import { registerMapAssigneesCommand } from "./commands/map-assignees.ts";
 import { registerMapFieldsCommand } from "./commands/map-fields.ts";
 import { registerMapCommand } from "./commands/map.ts";
 import { registerMcpCommand } from "./commands/mcp.ts";
-import { pull } from "./commands/pull.ts";
+import { formatImportedLines, pull } from "./commands/pull.ts";
 import { push } from "./commands/push.ts";
+import { registerResolveCommand } from "./commands/resolve.ts";
 import { registerStatusCommand } from "./commands/status.ts";
 import { sync } from "./commands/sync.ts";
 import { registerViewCommand } from "./commands/view.ts";
@@ -117,6 +118,7 @@ registerMapCommand(program);
 registerMapAssigneesCommand(program);
 registerMapFieldsCommand(program);
 registerMcpCommand(program);
+registerResolveCommand(program);
 registerStatusCommand(program);
 registerViewCommand(program);
 
@@ -161,7 +163,7 @@ program
 
 program
 	.command("push [taskIds...]")
-	.description("Push Backlog changes to Jira")
+	.description("Push Backlog changes to Jira (tasks by ID or linked Jira key)")
 	.option("--all", "Push all mapped tasks")
 	.option("--force", "Force push even if conflicts detected")
 	.option("--dry-run", "Show what would be pushed without making changes")
@@ -198,7 +200,7 @@ program
 
 program
 	.command("pull [taskIds...]")
-	.description("Pull Jira changes to Backlog")
+	.description("Pull Jira changes to Backlog (tasks by ID or linked Jira key)")
 	.option("--all", "Pull all mapped tasks")
 	.option("--import", "Import unmapped Jira issues as new Backlog tasks")
 	.option("--jql <jql>", "JQL filter for importing issues (requires --import)")
@@ -220,6 +222,9 @@ program
 			console.log(`  Pulled: ${result.pulled.length}`);
 			if (result.imported.length > 0) {
 				console.log(`  Imported: ${result.imported.length}`);
+				for (const line of formatImportedLines(result)) {
+					console.log(`    ${line}`);
+				}
 			}
 			console.log(`  Failed: ${result.failed.length}`);
 			console.log(`  Skipped: ${result.skipped.length}`);
@@ -248,7 +253,9 @@ program
 
 program
 	.command("sync [taskIds...]")
-	.description("Bidirectional sync with conflict resolution")
+	.description(
+		"Bidirectional sync with conflict resolution (tasks by ID or linked Jira key)",
+	)
 	.option("--all", "Sync all mapped tasks")
 	.option(
 		"--strategy <strategy>",

@@ -1,6 +1,7 @@
 import chalk from "chalk";
 import prompts from "prompts";
 import type { Conflict, FieldConflict } from "../commands/sync.ts";
+import { formatIdPair } from "../utils/id-resolver.ts";
 import { SPRINT_CONFLICT_FIELD } from "../utils/sprint-payload.ts";
 
 export interface ResolutionChoice {
@@ -21,8 +22,9 @@ export async function promptForConflictResolution(
 	conflict: Conflict,
 ): Promise<ConflictResolution> {
 	console.log(chalk.bold.yellow("\n⚠️  Conflict Detected\n"));
-	console.log(chalk.gray(`Task: ${conflict.taskId}`));
-	console.log(chalk.gray(`Jira: ${conflict.jiraKey}`));
+	console.log(
+		chalk.gray(`Task: ${formatIdPair(conflict.taskId, conflict.jiraKey)}`),
+	);
 	console.log(chalk.gray(`Fields in conflict: ${conflict.fields.length}\n`));
 
 	const resolutions: ResolutionChoice[] = [];

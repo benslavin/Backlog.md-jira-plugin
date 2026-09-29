@@ -28,6 +28,7 @@ import {
 	updateFrontmatterFields,
 	updateJiraMetadata,
 } from "../utils/frontmatter.ts";
+import { formatIdPair, resolveTaskArgs } from "../utils/id-resolver.ts";
 import { getJiraClientOptions } from "../utils/jira-config.ts";
 import { logger } from "../utils/logger.ts";
 import { recordSyncedSnapshots } from "../utils/mapped-field-sync.ts";
@@ -50,6 +51,9 @@ import { mapJiraStatusToBacklog } from "../utils/status-mapping.ts";
 import { classifySyncState } from "../utils/sync-state.ts";
 import { sanitizeTitle } from "../utils/title-sanitizer.ts";
 
+/** Placeholder task ID a dry-run import reports */
+const DRY_RUN_TASK_PREFIX = "dry-run-";
+
 export interface PullOptions {
 	taskIds?: string[];
 	all?: boolean;
@@ -70,6 +74,8 @@ export interface PullResult {
 	success: boolean;
 	pulled: string[];
 	imported: string[];
+	/** Each imported task with the Jira issue it was imported from */
+	importedLinks: Array<{ taskId: string; jiraKey: string }>;
 	failed: Array<{ taskId: string; error: string }>;
 	skipped: string[];
 	/** Problems that did not fail a task (e.g. sprint milestone updates) */
@@ -108,6 +114,7 @@ export async function pull(options: PullOptions = {}): Promise<PullResult> {
 		success: true,
 		pulled: [],
 		imported: [],
+		importedLinks: [],
 		failed: [],
 		skipped: [],
 		warnings: [],
@@ -142,14 +149,18 @@ export async function pull(options: PullOptions = {}): Promise<PullResult> {
 			}
 		}
 
-		// Get list of tasks to pull and issues to import
-		const { mapped, unmapped, warnings } = await getTaskIds(
-			options,
-			backlog,
-			jira,
-			store,
-			sprints,
-		);
+		// Get list of tasks to pull and issues to import; given IDs may be
+		// Jira keys of linked tasks
+		const requested = options.taskIds?.length
+			? resolveTaskArgs(options.taskIds, store)
+			: null;
+		for (const { input, error } of requested?.errors ?? []) {
+			result.failed.push({ taskId: input, error });
+			result.success = false;
+		}
+		const { mapped, unmapped, warnings } = requested
+			? { mapped: requested.taskIds, unmapped: [], warnings: [] }
+			: await getTaskIds(options, backlog, jira, store, sprints);
 		result.warnings.push(...(warnings ?? []));
 
 		logger.info(
@@ -175,6 +186,7 @@ export async function pull(options: PullOptions = {}): Promise<PullResult> {
 						});
 
 						result.imported.push(taskId);
+						result.importedLinks.push({ taskId, jiraKey });
 						logger.info({ taskId, jiraKey }, "Successfully imported issue");
 					} catch (error) {
 						const errorMsg =
@@ -245,6 +257,22 @@ export async function pull(options: PullOptions = {}): Promise<PullResult> {
 }
 
 /**
+ * One line per imported issue for the pull summary: "TASK-5 ⇄ CR2-80", or
+ * the issue alone in a dry run (no task is created)
+ */
+export function formatImportedLines(result: PullResult): string[] {
+	return [...result.importedLinks]
+		.sort((a, b) =>
+			a.jiraKey.localeCompare(b.jiraKey, undefined, { numeric: true }),
+		)
+		.map(({ taskId, jiraKey }) =>
+			taskId.startsWith(DRY_RUN_TASK_PREFIX)
+				? `${jiraKey} (dry run: would import)`
+				: formatIdPair(taskId, jiraKey),
+		);
+}
+
+/**
  * Get list of task IDs to pull
  * Returns { mapped: taskIds, unmapped: jiraKeys }
  */
@@ -255,10 +283,6 @@ async function getTaskIds(
 	store: FrontmatterStore,
 	sprints: SprintPullContext | null,
 ): Promise<{ mapped: string[]; unmapped: string[]; warnings?: string[] }> {
-	if (options.taskIds && options.taskIds.length > 0) {
-		return { mapped: options.taskIds, unmapped: [] };
-	}
-
 	if (options.all) {
 		// Get all tasks that have mappings
 		const mappings = store.getAllMappings();
@@ -887,7 +911,7 @@ async function importJiraIssue(
 			},
 			"DRY RUN: Would import Jira issue",
 		);
-		return `dry-run-${jiraKey}`;
+		return `${DRY_RUN_TASK_PREFIX}${jiraKey}`;
 	}
 
 	// Map assignee from Jira to Backlog format

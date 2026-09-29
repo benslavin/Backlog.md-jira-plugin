@@ -31,7 +31,21 @@ backlog-jira configure --step <step> # Revisit one setup step (credentials, conn
 backlog-jira map            # Link Backlog tasks to Jira issues
 backlog-jira map-fields     # Map extra Jira fields (or a board's sprints) onto Backlog tasks
 backlog-jira view <task-id> # View task sync details
+backlog-jira resolve <id>... # Show the task ID or Jira key each ID pairs with
 ```
+
+## Task IDs and Jira Keys
+
+Backlog task IDs (`TASK-12`) and Jira keys (`<PROJECT>-<n>`, e.g. `PROJ-77`, where `<PROJECT>` is `jira.projectKey` in `.backlog-jira/config.json`) are numbered independently, so their numbers do not correspond. Task descriptions, notes and Jira comments may mention either, and the plugin never rewrites them.
+
+- A `<PROJECT>-<n>` in task text is a Jira key, not a task ID. Resolve it before acting on it:
+  ```bash
+  backlog-jira resolve PROJ-77 --plain   # columns: input, task, jira, state (linked, unlinked-task, unlinked-jira, unknown)
+  backlog-jira resolve TASK-12 PROJ-77   # any mix of IDs; linked pairs print as TASK-12 ⇄ PROJ-77
+  ```
+- `backlog-jira` commands that take a task (`view`, `push`, `pull`, `sync`, `map link`, `create-issue`) also accept the Jira key of its linked issue.
+- `backlog` commands take task IDs only: never pass a Jira key where a task ID is expected (`backlog task edit <id>`, `--dep`, `-p`). Resolve it to its task ID first.
+- When writing task text, refer to tasks by task ID and to Jira issues by Jira key.
 
 ## Configuration
 

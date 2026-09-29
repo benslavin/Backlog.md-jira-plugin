@@ -924,12 +924,35 @@ View task/issue details and sync status.
 # View task details (mapped fields show Backlog and Jira values)
 backlog-jira view task-123 --plain
 
+# The Jira key of the linked issue works too; the header shows TASK-123 ⇄ PROJ-456
+backlog-jira view PROJ-456 --plain
+
 # View with Jira issue details
 backlog-jira view task-123 --with-jira
 
 # View sync history
 backlog-jira view task-123 --history
 ```
+
+### `backlog-jira resolve <ids...>`
+
+Pair Backlog task IDs with the Jira keys of their linked issues. Task IDs and Jira keys are
+numbered independently, so text in tasks and Jira may mention either; the plugin never rewrites
+it. Every command that takes a task (`view`, `push`, `pull`, `sync`, `map link`, `create-issue`)
+also accepts the Jira key of its linked issue.
+
+```bash
+backlog-jira resolve TASK-12 PROJ-77 PROJ-99
+# ✓ TASK-12 ⇄ PROJ-40
+# ✓ TASK-31 ⇄ PROJ-77
+# ○ PROJ-99 (Jira key, not linked to a Backlog task)
+
+# Tab-separated rows for agents: input, task, jira, state
+# (state is linked, unlinked-task, unlinked-jira or unknown)
+backlog-jira resolve PROJ-77 --plain
+```
+
+Resolution uses the local link records only and makes no Jira calls.
 
 ### `backlog-jira watch` (Future)
 
@@ -1145,6 +1168,7 @@ backlog-jira/
 │   │   ├── doctor.ts
 │   │   ├── connect.ts
 │   │   ├── map.ts
+│   │   ├── resolve.ts
 │   │   ├── status.ts
 │   │   ├── push.ts
 │   │   ├── pull.ts

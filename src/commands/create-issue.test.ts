@@ -185,6 +185,26 @@ describe("createIssue", () => {
 		expect(mockJiraClient.createIssue).not.toHaveBeenCalled();
 	});
 
+	it("resolves the Jira key of a linked issue to its task", async () => {
+		createTaskFile("task-200", "Linked Task", "TEST-200");
+		const result = await createIssue({ taskId: "TEST-200", configDir });
+
+		expect(result.success).toBe(false);
+		expect(result.taskId).toBe("task-200");
+		expect(result.error).toBe(
+			"Task task-200 is already mapped to Jira issue TEST-200",
+		);
+		expect(mockJiraClient.createIssue).not.toHaveBeenCalled();
+	});
+
+	it("reports a Jira key linked to no task", async () => {
+		const result = await createIssue({ taskId: "TEST-999", configDir });
+
+		expect(result.success).toBe(false);
+		expect(result.error).toContain("not linked to any Backlog task");
+		expect(mockBacklogClient.getTask).not.toHaveBeenCalled();
+	});
+
 	it("should return error if task is already mapped", async () => {
 		const result = await createIssue({
 			taskId: "task-mapped",

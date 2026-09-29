@@ -690,7 +690,7 @@ describe("configure --step", () => {
 			"project = API ORDER BY created DESC",
 		);
 		expect(printed()).toContain("120 issues match");
-		expect(printed()).not.toContain("50");
+		expect(printed()).not.toMatch(/\b50\b/);
 		expect((readConfig().jira as RawConfig).jqlFilter).toBe(
 			"project = API ORDER BY created DESC",
 		);

@@ -30498,12 +30498,170 @@ async function connectCommand() {
 }
 
 // src/commands/create-issue.ts
-import { readFileSync as readFileSync13 } from "node:fs";
-import { join as join13 } from "node:path";
+import { readFileSync as readFileSync14 } from "node:fs";
+import { join as join14 } from "node:path";
 init_jira();
 init_store();
 init_field_mapping();
 init_frontmatter();
+
+// src/utils/id-resolver.ts
+init_config_file();
+init_task_links();
+import { existsSync as existsSync12, readFileSync as readFileSync13, readdirSync as readdirSync3 } from "node:fs";
+import { join as join13 } from "node:path";
+var KEY_PATTERN = /^([A-Za-z][A-Za-z0-9_]*)-\d+(?:\.\d+)*$/;
+function createIdIndex(store, cwd = process.cwd()) {
+  const taskIds = listTaskIds(cwd);
+  const jiraKeyByTask = new Map;
+  const taskByJiraKey = new Map;
+  for (const [taskId, jiraKey] of store.getAllMappings()) {
+    const id = normalizeTaskId(taskId);
+    jiraKeyByTask.set(id, jiraKey);
+    taskByJiraKey.set(jiraKey.toUpperCase(), id);
+  }
+  const projectKey = readConfigFile(cwd)?.jira;
+  return {
+    taskIds,
+    jiraKeyByTask,
+    taskByJiraKey,
+    taskPrefix: readTaskPrefix(cwd),
+    projectKey: typeof projectKey?.projectKey === "string" && projectKey.projectKey ? projectKey.projectKey : undefined
+  };
+}
+function listTaskIds(cwd) {
+  const taskIds = new Set;
+  const tasksDir = join13(cwd, "backlog", "tasks");
+  if (existsSync12(tasksDir)) {
+    for (const file of readdirSync3(tasksDir)) {
+      const id = file.endsWith(".md") ? taskIdFromFilePath(file) : null;
+      if (id)
+        taskIds.add(id);
+    }
+  }
+  return taskIds;
+}
+function readTaskPrefix(cwd) {
+  try {
+    const content = readFileSync13(join13(cwd, "backlog", "config.yml"), "utf-8");
+    const match = content.match(/^task_prefix:\s*["']?([^"'\s#]+)["']?/m);
+    if (match)
+      return match[1];
+  } catch {}
+  return "task";
+}
+function resolveId(input, index) {
+  const trimmed = input.trim();
+  const normalized = normalizeTaskId(trimmed);
+  if (index.taskIds.has(normalized)) {
+    return {
+      input: trimmed,
+      kind: "task",
+      taskId: trimmed,
+      jiraKey: index.jiraKeyByTask.get(normalized)
+    };
+  }
+  const upper = trimmed.toUpperCase();
+  const linkedTask = index.taskByJiraKey.get(upper);
+  if (linkedTask) {
+    const jiraKey = index.jiraKeyByTask.get(linkedTask) ?? upper;
+    return { input: trimmed, kind: "jira", taskId: linkedTask, jiraKey };
+  }
+  const prefix = trimmed.match(KEY_PATTERN)?.[1];
+  if (prefix) {
+    const isProjectKey = index.projectKey !== undefined && prefix.toUpperCase() === index.projectKey.toUpperCase();
+    if (!isProjectKey && prefix.toLowerCase() === index.taskPrefix.toLowerCase()) {
+      return { input: trimmed, kind: "task", taskId: trimmed, missing: true };
+    }
+    if (!trimmed.includes(".")) {
+      return { input: trimmed, kind: "jira", jiraKey: upper };
+    }
+  }
+  return { input: trimmed, kind: "unknown" };
+}
+function resolveIds(inputs, index) {
+  return inputs.map((input) => resolveId(input, index));
+}
+function displayTaskId(taskId) {
+  return taskId.toUpperCase();
+}
+function formatIdPair(taskId, jiraKey) {
+  const task = displayTaskId(taskId);
+  return jiraKey ? `${task} ⇄ ${jiraKey}` : task;
+}
+function taskResolutionError(resolved) {
+  if (resolved.taskId && !resolved.missing)
+    return null;
+  if (resolved.kind === "task") {
+    return `Task ${resolved.input} not found`;
+  }
+  if (resolved.kind === "jira") {
+    return `${resolved.jiraKey} is a Jira key not linked to any Backlog task (link it with 'backlog-jira map link <taskId> ${resolved.jiraKey}' or import it with 'backlog-jira pull --import')`;
+  }
+  return `${resolved.input} is neither a Backlog task ID nor a linked Jira key`;
+}
+function resolveTaskArgs(inputs, store) {
+  const files = listTaskIds(process.cwd());
+  const index = inputs.every((input) => files.has(normalizeTaskId(input))) ? {
+    taskIds: files,
+    jiraKeyByTask: new Map,
+    taskByJiraKey: new Map,
+    taskPrefix: ""
+  } : createIdIndex(store);
+  const taskIds = [];
+  const errors = [];
+  const seen = new Set;
+  for (const input of inputs) {
+    const resolved = resolveId(input, index);
+    const error = taskResolutionError(resolved);
+    if (error || !resolved.taskId) {
+      errors.push({ input: resolved.input, error: error ?? "Unresolved" });
+      continue;
+    }
+    const key = normalizeTaskId(resolved.taskId);
+    if (seen.has(key))
+      continue;
+    seen.add(key);
+    taskIds.push(resolved.taskId);
+  }
+  return { taskIds, errors };
+}
+function resolveTaskArg(input, store) {
+  const { taskIds, errors } = resolveTaskArgs([input], store);
+  if (taskIds.length > 0)
+    return taskIds[0];
+  if (resolveId(input, createIdIndex(store)).kind === "jira") {
+    throw new Error(errors[0].error);
+  }
+  return input.trim();
+}
+function describeResolution(resolved, plain = false) {
+  const task = resolved.taskId ? displayTaskId(resolved.taskId) : "-";
+  const jira = resolved.jiraKey ?? "-";
+  const state = resolutionState(resolved);
+  if (plain) {
+    return `${resolved.input}	${state === "unknown" ? "-" : task}	${jira}	${state}`;
+  }
+  switch (state) {
+    case "linked":
+      return formatIdPair(resolved.taskId, resolved.jiraKey);
+    case "unlinked-task":
+      return `${task} (Backlog task, not linked to Jira)`;
+    case "unlinked-jira":
+      return `${jira} (Jira key, not linked to a Backlog task)`;
+    default:
+      return `${resolved.input} (unknown: no Backlog task or linked Jira issue)`;
+  }
+}
+function resolutionState(resolved) {
+  if (resolved.missing || resolved.kind === "unknown")
+    return "unknown";
+  if (resolved.taskId && resolved.jiraKey)
+    return "linked";
+  return resolved.kind === "task" ? "unlinked-task" : "unlinked-jira";
+}
+
+// src/commands/create-issue.ts
 init_jira_config();
 init_logger();
 init_mapped_field_sync();
@@ -30546,8 +30704,18 @@ function hasJiraValueFor(backlogPriority, mapping) {
 // src/commands/create-issue.ts
 async function createIssue(options) {
   logger.info({ options }, "Starting create-issue operation");
-  const { taskId, issueType, dryRun, configDir } = options;
+  const { issueType, dryRun, configDir } = options;
   const store = new FrontmatterStore(configDir);
+  let taskId;
+  try {
+    taskId = resolveTaskArg(options.taskId, store);
+  } catch (error) {
+    return {
+      success: false,
+      taskId: options.taskId,
+      error: error instanceof Error ? error.message : String(error)
+    };
+  }
   const backlog = new BacklogClient;
   const jira = new JiraClient(getJiraClientOptions());
   try {
@@ -30699,9 +30867,9 @@ function buildJiraIssueFromBacklogTask(task, priorityMapping) {
 }
 function loadConfig(configDir) {
   try {
-    const baseDir = configDir || join13(process.cwd(), ".backlog-jira");
-    const configPath = join13(baseDir, "config.json");
-    const content = readFileSync13(configPath, "utf-8");
+    const baseDir = configDir || join14(process.cwd(), ".backlog-jira");
+    const configPath = join14(baseDir, "config.json");
+    const content = readFileSync14(configPath, "utf-8");
     return JSON.parse(content);
   } catch (error) {
     logger.warn({ error }, "Failed to load config, using defaults");
@@ -30715,11 +30883,11 @@ init_doctor();
 // src/commands/init.ts
 init_source();
 var import_prompts2 = __toESM(require_prompts3(), 1);
-import { existsSync as existsSync13 } from "node:fs";
-import { join as join14 } from "node:path";
+import { existsSync as existsSync14 } from "node:fs";
+import { join as join15 } from "node:path";
 
 // src/utils/agent-instructions.ts
-import { existsSync as existsSync12, readFileSync as readFileSync14, writeFileSync as writeFileSync10 } from "node:fs";
+import { existsSync as existsSync13, readFileSync as readFileSync15, writeFileSync as writeFileSync10 } from "node:fs";
 function getMarkers(filePath) {
   const fileName = filePath.toLowerCase();
   if (fileName.endsWith(".md")) {
@@ -30787,7 +30955,21 @@ backlog-jira watch          # Continuous sync mode
 backlog-jira status         # View sync status
 backlog-jira configure --step <step> # Revisit one setup step (credentials, connection, project, status, sprints, fields, conflict, filter)
 backlog-jira view <task-id> # View task sync details
+backlog-jira resolve <id>... # Show the task ID or Jira key each ID pairs with
 \`\`\`
+
+## Task IDs and Jira Keys
+
+Backlog task IDs (\`TASK-12\`) and Jira keys (\`<PROJECT>-<n>\`, e.g. \`PROJ-77\`, where \`<PROJECT>\` is \`jira.projectKey\` in \`.backlog-jira/config.json\`) are numbered independently, so their numbers do not correspond. Task descriptions, notes and Jira comments may mention either, and the plugin never rewrites them.
+
+- A \`<PROJECT>-<n>\` in task text is a Jira key, not a task ID. Resolve it before acting on it:
+  \`\`\`bash
+  backlog-jira resolve PROJ-77 --plain   # columns: input, task, jira, state (linked, unlinked-task, unlinked-jira, unknown)
+  backlog-jira resolve TASK-12 PROJ-77   # any mix of IDs; linked pairs print as TASK-12 ⇄ PROJ-77
+  \`\`\`
+- \`backlog-jira\` commands that take a task (\`view\`, \`push\`, \`pull\`, \`sync\`, \`map link\`, \`create-issue\`) also accept the Jira key of its linked issue.
+- \`backlog\` commands take task IDs only: never pass a Jira key where a task ID is expected (\`backlog task edit <id>\`, \`--dep\`, \`-p\`). Resolve it to its task ID first.
+- When writing task text, refer to tasks by task ID and to Jira issues by Jira key.
 
 ## Configuration
 
@@ -30960,6 +31142,10 @@ This project uses the \`backlog-jira\` MCP server for bidirectional synchronizat
 - \`backlog-jira push\` - Push to Jira
 - \`backlog-jira sync\` - Bidirectional sync
 - \`backlog-jira watch\` - Continuous sync mode
+- \`backlog-jira resolve <id>... --plain\` - Pair task IDs with Jira keys
+
+### Task IDs and Jira Keys
+Backlog task IDs (\`TASK-12\`) and Jira keys (\`<PROJECT>-<n>\`) are numbered independently. A \`<PROJECT>-<n>\` in task text is a Jira key: resolve it with \`backlog-jira resolve\` and never pass it to \`backlog\` commands where a task ID is expected. \`backlog-jira\` commands accept either ID for a linked task.
 
 ### Environment Setup
 \`\`\`bash
@@ -30972,13 +31158,13 @@ export JIRA_API_TOKEN="your-api-token"
 }
 function addAgentInstructions(filePath, mode = "cli") {
   try {
-    if (!existsSync12(filePath)) {
+    if (!existsSync13(filePath)) {
       return {
         success: false,
         message: `File not found: ${filePath}`
       };
     }
-    const currentContent = readFileSync14(filePath, "utf-8");
+    const currentContent = readFileSync15(filePath, "utf-8");
     const guidelinesContent = mode === "cli" ? getCliModeContent() : getMcpModeContent();
     let newContent = currentContent;
     if (hasBacklogJiraGuidelines(currentContent)) {
@@ -31007,7 +31193,7 @@ init_logger();
 async function initCommand(options = {}) {
   const baseDir = options.baseDir || process.cwd();
   const configDir = getConfigDir(baseDir);
-  if (existsSync13(configDir)) {
+  if (existsSync14(configDir)) {
     console.log(source_default.yellow(".backlog-jira/ already exists. Use 'backlog-jira configure' to modify settings."));
     return;
   }
@@ -31017,8 +31203,8 @@ async function initCommand(options = {}) {
   console.log("");
   console.log(source_default.green("✓ Initialized .backlog-jira/ configuration"));
   console.log(`  - Config: ${configPath}`);
-  console.log(`  - Snapshots: ${join14(configDir, "snapshots/")}`);
-  console.log(`  - Operations log: ${join14(configDir, "ops-log.jsonl")}`);
+  console.log(`  - Snapshots: ${join15(configDir, "snapshots/")}`);
+  console.log(`  - Operations log: ${join15(configDir, "ops-log.jsonl")}`);
   await offerGuidedSetup(baseDir, options.runWizard);
 }
 async function offerGuidedSetup(baseDir, runWizard) {
@@ -31077,7 +31263,7 @@ async function setupAgentInstructions(projectRoot) {
     ".cursorrules",
     ".github/AGENTS.md"
   ];
-  const existingFiles = commonAgentFiles.map((file) => join14(projectRoot, file)).filter((filePath) => existsSync13(filePath));
+  const existingFiles = commonAgentFiles.map((file) => join15(projectRoot, file)).filter((filePath) => existsSync14(filePath));
   if (existingFiles.length === 0) {
     console.log(source_default.yellow("No agent instruction files found in project root (AGENTS.md, CLAUDE.md, etc.)"));
     console.log(source_default.gray("Create an agent instruction file first, then re-run initialization."));
@@ -31158,7 +31344,7 @@ async function offerGitCommit(files, mode) {
   const { exec } = await import("node:child_process");
   const { promisify } = await import("node:util");
   const execAsync = promisify(exec);
-  const projectRoot = files[0] ? join14(files[0], "..") : process.cwd();
+  const projectRoot = files[0] ? join15(files[0], "..") : process.cwd();
   try {
     await execAsync("git rev-parse --git-dir", { cwd: projectRoot });
   } catch {
@@ -31214,8 +31400,8 @@ init_jira();
 init_assignee_mapping();
 init_jira_config();
 init_logger();
-import { existsSync as existsSync14, readFileSync as readFileSync15, writeFileSync as writeFileSync11 } from "node:fs";
-import { join as join15 } from "node:path";
+import { existsSync as existsSync15, readFileSync as readFileSync16, writeFileSync as writeFileSync11 } from "node:fs";
+import { join as join16 } from "node:path";
 import { stdin as input, stdout as output } from "node:process";
 import * as readline from "node:readline/promises";
 async function showMappings() {
@@ -31226,13 +31412,13 @@ async function showMappings() {
   console.log();
 }
 async function addMapping(backlogUser, jiraUser, options = {}) {
-  const configPath = join15(process.cwd(), ".backlog-jira", "config.json");
-  if (!existsSync14(configPath)) {
+  const configPath = join16(process.cwd(), ".backlog-jira", "config.json");
+  if (!existsSync15(configPath)) {
     console.error(source_default.red("❌ Configuration not found"));
     console.log(source_default.gray("   Run 'backlog-jira init' first"));
     process.exit(1);
   }
-  const content = readFileSync15(configPath, "utf-8");
+  const content = readFileSync16(configPath, "utf-8");
   const config = JSON.parse(content);
   if (!config.backlog) {
     config.backlog = {};
@@ -31253,13 +31439,13 @@ async function addMapping(backlogUser, jiraUser, options = {}) {
   logger.info({ backlogUser: cleanBacklogUser, jiraUser }, "Added assignee mapping");
 }
 async function removeMapping(backlogUser) {
-  const configPath = join15(process.cwd(), ".backlog-jira", "config.json");
-  if (!existsSync14(configPath)) {
+  const configPath = join16(process.cwd(), ".backlog-jira", "config.json");
+  if (!existsSync15(configPath)) {
     console.error(source_default.red("❌ Configuration not found"));
     console.log(source_default.gray("   Run 'backlog-jira init' first"));
     process.exit(1);
   }
-  const content = readFileSync15(configPath, "utf-8");
+  const content = readFileSync16(configPath, "utf-8");
   const config = JSON.parse(content);
   const cleanBacklogUser = backlogUser.startsWith("@") ? backlogUser.substring(1) : backlogUser;
   const explicitMapping = config.backlog?.assigneeMapping?.[cleanBacklogUser];
@@ -31282,13 +31468,13 @@ async function removeMapping(backlogUser) {
   logger.info({ backlogUser: cleanBacklogUser, jiraUser }, "Removed assignee mapping");
 }
 async function promoteMapping(backlogUser) {
-  const configPath = join15(process.cwd(), ".backlog-jira", "config.json");
-  if (!existsSync14(configPath)) {
+  const configPath = join16(process.cwd(), ".backlog-jira", "config.json");
+  if (!existsSync15(configPath)) {
     console.error(source_default.red("❌ Configuration not found"));
     console.log(source_default.gray("   Run 'backlog-jira init' first"));
     process.exit(1);
   }
-  const content = readFileSync15(configPath, "utf-8");
+  const content = readFileSync16(configPath, "utf-8");
   const config = JSON.parse(content);
   const cleanBacklogUser = backlogUser.startsWith("@") ? backlogUser.substring(1) : backlogUser;
   const autoMapping = config.backlog?.autoMappedAssignees?.[cleanBacklogUser];
@@ -31623,11 +31809,12 @@ async function createMapping(store, backlog, jira, taskId, jiraKey) {
   });
   store.logOperation("manual_map", taskId, jiraKey, "success");
 }
-async function linkTask(taskId, jiraKey, options = {}) {
+async function linkTask(taskArg, jiraKey, options = {}) {
   const store = new FrontmatterStore;
   const backlog = new BacklogClient;
   const jira = new JiraClient(getJiraClientOptions());
   try {
+    const taskId = resolveTaskArg(taskArg, store);
     logger.info({ taskId, jiraKey }, "Starting link task operation");
     console.log(`\uD83D\uDD0D Validating task ${taskId}...`);
     try {
@@ -31662,17 +31849,17 @@ async function linkTask(taskId, jiraKey, options = {}) {
       console.log(`⚠️  Overwriting existing mapping ${taskId} → ${existingMapping.jiraKey}`);
       logger.info({ taskId, oldJiraKey: existingMapping.jiraKey, newJiraKey: jiraKey }, "Overwriting existing mapping");
     }
-    console.log(`\uD83D\uDD17 Creating mapping ${taskId} → ${jiraKey}...`);
+    console.log(`\uD83D\uDD17 Creating mapping ${formatIdPair(taskId, jiraKey)}...`);
     await createMapping(store, backlog, jira, taskId, jiraKey);
     console.log(`
-✅ Successfully linked ${taskId} → ${jiraKey}`);
+✅ Successfully linked ${formatIdPair(taskId, jiraKey)}`);
     logger.info({ taskId, jiraKey }, "Link task operation completed");
     process.exit(0);
   } catch (error) {
     if (error instanceof Error && error.message.includes("already linked")) {
       throw error;
     }
-    logger.error({ error, taskId, jiraKey }, "Link task operation failed");
+    logger.error({ error, taskId: taskArg, jiraKey }, "Link task operation failed");
     throw error;
   } finally {
     await jira.close();
@@ -31699,7 +31886,7 @@ function registerMapCommand(program) {
       process.exit(1);
     }
   });
-  mapCmd.command("link").description("Directly link a Backlog task to a Jira issue by key").argument("<taskId>", "Backlog task ID (e.g., task-123)").argument("<jiraKey>", "Jira issue key (e.g., PROJ-456)").option("--force", "Overwrite existing mapping if present").action(async (taskId, jiraKey, options) => {
+  mapCmd.command("link").description("Directly link a Backlog task to a Jira issue by key").argument("<taskId>", "Backlog task ID (e.g., task-123), or the Jira key of its linked issue").argument("<jiraKey>", "Jira issue key (e.g., PROJ-456)").option("--force", "Overwrite existing mapping if present").action(async (taskId, jiraKey, options) => {
     try {
       await linkTask(taskId, jiraKey, options);
     } catch (error) {
@@ -31713,8 +31900,8 @@ function registerMapCommand(program) {
 // src/commands/mcp.ts
 init_source();
 import { spawn as spawn5 } from "node:child_process";
-import { existsSync as existsSync15, readFileSync as readFileSync16 } from "node:fs";
-import { join as join16 } from "node:path";
+import { existsSync as existsSync16, readFileSync as readFileSync17 } from "node:fs";
+import { join as join17 } from "node:path";
 function registerMcpCommand(program) {
   const mcpCommand = program.command("mcp").description("MCP Atlassian server management");
   mcpCommand.command("start").description("Start MCP Atlassian server using plugin configuration").option("--debug", "Print startup info and debug output").option("-v, --verbose", "Display docker commands being executed").option("--dns-servers <servers...>", "DNS server IPs for the MCP server process (e.g., 8.8.8.8 1.1.1.1)").option("--dns-search-domains <domains...>", "DNS search domains for the MCP server process (e.g., company.com internal.local)").action(async (options) => {
@@ -31799,8 +31986,8 @@ function validateAndPrepareCredentials(debug) {
   return envVars;
 }
 function loadMcpConfiguration(debug) {
-  const configDir = join16(process.cwd(), ".backlog-jira");
-  const configPath = join16(configDir, "config.json");
+  const configDir = join17(process.cwd(), ".backlog-jira");
+  const configPath = join17(configDir, "config.json");
   const defaultConfig = {
     serverCommand: "mcp-atlassian",
     serverArgs: [],
@@ -31809,14 +31996,14 @@ function loadMcpConfiguration(debug) {
     dnsServers: [],
     dnsSearchDomains: []
   };
-  if (!existsSync15(configPath)) {
+  if (!existsSync16(configPath)) {
     if (debug) {
       console.log(source_default.yellow("⚠ No config.json found, using defaults"));
     }
     return defaultConfig;
   }
   try {
-    const configContent = readFileSync16(configPath, "utf-8");
+    const configContent = readFileSync17(configPath, "utf-8");
     const config = JSON.parse(configContent);
     const mcpConfig = {
       ...defaultConfig,
@@ -31981,8 +32168,8 @@ function logDockerCommand(command, args) {
 }
 
 // src/commands/pull.ts
-import { existsSync as existsSync16, readFileSync as readFileSync17 } from "node:fs";
-import { join as join17 } from "node:path";
+import { existsSync as existsSync17, readFileSync as readFileSync18 } from "node:fs";
+import { join as join18 } from "node:path";
 init_jira();
 init_store();
 init_assignee_mapping();
@@ -32181,6 +32368,7 @@ function sanitizeTitle(title) {
 }
 
 // src/commands/pull.ts
+var DRY_RUN_TASK_PREFIX = "dry-run-";
 async function pull(options = {}) {
   const originalLevel = logger.level;
   if (!options.verbose) {
@@ -32203,6 +32391,7 @@ async function pull(options = {}) {
     success: true,
     pulled: [],
     imported: [],
+    importedLinks: [],
     failed: [],
     skipped: [],
     warnings: []
@@ -32222,7 +32411,12 @@ async function pull(options = {}) {
         sprints.warnings.push(`Could not refresh sprints of board ${sprints.mapping.boardId}: ${error instanceof Error ? error.message : String(error)}`);
       }
     }
-    const { mapped, unmapped, warnings } = await getTaskIds(options, backlog, jira, store, sprints);
+    const requested = options.taskIds?.length ? resolveTaskArgs(options.taskIds, store) : null;
+    for (const { input, error } of requested?.errors ?? []) {
+      result.failed.push({ taskId: input, error });
+      result.success = false;
+    }
+    const { mapped, unmapped, warnings } = requested ? { mapped: requested.taskIds, unmapped: [], warnings: [] } : await getTaskIds(options, backlog, jira, store, sprints);
     result.warnings.push(...warnings ?? []);
     logger.info({ mappedCount: mapped.length, unmappedCount: unmapped.length }, "Tasks to process");
     if (options.import && unmapped.length > 0) {
@@ -32241,6 +32435,7 @@ async function pull(options = {}) {
               dryRun: options.dryRun || false
             });
             result.imported.push(taskId);
+            result.importedLinks.push({ taskId, jiraKey });
             logger.info({ taskId, jiraKey }, "Successfully imported issue");
           } catch (error) {
             const errorMsg = error instanceof Error ? error.message : String(error);
@@ -32291,10 +32486,10 @@ async function pull(options = {}) {
   logger.info({ result }, "Pull operation completed");
   return result;
 }
+function formatImportedLines(result) {
+  return [...result.importedLinks].sort((a, b) => a.jiraKey.localeCompare(b.jiraKey, undefined, { numeric: true })).map(({ taskId, jiraKey }) => taskId.startsWith(DRY_RUN_TASK_PREFIX) ? `${jiraKey} (dry run: would import)` : formatIdPair(taskId, jiraKey));
+}
 async function getTaskIds(options, backlog, jira, store, sprints) {
-  if (options.taskIds && options.taskIds.length > 0) {
-    return { mapped: options.taskIds, unmapped: [] };
-  }
   if (options.all) {
     const mappings = store.getAllMappings();
     return { mapped: Array.from(mappings.keys()), unmapped: [] };
@@ -32328,9 +32523,9 @@ async function getIssuesForImport(options, jira, store, sprintMapping) {
   let configProjectKey;
   if (!jql) {
     try {
-      const configPath = join17(process.cwd(), ".backlog-jira", "config.json");
-      if (existsSync16(configPath)) {
-        const config = JSON.parse(readFileSync17(configPath, "utf-8"));
+      const configPath = join18(process.cwd(), ".backlog-jira", "config.json");
+      if (existsSync17(configPath)) {
+        const config = JSON.parse(readFileSync18(configPath, "utf-8"));
         jql = config.jira?.jqlFilter;
         configProjectKey = config.jira?.projectKey;
       }
@@ -32597,7 +32792,7 @@ async function importJiraIssue(jiraKey, context) {
       assignee: issue.assignee,
       acCount: acceptanceCriteria.length
     }, "DRY RUN: Would import Jira issue");
-    return `dry-run-${jiraKey}`;
+    return `${DRY_RUN_TASK_PREFIX}${jiraKey}`;
   }
   let mappedAssignee = issue.assignee ? mapJiraUserToBacklog(issue.assignee) : undefined;
   if (issue.assignee && !mappedAssignee) {
@@ -32674,8 +32869,8 @@ async function importJiraIssue(jiraKey, context) {
 }
 
 // src/commands/push.ts
-import { readFileSync as readFileSync18 } from "node:fs";
-import { join as join18 } from "node:path";
+import { readFileSync as readFileSync19 } from "node:fs";
+import { join as join19 } from "node:path";
 init_jira();
 init_store();
 init_assignee_mapping();
@@ -32917,7 +33112,12 @@ async function push(options = {}) {
     if (sprints && options.sprintContext) {
       jira.includeIssueFields([sprints.sprintFieldId]);
     }
-    const taskIds = await getTaskIds2(options, backlog, jira, store, sprints);
+    const requested = options.taskIds?.length ? resolveTaskArgs(options.taskIds, store) : null;
+    for (const { input, error } of requested?.errors ?? []) {
+      result.failed.push({ taskId: input, error });
+      result.success = false;
+    }
+    const taskIds = requested?.taskIds ?? await getTaskIds2(options, backlog, jira, store, sprints);
     logger.info({ count: taskIds.length }, "Tasks to process");
     const batchSize = 10;
     for (let i = 0;i < taskIds.length; i += batchSize) {
@@ -32962,9 +33162,6 @@ async function push(options = {}) {
   return result;
 }
 async function getTaskIds2(options, backlog, jira, store, sprints) {
-  if (options.taskIds && options.taskIds.length > 0) {
-    return options.taskIds;
-  }
   if (options.all) {
     const mappings = store.getAllMappings();
     return Array.from(mappings.keys());
@@ -33203,13 +33400,47 @@ async function buildJiraUpdates(task, currentIssue, jiraClient, projectKey, over
 }
 function loadConfig2() {
   try {
-    const configPath = join18(process.cwd(), ".backlog-jira", "config.json");
-    const content = readFileSync18(configPath, "utf-8");
+    const configPath = join19(process.cwd(), ".backlog-jira", "config.json");
+    const content = readFileSync19(configPath, "utf-8");
     return JSON.parse(content);
   } catch (error) {
     logger.warn({ error }, "Failed to load config, using defaults");
     return {};
   }
+}
+
+// src/commands/resolve.ts
+init_store();
+init_logger();
+var PLAIN_HEADER = "input\ttask\tjira\tstate";
+var STATE_ICONS = {
+  linked: "✓",
+  "unlinked-task": "○",
+  "unlinked-jira": "○",
+  unknown: "?"
+};
+function resolveCommand(ids, options = {}) {
+  const store = new FrontmatterStore;
+  try {
+    const resolved = resolveIds(ids, createIdIndex(store));
+    const lines = options.plain ? [PLAIN_HEADER, ...resolved.map((r) => describeResolution(r, true))] : resolved.map((r) => `${STATE_ICONS[resolutionState(r)]} ${describeResolution(r)}`);
+    return { lines, resolved };
+  } finally {
+    store.close();
+  }
+}
+function registerResolveCommand(program) {
+  program.command("resolve <ids...>").description("Show the counterpart of each Backlog task ID or Jira key (TASK-1 ⇄ CR2-77)").option("--plain", `Tab-separated rows for agents: ${PLAIN_HEADER.replaceAll("\t", ", ")} (linked, unlinked-task, unlinked-jira or unknown)`).action((ids, options) => {
+    try {
+      for (const line of resolveCommand(ids, options).lines) {
+        console.log(line);
+      }
+    } catch (error) {
+      logger.error({ error }, "Resolve command failed");
+      console.error(`Error: ${error instanceof Error ? error.message : String(error)}`);
+      process.exit(1);
+    }
+  });
 }
 
 // src/commands/status.ts
@@ -33331,7 +33562,7 @@ async function getStatus(options) {
     let filteredStatuses = statuses;
     if (options.grep) {
       const grepLower = options.grep.toLowerCase();
-      filteredStatuses = statuses.filter((s) => s.syncState.toLowerCase().includes(grepLower) || s.taskId.toLowerCase().includes(grepLower));
+      filteredStatuses = statuses.filter((s) => s.syncState.toLowerCase().includes(grepLower) || s.taskId.toLowerCase().includes(grepLower) || s.jiraKey.toLowerCase().includes(grepLower));
     }
     if (options.json) {
       console.log(JSON.stringify(filteredStatuses, null, 2));
@@ -33363,7 +33594,7 @@ async function getStatus(options) {
       }
       if (counts.Conflict > 0) {
         console.log(`
-\uD83D\uDCA1 Tip: Use 'backlog-jira resolve' to handle conflicts`);
+\uD83D\uDCA1 Tip: Use 'backlog-jira sync' to handle conflicts`);
       }
     }
   } finally {
@@ -33372,16 +33603,19 @@ async function getStatus(options) {
   }
 }
 function displayStatusTable(statuses) {
-  console.log("╔═══════════════╦════════════╦═══════════════╦════════════════════════════════╗");
-  console.log("║ Task ID       ║ Jira Key   ║ Sync State    ║ Changed Fields                 ║");
-  console.log("╠═══════════════╬════════════╬═══════════════╬════════════════════════════════╣");
-  for (const status of statuses) {
+  const pairs = statuses.map((s) => formatIdPair(s.taskId, s.jiraKey));
+  const width = Math.max("Task ⇄ Jira".length, ...pairs.map((p) => p.length));
+  const bar = "═".repeat(width + 2);
+  console.log(`╔${bar}╦═══════════════╦════════════════════════════════╗`);
+  console.log(`║ ${"Task ⇄ Jira".padEnd(width)} ║ Sync State    ║ Changed Fields                 ║`);
+  console.log(`╠${bar}╬═══════════════╬════════════════════════════════╣`);
+  for (const [i, status] of statuses.entries()) {
     const stateIcon = getStateIcon(status.syncState);
     const stateStr = `${stateIcon} ${status.syncState}`.padEnd(13);
     const fieldsStr = (status.changedFields?.join(", ") || "").slice(0, 30).padEnd(30);
-    console.log(`║ ${status.taskId.padEnd(13)} ║ ${status.jiraKey.padEnd(10)} ║ ${stateStr} ║ ${fieldsStr} ║`);
+    console.log(`║ ${pairs[i].padEnd(width)} ║ ${stateStr} ║ ${fieldsStr} ║`);
   }
-  console.log("╚═══════════════╩════════════╩═══════════════╩════════════════════════════════╝");
+  console.log(`╚${bar}╩═══════════════╩════════════════════════════════╝`);
 }
 function getStateIcon(state) {
   switch (state) {
@@ -33400,7 +33634,7 @@ function getStateIcon(state) {
   }
 }
 function registerStatusCommand(program) {
-  program.command("status").description("Show sync status of mapped tasks").option("--json", "Output in JSON format").option("--grep <pattern>", "Filter results by sync state or task ID").action(async (options) => {
+  program.command("status").description("Show sync status of mapped tasks").option("--json", "Output in JSON format").option("--grep <pattern>", "Filter results by sync state, task ID or Jira key").action(async (options) => {
     try {
       await getStatus(options);
       process.exit(0);
@@ -33413,21 +33647,20 @@ function registerStatusCommand(program) {
 }
 
 // src/commands/sync.ts
-import { readFileSync as readFileSync19, writeFileSync as writeFileSync12 } from "node:fs";
-import { join as join19 } from "node:path";
+import { readFileSync as readFileSync20, writeFileSync as writeFileSync12 } from "node:fs";
+import { join as join20 } from "node:path";
 init_jira();
 init_store();
 
 // src/ui/conflict-resolver.ts
 init_source();
-init_sprint_payload();
 var import_prompts3 = __toESM(require_prompts3(), 1);
+init_sprint_payload();
 async function promptForConflictResolution(conflict) {
   console.log(source_default.bold.yellow(`
 ⚠️  Conflict Detected
 `));
-  console.log(source_default.gray(`Task: ${conflict.taskId}`));
-  console.log(source_default.gray(`Jira: ${conflict.jiraKey}`));
+  console.log(source_default.gray(`Task: ${formatIdPair(conflict.taskId, conflict.jiraKey)}`));
   console.log(source_default.gray(`Fields in conflict: ${conflict.fields.length}
 `));
   const resolutions = [];
@@ -33927,7 +34160,12 @@ async function sync(options = {}) {
   let sprints = null;
   try {
     sprints = await createSprintSyncContext(sprintMapping, { jira, backlog });
-    const taskIds = await getTaskIds3(options, store);
+    const requested = options.taskIds?.length ? resolveTaskArgs(options.taskIds, store) : null;
+    for (const { input, error } of requested?.errors ?? []) {
+      result.failed.push({ taskId: input, error });
+      result.success = false;
+    }
+    const taskIds = requested?.taskIds ?? getTaskIds3(options, store);
     logger.info({ count: taskIds.length, strategy }, "Tasks to process");
     const batchSize = 10;
     for (let i = 0;i < taskIds.length; i += batchSize) {
@@ -33958,7 +34196,7 @@ async function sync(options = {}) {
           const errorMsg = error instanceof Error ? error.message : String(error);
           const m = store.getMapping(taskId);
           const jiraKey = m?.jiraKey;
-          const minimal = `${taskId}${jiraKey ? ` (${jiraKey})` : ""} sync failed`;
+          const minimal = `${formatIdPair(taskId, jiraKey)} sync failed`;
           result.failed.push({
             taskId,
             error: error instanceof MappedFieldPushError ? `${minimal}
@@ -33994,10 +34232,7 @@ ${error.message}` : minimal
   }
   return result;
 }
-async function getTaskIds3(options, store) {
-  if (options.taskIds && options.taskIds.length > 0) {
-    return options.taskIds;
-  }
+function getTaskIds3(options, store) {
   if (options.all) {
     const mappings = store.getAllMappings();
     return Array.from(mappings.keys());
@@ -34187,8 +34422,8 @@ async function resolveConflict(conflict, strategy, context) {
 }
 function loadConfig3() {
   try {
-    const configPath = join19(process.cwd(), ".backlog-jira", "config.json");
-    const content = readFileSync19(configPath, "utf-8");
+    const configPath = join20(process.cwd(), ".backlog-jira", "config.json");
+    const content = readFileSync20(configPath, "utf-8");
     return JSON.parse(content);
   } catch (error) {
     logger.warn({ error }, "Failed to load config, using defaults");
@@ -34302,7 +34537,7 @@ function determinePreferredSource(resolutions) {
 }
 function saveConflictPreference(preference) {
   try {
-    const configPath = join19(process.cwd(), ".backlog-jira", "config.json");
+    const configPath = join20(process.cwd(), ".backlog-jira", "config.json");
     const config = loadConfig3();
     config.sync = config.sync || {};
     config.sync.conflictStrategy = preference;
@@ -34374,10 +34609,12 @@ init_jira_config();
 init_logger();
 init_mapped_field_sync();
 init_task_links();
-async function viewTask(taskId, options) {
+async function viewTask(taskArg, options) {
   const store = new FrontmatterStore;
   const backlog = new BacklogClient;
+  let taskId = taskArg;
   try {
+    taskId = resolveTaskArg(taskArg, store);
     const task = await backlog.getTask(taskId);
     const content = `# Task Content
 
@@ -34389,14 +34626,14 @@ ${task.description || "No description"}`;
       taskWithJira = {
         ...task,
         jiraKey: mapping.jiraKey,
-        jiraUrl: `https://your-domain.atlassian.net/browse/${mapping.jiraKey}`,
+        jiraUrl: getIssueUrl(taskId, mapping.jiraKey),
         jiraLastSync: syncState?.lastSyncAt || "Never",
         jiraSyncState: syncState?.conflictState || "Unknown"
       };
     }
     const coreFormatter = (t, c, f) => {
       return `[CORE FORMAT PLACEHOLDER]
-Task: ${t.id} - ${t.title}
+Task: ${formatIdPair(t.id, mapping?.jiraKey)} - ${t.title}
 Status: ${t.status}
 
 Content:
@@ -34425,6 +34662,13 @@ ${c}`;
   } finally {
     store.close();
   }
+}
+function getIssueUrl(taskId, jiraKey) {
+  const stored = readTaskLink(taskId)?.jiraUrl;
+  if (stored)
+    return stored;
+  const base = process.env.JIRA_URL?.replace(/\/+$/, "");
+  return base ? `${base}/browse/${jiraKey}` : undefined;
 }
 async function getMappedFieldLines(taskId, jiraKey) {
   let mappings;
@@ -34466,7 +34710,7 @@ function getSprintHistoryLines(taskId, linked) {
   return formatSprintHistory(readTaskLink(taskId));
 }
 function registerViewCommand(program) {
-  program.command("view <taskId>").description("View task with Jira integration details").option("--plain", "Output plain text format").action(async (taskId, options) => {
+  program.command("view <taskId>").description("View task with Jira integration details (by task ID or linked Jira key)").option("--plain", "Output plain text format").action(async (taskId, options) => {
     try {
       await viewTask(taskId, options);
       process.exit(0);
@@ -34647,6 +34891,7 @@ registerMapCommand(program2);
 registerMapAssigneesCommand(program2);
 registerMapFieldsCommand(program2);
 registerMcpCommand(program2);
+registerResolveCommand(program2);
 registerStatusCommand(program2);
 registerViewCommand(program2);
 program2.command("create-issue <taskId>").description("Create a Jira issue from an unmapped Backlog task").option("--issue-type <type>", "Override default issue type (e.g., Task, Bug, Story)").option("--dry-run", "Show what would be created without creating the issue").action(async (taskId, options) => {
@@ -34676,7 +34921,7 @@ program2.command("create-issue <taskId>").description("Create a Jira issue from 
     process.exit(1);
   }
 });
-program2.command("push [taskIds...]").description("Push Backlog changes to Jira").option("--all", "Push all mapped tasks").option("--force", "Force push even if conflicts detected").option("--dry-run", "Show what would be pushed without making changes").option("-v, --verbose", "Show detailed logging output").action(async (taskIds, options) => {
+program2.command("push [taskIds...]").description("Push Backlog changes to Jira (tasks by ID or linked Jira key)").option("--all", "Push all mapped tasks").option("--force", "Force push even if conflicts detected").option("--dry-run", "Show what would be pushed without making changes").option("-v, --verbose", "Show detailed logging output").action(async (taskIds, options) => {
   try {
     const result = await push({
       taskIds: taskIds && taskIds.length > 0 ? taskIds : undefined,
@@ -34704,7 +34949,7 @@ Failures:`);
     process.exit(1);
   }
 });
-program2.command("pull [taskIds...]").description("Pull Jira changes to Backlog").option("--all", "Pull all mapped tasks").option("--import", "Import unmapped Jira issues as new Backlog tasks").option("--jql <jql>", "JQL filter for importing issues (requires --import)").option("--force", "Force pull even if conflicts detected").option("--dry-run", "Show what would be pulled without making changes").option("-v, --verbose", "Show detailed logging output").action(async (taskIds, options) => {
+program2.command("pull [taskIds...]").description("Pull Jira changes to Backlog (tasks by ID or linked Jira key)").option("--all", "Pull all mapped tasks").option("--import", "Import unmapped Jira issues as new Backlog tasks").option("--jql <jql>", "JQL filter for importing issues (requires --import)").option("--force", "Force pull even if conflicts detected").option("--dry-run", "Show what would be pulled without making changes").option("-v, --verbose", "Show detailed logging output").action(async (taskIds, options) => {
   try {
     const result = await pull({
       taskIds: taskIds && taskIds.length > 0 ? taskIds : undefined,
@@ -34720,6 +34965,9 @@ Pull Results:`);
     console.log(`  Pulled: ${result.pulled.length}`);
     if (result.imported.length > 0) {
       console.log(`  Imported: ${result.imported.length}`);
+      for (const line of formatImportedLines(result)) {
+        console.log(`    ${line}`);
+      }
     }
     console.log(`  Failed: ${result.failed.length}`);
     console.log(`  Skipped: ${result.skipped.length}`);
@@ -34744,7 +34992,7 @@ Failures:`);
     process.exit(1);
   }
 });
-program2.command("sync [taskIds...]").description("Bidirectional sync with conflict resolution").option("--all", "Sync all mapped tasks").option("--strategy <strategy>", "Conflict resolution strategy: prefer-backlog|prefer-jira|prompt|manual").option("--dry-run", "Show what would be synced without making changes").option("-v, --verbose", "Show detailed logging output").action(async (taskIds, options) => {
+program2.command("sync [taskIds...]").description("Bidirectional sync with conflict resolution (tasks by ID or linked Jira key)").option("--all", "Sync all mapped tasks").option("--strategy <strategy>", "Conflict resolution strategy: prefer-backlog|prefer-jira|prompt|manual").option("--dry-run", "Show what would be synced without making changes").option("-v, --verbose", "Show detailed logging output").action(async (taskIds, options) => {
   try {
     const result = await sync({
       taskIds: taskIds && taskIds.length > 0 ? taskIds : undefined,

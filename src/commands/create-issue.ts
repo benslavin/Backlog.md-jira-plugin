@@ -13,6 +13,7 @@ import {
 	withoutBuiltInMappings,
 } from "../utils/field-mapping.ts";
 import { getTaskFilePath, updateJiraMetadata } from "../utils/frontmatter.ts";
+import { resolveTaskArg } from "../utils/id-resolver.ts";
 import { getJiraClientOptions } from "../utils/jira-config.ts";
 import { logger } from "../utils/logger.ts";
 import {
@@ -53,9 +54,20 @@ export async function createIssue(
 ): Promise<CreateIssueResult> {
 	logger.info({ options }, "Starting create-issue operation");
 
-	const { taskId, issueType, dryRun, configDir } = options;
+	const { issueType, dryRun, configDir } = options;
 
 	const store = new FrontmatterStore(configDir);
+	// A linked issue's Jira key names its task (and is then reported as mapped)
+	let taskId: string;
+	try {
+		taskId = resolveTaskArg(options.taskId, store);
+	} catch (error) {
+		return {
+			success: false,
+			taskId: options.taskId,
+			error: error instanceof Error ? error.message : String(error),
+		};
+	}
 	const backlog = new BacklogClient();
 	const jira = new JiraClient(getJiraClientOptions());
 

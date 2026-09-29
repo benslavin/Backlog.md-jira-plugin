@@ -13,6 +13,7 @@ import {
 	readTaskFrontmatter,
 } from "../utils/field-mapping.ts";
 import { getTaskFilePath, updateJiraMetadata } from "../utils/frontmatter.ts";
+import { formatIdPair, resolveTaskArgs } from "../utils/id-resolver.ts";
 import { getJiraClientOptions } from "../utils/jira-config.ts";
 import { logger } from "../utils/logger.ts";
 import {
@@ -185,8 +186,15 @@ export async function sync(options: SyncOptions = {}): Promise<SyncResult> {
 		// Shared by every task so parallel syncs agree on sprints and milestones
 		sprints = await createSprintSyncContext(sprintMapping, { jira, backlog });
 
-		// Get list of tasks to sync
-		const taskIds = await getTaskIds(options, store);
+		// Get list of tasks to sync; given IDs may be Jira keys of linked tasks
+		const requested = options.taskIds?.length
+			? resolveTaskArgs(options.taskIds, store)
+			: null;
+		for (const { input, error } of requested?.errors ?? []) {
+			result.failed.push({ taskId: input, error });
+			result.success = false;
+		}
+		const taskIds = requested?.taskIds ?? getTaskIds(options, store);
 
 		logger.info({ count: taskIds.length, strategy }, "Tasks to process");
 
@@ -224,7 +232,7 @@ export async function sync(options: SyncOptions = {}): Promise<SyncResult> {
 					// Get jira key for nicer message
 					const m = store.getMapping(taskId);
 					const jiraKey = m?.jiraKey;
-					const minimal = `${taskId}${jiraKey ? ` (${jiraKey})` : ""} sync failed`;
+					const minimal = `${formatIdPair(taskId, jiraKey)} sync failed`;
 					// Push minimal message for user-friendly output; mapped field
 					// failures name the fields so they can be fixed
 					result.failed.push({
@@ -283,14 +291,7 @@ export async function sync(options: SyncOptions = {}): Promise<SyncResult> {
 /**
  * Get list of task IDs to sync
  */
-async function getTaskIds(
-	options: SyncOptions,
-	store: FrontmatterStore,
-): Promise<string[]> {
-	if (options.taskIds && options.taskIds.length > 0) {
-		return options.taskIds;
-	}
-
+function getTaskIds(options: SyncOptions, store: FrontmatterStore): string[] {
 	if (options.all) {
 		const mappings = store.getAllMappings();
 		return Array.from(mappings.keys());

@@ -13,6 +13,7 @@ import {
 	readTaskFrontmatter,
 } from "../utils/field-mapping.ts";
 import { getTaskFilePath, updateJiraMetadata } from "../utils/frontmatter.ts";
+import { resolveTaskArgs } from "../utils/id-resolver.ts";
 import { getJiraClientOptions } from "../utils/jira-config.ts";
 import { logger } from "../utils/logger.ts";
 import {
@@ -124,8 +125,17 @@ export async function push(options: PushOptions = {}): Promise<PushResult> {
 			jira.includeIssueFields([sprints.sprintFieldId]);
 		}
 
-		// Get list of tasks to push
-		const taskIds = await getTaskIds(options, backlog, jira, store, sprints);
+		// Get list of tasks to push; given IDs may be Jira keys of linked tasks
+		const requested = options.taskIds?.length
+			? resolveTaskArgs(options.taskIds, store)
+			: null;
+		for (const { input, error } of requested?.errors ?? []) {
+			result.failed.push({ taskId: input, error });
+			result.success = false;
+		}
+		const taskIds =
+			requested?.taskIds ??
+			(await getTaskIds(options, backlog, jira, store, sprints));
 
 		logger.info({ count: taskIds.length }, "Tasks to process");
 
@@ -199,10 +209,6 @@ async function getTaskIds(
 	store: FrontmatterStore,
 	sprints: SprintPushContext | null,
 ): Promise<string[]> {
-	if (options.taskIds && options.taskIds.length > 0) {
-		return options.taskIds;
-	}
-
 	if (options.all) {
 		// Get all tasks that have mappings
 		const mappings = store.getAllMappings();
