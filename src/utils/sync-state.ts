@@ -2,7 +2,9 @@ import type { Snapshot } from "../state/store.ts";
 import {
 	type FieldMapping,
 	type FieldMappingDirection,
+	type SprintMapping,
 	loadFieldMappings,
+	loadSprintMapping,
 } from "./field-mapping.ts";
 import { logger } from "./logger.ts";
 import {
@@ -10,6 +12,7 @@ import {
 	comparePayloads,
 	computeHash,
 } from "./normalizer.ts";
+import { SPRINT_PAYLOAD_KEY } from "./sprint-payload.ts";
 
 /**
  * Sync state classification
@@ -46,7 +49,10 @@ export function classifySyncState(
 	backlogSnapshot: Snapshot | null,
 	jiraSnapshot: Snapshot | null,
 	currentPayloads?: { backlog: NormalizedPayload; jira: NormalizedPayload },
-	options?: { fieldMappings?: FieldMapping[] },
+	options?: {
+		fieldMappings?: FieldMapping[];
+		sprintMapping?: SprintMapping | null;
+	},
 ): SyncStateResult {
 	logger.debug(
 		{
@@ -79,7 +85,10 @@ export function classifySyncState(
 	let restorePush = false;
 
 	if (currentPayloads) {
-		const directions = getMappingDirections(options?.fieldMappings);
+		const directions = getMappingDirections(
+			options?.fieldMappings,
+			options?.sprintMapping,
+		);
 
 		// When the set of mapped fields differs from the snapshot (mappings were
 		// added or removed), compare only the fields both know about so that the
@@ -256,6 +265,7 @@ export function detectChangesAcrossMappingChange(
  */
 function getMappingDirections(
 	fieldMappings?: FieldMapping[],
+	sprintMapping?: SprintMapping | null,
 ): Map<string, FieldMappingDirection> {
 	let mappings = fieldMappings;
 	if (!mappings) {
@@ -266,7 +276,19 @@ function getMappingDirections(
 			mappings = [];
 		}
 	}
-	return new Map(mappings.map((m) => [m.backlog, m.direction]));
+	const directions = new Map(mappings.map((m) => [m.backlog, m.direction]));
+
+	// The sprint is carried under the milestone key with its own direction
+	let sprint = sprintMapping;
+	if (sprint === undefined) {
+		try {
+			sprint = loadSprintMapping();
+		} catch {
+			sprint = null;
+		}
+	}
+	if (sprint) directions.set(SPRINT_PAYLOAD_KEY, sprint.direction);
+	return directions;
 }
 
 /**

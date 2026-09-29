@@ -7,6 +7,7 @@ import {
 	loadFieldMappings,
 } from "../utils/field-mapping.ts";
 import { logger } from "../utils/logger.ts";
+import { loadSprintPayloadSource } from "../utils/sprint-payload.ts";
 import {
 	type JiraBoard,
 	type JiraSprint,
@@ -667,9 +668,14 @@ export class JiraClient {
 			// Invalid mappings are reported when they are applied
 			logger.debug({ error }, "Ignoring invalid fieldMappings for getIssue");
 		}
-		if (this.extraIssueFields.length === 0) return fields;
+		// Sync payloads carry the sprint whenever sprint sync is configured
+		const sprintFieldId = loadSprintPayloadSource()?.sprintFieldId;
+		const extra = sprintFieldId
+			? [...this.extraIssueFields, sprintFieldId]
+			: this.extraIssueFields;
+		if (extra.length === 0) return fields;
 		const list = (fields ?? DEFAULT_ISSUE_FIELDS.join(",")).split(",");
-		for (const id of this.extraIssueFields) {
+		for (const id of extra) {
 			if (!list.includes(id)) list.push(id);
 		}
 		return list.join(",");

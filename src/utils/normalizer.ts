@@ -11,6 +11,13 @@ import {
 	readTaskFrontmatter,
 } from "./field-mapping.ts";
 import {
+	SPRINT_PAYLOAD_KEY,
+	type SprintPayloadSource,
+	backlogSprintValue,
+	jiraSprintValue,
+	loadSprintPayloadSource,
+} from "./sprint-payload.ts";
+import {
 	type StatusMappingConfig,
 	loadStatusMapping,
 	mapJiraStatusToBacklog,
@@ -42,6 +49,16 @@ export interface NormalizeOptions {
 	frontmatter?: Record<string, unknown>;
 	/** Status mapping for Jira statuses; loaded from config.json when omitted */
 	statusMapping?: StatusMappingConfig;
+	/** Sprint sync source; loaded from config.json when omitted, null for none */
+	sprint?: SprintPayloadSource | null;
+}
+
+function getSprintSource(
+	options?: Pick<NormalizeOptions, "sprint">,
+): SprintPayloadSource | null {
+	return options?.sprint === undefined
+		? loadSprintPayloadSource()
+		: options.sprint;
 }
 
 /**
@@ -77,13 +94,20 @@ export function normalizeBacklogTask(
 	const mappings = getMappedFieldMappings(options).filter(
 		(m) => !isCoreOverrideTarget(m.backlog),
 	);
-	if (mappings.length > 0) {
+	const sprint = getSprintSource(options);
+	if (mappings.length > 0 || sprint) {
 		const frontmatter = options?.frontmatter ?? readTaskFrontmatter(task.id);
 		payload.mappedFields = {};
 		for (const mapping of mappings) {
 			payload.mappedFields[mapping.backlog] = canonicalMappedValue(
 				getBacklogTargetValue(frontmatter, mapping.backlog),
 				mapping.backlog,
+			);
+		}
+		if (sprint) {
+			payload.mappedFields[SPRINT_PAYLOAD_KEY] = backlogSprintValue(
+				sprint,
+				frontmatter.milestone,
 			);
 		}
 	}
@@ -96,7 +120,10 @@ export function normalizeBacklogTask(
  */
 export function normalizeJiraIssue(
 	issue: JiraIssue,
-	options?: Pick<NormalizeOptions, "fieldMappings" | "statusMapping">,
+	options?: Pick<
+		NormalizeOptions,
+		"fieldMappings" | "statusMapping" | "sprint"
+	>,
 ): NormalizedPayload {
 	const payload: NormalizedPayload = {
 		title: issue.summary.trim(),
@@ -133,6 +160,12 @@ export function normalizeJiraIssue(
 				mapping.backlog,
 			);
 		}
+	}
+
+	const sprint = getSprintSource(options);
+	if (sprint) {
+		payload.mappedFields = payload.mappedFields ?? {};
+		payload.mappedFields[SPRINT_PAYLOAD_KEY] = jiraSprintValue(sprint, issue);
 	}
 
 	return payload;

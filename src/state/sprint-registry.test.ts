@@ -180,6 +180,32 @@ describe("SprintRegistry", () => {
 		});
 	});
 
+	it("keeps entries written by another instance since it was loaded", () => {
+		SprintRegistry.load(testDir).save();
+		const first = SprintRegistry.load(testDir);
+		const second = SprintRegistry.load(testDir);
+
+		first.upsert({ id: "1", name: "Sprint 1", state: "active" }, "m-1");
+		first.sprintFieldId = "customfield_10020";
+		first.save();
+		second.upsert({ id: "2", name: "Sprint 2", state: "future" }, "m-2");
+		second.save();
+
+		const merged = SprintRegistry.load(testDir);
+		expect(merged.list().map((e) => e.sprintId)).toEqual(["1", "2"]);
+		expect(merged.sprintFieldId).toBe("customfield_10020");
+
+		// An instance's own changes win for the sprints it touched
+		first.upsert(
+			{ id: "2", name: "Sprint 2 (renamed)", state: "future" },
+			"m-2",
+		);
+		first.save();
+		expect(SprintRegistry.load(testDir).get("2")?.name).toBe(
+			"Sprint 2 (renamed)",
+		);
+	});
+
 	it("refuses to load a damaged registry instead of overwriting it", () => {
 		const cases: Array<[string, string]> = [
 			["{ nope", "not valid JSON"],

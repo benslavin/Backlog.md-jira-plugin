@@ -47,6 +47,12 @@ export interface PushOptions {
 	force?: boolean;
 	dryRun?: boolean;
 	verbose?: boolean;
+	/**
+	 * Sprint push state shared across calls (sync pushes tasks one at a time
+	 * in parallel and must not create a sprint twice); created per call when
+	 * omitted
+	 */
+	sprintContext?: SprintPushContext | null;
 }
 
 export interface PushResult {
@@ -108,9 +114,15 @@ export async function push(options: PushOptions = {}): Promise<PushResult> {
 	};
 
 	try {
-		const sprints = await createSprintPushContext(sprintMapping, jira, {
-			dryRun: options.dryRun,
-		});
+		const sprints =
+			options.sprintContext !== undefined
+				? options.sprintContext
+				: await createSprintPushContext(sprintMapping, jira, {
+						dryRun: options.dryRun,
+					});
+		if (sprints && options.sprintContext) {
+			jira.includeIssueFields([sprints.sprintFieldId]);
+		}
 
 		// Get list of tasks to push
 		const taskIds = await getTaskIds(options, backlog, jira, store, sprints);
@@ -342,7 +354,7 @@ async function pushTask(
 			// The milestone moves the issue between sprints; sprint problems are
 			// reported like mapped field failures after the rest is pushed
 			const sprintFailures = sprints
-				? await pushSprint(sprints, taskId, issue)
+				? await pushSprint(sprints, taskId, issue, force)
 				: [];
 
 			// Update snapshots with re-fetched data
@@ -540,9 +552,10 @@ async function pushSprint(
 	sprints: SprintPushContext,
 	taskId: string,
 	issue: JiraIssue,
+	force = false,
 ): Promise<MappedFieldFailure[]> {
 	try {
-		const result = await pushTaskSprint(sprints, taskId, issue);
+		const result = await pushTaskSprint(sprints, taskId, issue, { force });
 		if (result.status === "skipped") {
 			logger.debug({ taskId, reason: result.reason }, "Sprint not pushed");
 		}

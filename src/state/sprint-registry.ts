@@ -70,16 +70,23 @@ export function getSprintRegistryPath(cwd = process.cwd()): string {
 export class SprintRegistry {
 	/** Serialized content as last loaded or saved, to detect changes */
 	private savedText: string;
+	/** File content as last read or written (null: no file) */
+	private diskText: string | null;
+	/** Sprint ids changed through this instance */
+	private readonly touched = new Set<string>();
+	private fieldIdTouched = false;
 
 	private constructor(
 		readonly path: string,
-		private readonly root: Record<string, unknown>,
-		private readonly entries: Array<Record<string, unknown>>,
+		private root: Record<string, unknown>,
+		private entries: Array<Record<string, unknown>>,
+		diskText: string | null,
 	) {
 		// Compare against the canonical form of what was read, so an unchanged
 		// registry is never rewritten (keeping hand formatting) and an empty
 		// one is never created
 		this.savedText = this.serialize();
+		this.diskText = diskText;
 	}
 
 	/**
@@ -89,14 +96,23 @@ export class SprintRegistry {
 	 */
 	static load(cwd = process.cwd()): SprintRegistry {
 		const path = getSprintRegistryPath(cwd);
-		if (!existsSync(path)) {
-			return new SprintRegistry(
-				path,
-				{ version: SPRINT_REGISTRY_VERSION, sprints: [] },
-				[],
-			);
-		}
+		const read = SprintRegistry.read(path);
+		return read
+			? new SprintRegistry(path, read.root, read.entries, read.text)
+			: new SprintRegistry(
+					path,
+					{ version: SPRINT_REGISTRY_VERSION, sprints: [] },
+					[],
+					null,
+				);
+	}
 
+	private static read(path: string): {
+		root: Record<string, unknown>;
+		entries: Array<Record<string, unknown>>;
+		text: string;
+	} | null {
+		if (!existsSync(path)) return null;
 		const text = readFileSync(path, "utf-8");
 		let parsed: unknown;
 		try {
@@ -140,11 +156,27 @@ export class SprintRegistry {
 			seen.add(sprintId);
 		});
 
-		return new SprintRegistry(
-			path,
+		return {
 			root,
-			entries as Array<Record<string, unknown>>,
-		);
+			entries: entries as Array<Record<string, unknown>>,
+			text,
+		};
+	}
+
+	/**
+	 * Id of the Jira Sprint custom field as last discovered, so payloads can
+	 * be normalized without asking Jira
+	 */
+	get sprintFieldId(): string | null {
+		const id = this.root.sprintFieldId;
+		return typeof id === "string" && id ? id : null;
+	}
+
+	set sprintFieldId(id: string | null) {
+		if (id === this.sprintFieldId) return;
+		if (id) this.root.sprintFieldId = id;
+		else delete this.root.sprintFieldId;
+		this.fieldIdTouched = true;
 	}
 
 	/** All entries in file order */
@@ -180,6 +212,7 @@ export class SprintRegistry {
 			entry = { sprintId: sprint.id, milestoneId };
 			this.entries.push(entry);
 		}
+		this.touched.add(sprint.id);
 		entry.milestoneId = milestoneId;
 		for (const key of SPRINT_DATA_KEYS) {
 			const value = sprint[key];
@@ -206,17 +239,56 @@ export class SprintRegistry {
 	 * Write the registry when it changed; returns whether the file was written
 	 */
 	save(): boolean {
+		if (this.serialize() === this.savedText) return false;
+		this.mergeExternalChanges();
 		const text = this.serialize();
-		if (text === this.savedText) return false;
 		mkdirSync(dirname(this.path), { recursive: true });
 		ensureRegistryTracked(dirname(this.path));
 		writeFileSync(this.path, text, "utf-8");
 		this.savedText = text;
+		this.diskText = text;
+		this.touched.clear();
+		this.fieldIdTouched = false;
 		logger.debug(
 			{ path: this.path, count: this.entries.length },
 			"Saved sprint registry",
 		);
 		return true;
+	}
+
+	/**
+	 * When another registry instance (e.g. a concurrent pull or push) wrote
+	 * the file since it was read, start from the file and re-apply only the
+	 * changes made through this instance, so neither side loses entries
+	 */
+	private mergeExternalChanges(): void {
+		const current = existsSync(this.path)
+			? readFileSync(this.path, "utf-8")
+			: null;
+		if (current === this.diskText) return;
+		const fresh = SprintRegistry.read(this.path);
+		if (!fresh) return;
+
+		for (const id of this.touched) {
+			const mine = this.find(id);
+			if (!mine) continue;
+			const index = fresh.entries.findIndex((e) => e.sprintId === id);
+			if (index >= 0) fresh.entries[index] = mine;
+			else fresh.entries.push(mine);
+		}
+		if (this.fieldIdTouched) {
+			if (this.root.sprintFieldId) {
+				fresh.root.sprintFieldId = this.root.sprintFieldId;
+			} else {
+				delete fresh.root.sprintFieldId;
+			}
+		}
+		this.root = fresh.root;
+		this.entries = fresh.entries;
+		logger.debug(
+			{ path: this.path },
+			"Merged concurrent sprint registry changes",
+		);
 	}
 
 	private find(sprintId: string): Record<string, unknown> | undefined {

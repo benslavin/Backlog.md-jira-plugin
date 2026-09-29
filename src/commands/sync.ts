@@ -7,7 +7,9 @@ import { promptForConflictResolution } from "../ui/conflict-resolver.ts";
 import {
 	type FieldMapping,
 	type MappedValue,
+	type SprintMapping,
 	loadFieldMappings,
+	loadSprintMapping,
 	readTaskFrontmatter,
 } from "../utils/field-mapping.ts";
 import { getTaskFilePath, updateJiraMetadata } from "../utils/frontmatter.ts";
@@ -28,6 +30,14 @@ import {
 	normalizeBacklogTask,
 	normalizeJiraIssue,
 } from "../utils/normalizer.ts";
+import { SPRINT_CONFLICT_FIELD } from "../utils/sprint-payload.ts";
+import {
+	type SprintSyncContext,
+	applySprintMerge,
+	createSprintSyncContext,
+	detectSprintConflict,
+	planSprintMerge,
+} from "../utils/sprint-sync.ts";
 import { type SyncState, classifySyncState } from "../utils/sync-state.ts";
 import { pull } from "./pull.ts";
 import { push } from "./push.ts";
@@ -63,6 +73,8 @@ export interface SyncResult {
 	skipped: string[];
 	// Optional user-facing hints to display (e.g., proxy login guidance)
 	hints?: string[];
+	/** Problems that did not fail a task (e.g. sprint milestone updates) */
+	warnings?: string[];
 }
 
 export interface Conflict {
@@ -136,8 +148,10 @@ export async function sync(options: SyncOptions = {}): Promise<SyncResult> {
 
 	// Validate field mappings up front so config errors are reported clearly
 	let fieldMappings: FieldMapping[];
+	let sprintMapping: SprintMapping | null;
 	try {
 		fieldMappings = loadFieldMappings();
+		sprintMapping = loadSprintMapping();
 	} catch (error) {
 		if (restoreIo) restoreIo();
 		logger.level = originalLevel;
@@ -163,9 +177,14 @@ export async function sync(options: SyncOptions = {}): Promise<SyncResult> {
 		failed: [],
 		skipped: [],
 		hints: [],
+		warnings: [],
 	};
 
+	let sprints: SprintSyncContext | null = null;
 	try {
+		// Shared by every task so parallel syncs agree on sprints and milestones
+		sprints = await createSprintSyncContext(sprintMapping, { jira, backlog });
+
 		// Get list of tasks to sync
 		const taskIds = await getTaskIds(options, store);
 
@@ -183,6 +202,7 @@ export async function sync(options: SyncOptions = {}): Promise<SyncResult> {
 						jira,
 						strategy,
 						fieldMappings,
+						sprints,
 						dryRun: options.dryRun || false,
 					});
 
@@ -246,6 +266,7 @@ export async function sync(options: SyncOptions = {}): Promise<SyncResult> {
 			JSON.stringify(result),
 		);
 	} finally {
+		if (sprints?.pull) result.warnings?.push(...sprints.pull.warnings);
 		store.close();
 		// Restore IO filters if applied
 		if (restoreIo) restoreIo();
@@ -291,6 +312,7 @@ async function syncTask(
 		jira: JiraClient;
 		strategy: ConflictStrategy;
 		fieldMappings: FieldMapping[];
+		sprints: SprintSyncContext | null;
 		dryRun: boolean;
 	},
 ): Promise<
@@ -298,7 +320,8 @@ async function syncTask(
 	| { type: "conflict"; resolution: string }
 	| { type: "skipped"; reason: string }
 > {
-	const { store, backlog, jira, strategy, fieldMappings, dryRun } = context;
+	const { store, backlog, jira, strategy, fieldMappings, sprints, dryRun } =
+		context;
 
 	// Get mapping
 	const mapping = store.getMapping(taskId);
@@ -327,7 +350,7 @@ async function syncTask(
 		snapshots.backlog,
 		snapshots.jira,
 		{ backlog: backlogPayload, jira: jiraPayload },
-		{ fieldMappings },
+		{ fieldMappings, sprintMapping: sprints?.mapping ?? null },
 	);
 
 	logger.debug({ taskId, state: state.state }, "Sync state classified");
@@ -341,14 +364,24 @@ async function syncTask(
 		case "NeedsPush":
 			// Backlog changed, push to Jira
 			if (!dryRun) {
-				assertSucceeded(await push({ taskIds: [taskId] }));
+				assertSucceeded(
+					await push({
+						taskIds: [taskId],
+						sprintContext: sprints?.push ?? null,
+					}),
+				);
 			}
 			return { type: "synced", direction: "push" };
 
 		case "NeedsPull":
 			// Jira changed, pull to Backlog
 			if (!dryRun) {
-				assertSucceeded(await pull({ taskIds: [taskId] }));
+				assertSucceeded(
+					await pull({
+						taskIds: [taskId],
+						sprintContext: sprints?.pull ?? null,
+					}),
+				);
 			}
 			return { type: "synced", direction: "pull" };
 
@@ -370,6 +403,9 @@ async function syncTask(
 					fields: [
 						...detectBuiltinFieldConflicts(mappedState, task, fieldMappings),
 						...detectMappedFieldConflicts(mappedState, fieldMappings),
+						...[detectSprintConflict(mappedState, sprints)].filter(
+							(c): c is NonNullable<typeof c> => c !== null,
+						),
 					],
 					backlogTask: task,
 					jiraIssue: issue,
@@ -380,7 +416,7 @@ async function syncTask(
 					mappedState,
 				},
 				strategy,
-				{ store, backlog, jira, fieldMappings, dryRun },
+				{ store, backlog, jira, fieldMappings, sprints, dryRun },
 			);
 		}
 
@@ -459,10 +495,11 @@ async function resolveConflict(
 		backlog: BacklogClient;
 		jira: JiraClient;
 		fieldMappings: FieldMapping[];
+		sprints: SprintSyncContext | null;
 		dryRun: boolean;
 	},
 ): Promise<{ type: "conflict"; resolution: string }> {
-	const { store, backlog, jira, fieldMappings, dryRun } = context;
+	const { store, backlog, jira, fieldMappings, sprints, dryRun } = context;
 
 	logger.info(
 		{ taskId: conflict.taskId, strategy, fieldCount: conflict.fields.length },
@@ -475,7 +512,11 @@ async function resolveConflict(
 			// pull-only mapped fields are left as they are)
 			if (!dryRun) {
 				assertSucceeded(
-					await push({ taskIds: [conflict.taskId], force: true }),
+					await push({
+						taskIds: [conflict.taskId],
+						force: true,
+						sprintContext: sprints?.push ?? null,
+					}),
 				);
 			}
 			return { type: "conflict", resolution: "preferred-backlog" };
@@ -485,7 +526,11 @@ async function resolveConflict(
 			// push-only mapped fields are left as they are)
 			if (!dryRun) {
 				assertSucceeded(
-					await pull({ taskIds: [conflict.taskId], force: true }),
+					await pull({
+						taskIds: [conflict.taskId],
+						force: true,
+						sprintContext: sprints?.pull ?? null,
+					}),
 				);
 			}
 			return { type: "conflict", resolution: "preferred-jira" };
@@ -499,6 +544,7 @@ async function resolveConflict(
 						jira,
 						store,
 						fieldMappings,
+						sprints,
 						backlogTask: conflict.backlogTask,
 						mappedState: conflict.mappedState,
 					});
@@ -521,6 +567,7 @@ async function resolveConflict(
 							jira,
 							store,
 							fieldMappings,
+							sprints,
 							backlogTask: conflict.backlogTask,
 							mappedState: conflict.mappedState,
 						},
@@ -606,20 +653,32 @@ export async function applyFieldResolutions(
 			"getMapping" | "setSnapshot" | "updateSyncState"
 		>;
 		fieldMappings?: FieldMapping[];
+		/** Sprint sync state, when a sprint mapping is configured */
+		sprints?: SprintSyncContext | null;
 		backlogTask?: BacklogTask;
 		mappedState?: MappedFieldState;
 	},
 ): Promise<void> {
-	const { backlog, jira, store, fieldMappings = [], mappedState } = context;
+	const {
+		backlog,
+		jira,
+		store,
+		fieldMappings = [],
+		sprints = null,
+		mappedState,
+	} = context;
 
 	// Mapped fields are resolved individually after the built-in fields
 	const mappingsByTarget = new Map(fieldMappings.map((m) => [m.backlog, m]));
 	const mappedResolutions = new Map<string, MappedValue>();
 	const builtinResolutions: typeof resolutions = [];
+	let sprintResolution: "backlog" | "jira" | undefined;
 
 	for (const resolution of resolutions) {
 		const fieldMapping = mappingsByTarget.get(resolution.field);
-		if (fieldMapping && fieldMapping.direction === "both") {
+		if (resolution.field === SPRINT_CONFLICT_FIELD) {
+			if (resolution.source !== "manual") sprintResolution = resolution.source;
+		} else if (fieldMapping && fieldMapping.direction === "both") {
 			mappedResolutions.set(
 				resolution.field,
 				resolution.source === "manual"
@@ -667,6 +726,27 @@ export async function applyFieldResolutions(
 				frontmatter: readTaskFrontmatter(taskId),
 				issue: await jira.getIssue(jiraKey),
 			});
+			if (failures.length > 0) {
+				throw new MappedFieldPushError(jiraKey, failures);
+			}
+		}
+	}
+
+	// Merge the sprint: the milestone moves the issue, or Jira's sprint sets
+	// the milestone
+	if (mappedState && sprints) {
+		const side = planSprintMerge(
+			mappedState,
+			sprints.mapping,
+			sprintResolution,
+		);
+		if (side) {
+			const failures = await applySprintMerge(
+				side,
+				sprints,
+				taskId,
+				await jira.getIssue(jiraKey),
+			);
 			if (failures.length > 0) {
 				throw new MappedFieldPushError(jiraKey, failures);
 			}

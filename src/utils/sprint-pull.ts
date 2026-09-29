@@ -69,7 +69,9 @@ export async function createSprintPullContext(
 ): Promise<SprintPullContext | null> {
 	if (!mapping || mapping.direction === "push") return null;
 
-	const sprintFieldId = await clients.jira.getSprintFieldId();
+	const cwd = options.cwd ?? process.cwd();
+	const registry = options.registry ?? SprintRegistry.load(cwd);
+	const sprintFieldId = await discoverSprintField(clients.jira, registry);
 	if (!sprintFieldId) {
 		throw new Error(
 			"Sprint sync is configured but this Jira site has no Sprint field (Jira Software). Remove the sprint fieldMappings entry or check the site.",
@@ -77,8 +79,6 @@ export async function createSprintPullContext(
 	}
 	clients.jira.includeIssueFields([sprintFieldId]);
 
-	const cwd = options.cwd ?? process.cwd();
-	const registry = options.registry ?? SprintRegistry.load(cwd);
 	return {
 		mapping,
 		sprintFieldId,
@@ -91,6 +91,23 @@ export async function createSprintPullContext(
 		warnings: [],
 		dryRun: options.dryRun ?? false,
 	};
+}
+
+/**
+ * The Sprint field id: as recorded in the registry, else discovered from
+ * Jira and recorded so sync payloads can carry the sprint
+ */
+export async function discoverSprintField(
+	jira: Pick<JiraClient, "getSprintFieldId">,
+	registry: SprintRegistry,
+): Promise<string | null> {
+	if (registry.sprintFieldId) return registry.sprintFieldId;
+	const id = await jira.getSprintFieldId();
+	if (id) {
+		registry.sprintFieldId = id;
+		registry.save();
+	}
+	return id;
 }
 
 /**
@@ -348,12 +365,14 @@ export function sprintNeedsPull(
  * sprint history in the task link record.
  *
  * With direction "both", a milestone changed in Backlog since the last sync
- * while the issue's sprint did not change is left for push.
+ * while the issue's sprint did not change is left for push, unless forced
+ * (Jira's sprint was chosen, e.g. by the prefer-jira conflict strategy).
  */
 export async function pullTaskSprint(
 	ctx: SprintPullContext,
 	taskId: string,
 	issue: JiraIssue,
+	options: { force?: boolean } = {},
 ): Promise<TaskSprintPullResult> {
 	const sprints = getIssueSprints(ctx, issue);
 	const displayed = selectDisplayedSprint(sprints);
@@ -369,6 +388,7 @@ export async function pullTaskSprint(
 	}
 
 	const localChange =
+		!options.force &&
 		ctx.mapping.direction === "both" &&
 		link.sprintSync !== undefined &&
 		!sameMilestone(current, link.sprintSync.milestoneId) &&

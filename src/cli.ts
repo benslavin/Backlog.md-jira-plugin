@@ -255,6 +255,12 @@ program
 					console.log(`  ${conflict.taskId}: ${conflict.resolution}`);
 				}
 			}
+			if (result.warnings && result.warnings.length > 0) {
+				console.log("\nWarnings:");
+				for (const warning of result.warnings) {
+					console.log(`  ${warning}`);
+				}
+			}
 			if (result.failed.length > 0) {
 				console.log("\nFailures:");
 				// Print minimal, user-friendly failure lines

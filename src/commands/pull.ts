@@ -57,6 +57,12 @@ export interface PullOptions {
 	force?: boolean;
 	dryRun?: boolean;
 	verbose?: boolean;
+	/**
+	 * Sprint pull state shared across calls (sync pulls tasks one at a time
+	 * in parallel and must not create a sprint's milestone twice); created
+	 * per call when omitted
+	 */
+	sprintContext?: SprintPullContext | null;
 }
 
 export interface PullResult {
@@ -107,12 +113,21 @@ export async function pull(options: PullOptions = {}): Promise<PullResult> {
 	};
 
 	let sprints: SprintPullContext | null = null;
+	let warningsFrom = 0;
 	try {
-		sprints = await createSprintPullContext(
-			sprintMapping,
-			{ jira, backlog },
-			{ dryRun: options.dryRun },
-		);
+		sprints =
+			options.sprintContext !== undefined
+				? options.sprintContext
+				: await createSprintPullContext(
+						sprintMapping,
+						{ jira, backlog },
+						{ dryRun: options.dryRun },
+					);
+		if (sprints && options.sprintContext) {
+			// The shared context's client may differ from this call's
+			jira.includeIssueFields([sprints.sprintFieldId]);
+		}
+		warningsFrom = sprints?.warnings.length ?? 0;
 		// Bulk pulls also bring milestones of registered sprints in step with
 		// the board; pulls of given tasks (as from sync) reconcile only the
 		// sprints of those tasks
@@ -216,7 +231,7 @@ export async function pull(options: PullOptions = {}): Promise<PullResult> {
 			JSON.stringify(result),
 		);
 	} finally {
-		if (sprints) result.warnings.push(...sprints.warnings);
+		if (sprints) result.warnings.push(...sprints.warnings.slice(warningsFrom));
 		store.close();
 		await jira.close();
 		// Restore original log level
@@ -459,7 +474,7 @@ async function pullTask(
 
 		if (state.state === "InSync") {
 			// Sprint changes are not part of the synced payload
-			if (sprints) await pullSprint(sprints, taskId, issue);
+			if (sprints) await pullSprint(sprints, taskId, issue, force);
 			logger.info({ taskId }, "Task already in sync, skipping");
 			return;
 		}
@@ -521,7 +536,7 @@ async function pullTask(
 		// which may rewrite the task file
 		applyMappedFrontmatter(taskId, issue, fieldMappings);
 
-		if (sprints) await pullSprint(sprints, taskId, issue);
+		if (sprints) await pullSprint(sprints, taskId, issue, force);
 
 		// Update snapshots with freshly updated data
 		const updatedTask = await backlog.getTask(taskId);
@@ -580,9 +595,10 @@ async function pullSprint(
 	sprints: SprintPullContext,
 	taskId: string,
 	issue: JiraIssue,
+	force = false,
 ): Promise<void> {
 	try {
-		await pullTaskSprint(sprints, taskId, issue);
+		await pullTaskSprint(sprints, taskId, issue, { force });
 	} catch (error) {
 		sprints.warnings.push(
 			`${taskId}: sprint not pulled: ${error instanceof Error ? error.message : String(error)}`,

@@ -12,6 +12,7 @@ import {
 } from "./field-mapping.ts";
 import { logger } from "./logger.ts";
 import {
+	discoverSprintField,
 	getIssueSprints,
 	sameMilestone,
 	selectDisplayedSprint,
@@ -75,7 +76,9 @@ export async function createSprintPushContext(
 ): Promise<SprintPushContext | null> {
 	if (!mapping || mapping.direction === "pull") return null;
 
-	const sprintFieldId = await jira.getSprintFieldId();
+	const cwd = options.cwd ?? process.cwd();
+	const registry = options.registry ?? SprintRegistry.load(cwd);
+	const sprintFieldId = await discoverSprintField(jira, registry);
 	if (!sprintFieldId) {
 		throw new Error(
 			"Sprint sync is configured but this Jira site has no Sprint field (Jira Software). Remove the sprint fieldMappings entry or check the site.",
@@ -83,8 +86,6 @@ export async function createSprintPushContext(
 	}
 	jira.includeIssueFields([sprintFieldId]);
 
-	const cwd = options.cwd ?? process.cwd();
-	const registry = options.registry ?? SprintRegistry.load(cwd);
 	return {
 		mapping,
 		sprintFieldId,
@@ -248,11 +249,13 @@ function findMilestone(
  *
  * With direction "both" only a milestone changed in Backlog since the last
  * sprint sync is pushed; Jira-side sprint changes are pulled instead.
+ * Forcing pushes the milestone regardless (Backlog's sprint was chosen).
  */
 export async function pushTaskSprint(
 	ctx: SprintPushContext,
 	taskId: string,
 	issue: JiraIssue,
+	options: { force?: boolean } = {},
 ): Promise<TaskSprintPushResult> {
 	if (isSubtaskIssue(issue)) {
 		return {
@@ -265,6 +268,7 @@ export async function pushTaskSprint(
 	const current = typeof raw === "string" && raw.trim() ? raw.trim() : null;
 	const link = readTaskLink(taskId) ?? {};
 	if (
+		!options.force &&
 		ctx.mapping.direction === "both" &&
 		link.sprintSync &&
 		sameMilestone(current, link.sprintSync.milestoneId)
