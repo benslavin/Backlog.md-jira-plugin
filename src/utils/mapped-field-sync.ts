@@ -13,6 +13,7 @@ import {
 	getBacklogTargetValue,
 	getMappedJiraValue,
 	isCoreOverrideTarget,
+	isMcpReturnedField,
 	withoutBuiltInMappings,
 } from "./field-mapping.ts";
 import { getTaskFilePath, updateFrontmatterFields } from "./frontmatter.ts";
@@ -585,21 +586,27 @@ export interface FieldMappingCheck {
 }
 
 /**
- * Check each mapping's Jira field exists, and that fields written to Jira
+ * Check each mapping's Jira field exists and, when pulled, is returned by
+ * MCP Atlassian, and that fields written to Jira
  * (push/both) are on the create/edit screen of the configured project and
  * issue type. `screenFieldIds` is null when screen metadata is unavailable.
  */
 export function verifyFieldMappings(
 	mappings: FieldMapping[],
-	knownFields: Array<{ id: string; name?: string }>,
+	knownFields: Array<{ id: string; name?: string; custom?: boolean }>,
 	screenFieldIds: Set<string> | null,
 	scope: { projectKey: string; issueType: string },
 ): FieldMappingCheck[] {
-	const known = new Set(knownFields.map((f) => f.id));
+	const known = new Map(knownFields.map((f) => [f.id, f]));
 	return mappings.map((mapping) => {
 		const problems: string[] = [];
-		if (!known.has(mapping.jira)) {
+		const field = known.get(mapping.jira);
+		if (!field) {
 			problems.push(`Jira field "${mapping.jira}" does not exist`);
+		} else if (mapping.direction !== "push" && !isMcpReturnedField(field)) {
+			problems.push(
+				`MCP Atlassian does not return the Jira system field "${mapping.jira}", so it cannot be pulled; remove the mapping or make it "push"`,
+			);
 		} else if (
 			mapping.direction !== "pull" &&
 			screenFieldIds &&

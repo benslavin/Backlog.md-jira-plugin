@@ -72,6 +72,23 @@ Mappings live in `.backlog-jira/config.json` under the top-level `fieldMappings`
 
 Empty Jira values clear the Backlog target (except `priority`). Empty Backlog values clear the Jira field (`null`, or `[]` for list fields); on `create-issue` empty values are simply omitted.
 
+### System Fields Returned by MCP Atlassian
+
+MCP Atlassian returns custom fields as they are, but it rebuilds system fields from a fixed model and drops the rest. Some system fields are only returned inside another field, so the plugin reads them from there. These mappings can only be pulled:
+
+| Jira field | Read from | Type | Backlog value |
+|------------|-----------|------|---------------|
+| `timeoriginalestimate` | `timetracking` | `string` | Jira's display duration, e.g. `1d 4h` |
+| `timeestimate` (remaining) | `timetracking` | `string` | Jira's display duration |
+| `timespent` | `timetracking` | `string` | Jira's display duration |
+| `comment` | `comments` | `array` or `string` | One `Author (YYYY-MM-DD): text` line per comment; `string` joins them with ` \| ` |
+
+Durations use the site's time tracking settings, so `1d` is whatever a working day is on that site. Other system fields MCP Atlassian does not return (such as `votes`, `workratio` or `aggregatetimespent`) are not offered by `configure` or `map-fields fields`, and `doctor` reports pull mappings of them.
+
+```json
+{ "backlog": "frontmatter:original_estimate", "jira": "timeoriginalestimate", "type": "string" }
+```
+
 ## Built-in Priority Mapping
 
 Priority is synced through a default field mapping between Backlog `priority` and Jira's system `priority` field:
@@ -140,6 +157,7 @@ backlog-jira view task-12 --plain
 `backlog-jira doctor` checks every mapping:
 
 - the Jira field exists (via `jira_search_fields`);
+- for `pull` and `both` mappings of system fields, MCP Atlassian returns the field (see [System Fields Returned by MCP Atlassian](#system-fields-returned-by-mcp-atlassian));
 - for `push` and `both` mappings, the field is on the screen of the configured `jira.projectKey` and `jira.issueType` (via `jira_get_project_issue_types` and `jira_get_create_fields`). MCP Atlassian exposes create-screen metadata, which is used as the check for editability.
 
 If MCP Atlassian cannot provide screen metadata (older versions), the editability check is skipped with a warning.

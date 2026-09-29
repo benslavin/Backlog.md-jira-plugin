@@ -407,6 +407,32 @@ describe("verifyFieldMappings", () => {
 	const scope = { projectKey: "PROJ", issueType: "Task" };
 	const known = [{ id: "customfield_10016" }, { id: "customfield_10020" }];
 
+	it("flags pulled system fields MCP Atlassian does not return", () => {
+		const results = verifyFieldMappings(
+			[
+				{ ...points("pull"), jira: "votes" },
+				{ ...points("push"), backlog: "frontmatter:v", jira: "votes" },
+				{
+					...points("pull"),
+					backlog: "frontmatter:e",
+					jira: "timeoriginalestimate",
+				},
+				{ ...points("pull"), backlog: "frontmatter:d", jira: "duedate" },
+			],
+			[{ id: "votes" }, { id: "timeoriginalestimate" }, { id: "duedate" }],
+			null,
+			scope,
+		);
+		expect(results.map((r) => r.problems)).toEqual([
+			[
+				'MCP Atlassian does not return the Jira system field "votes", so it cannot be pulled; remove the mapping or make it "push"',
+			],
+			[],
+			[],
+			[],
+		]);
+	});
+
 	it("flags fields that do not exist", () => {
 		const [result] = verifyFieldMappings(
 			[{ ...points("pull"), jira: "customfield_99999" }],

@@ -553,3 +553,133 @@ describe("suggestTypeForSchema", () => {
 		expect(suggestTypeForSchema(undefined)).toBeUndefined();
 	});
 });
+
+describe("MCP Atlassian field aliases", () => {
+	const tracked = makeIssue({
+		timetracking: {
+			original_estimate: "1d",
+			remaining_estimate: "4h",
+			time_spent: "2h",
+		},
+		comments: [
+			{
+				id: "1",
+				body: "First\n\nlook",
+				author: { display_name: "Ann" },
+				created: "2026-09-09T13:24:41.000-0400",
+			},
+			{ id: "2", body: "   " },
+			{ id: "3", body: "No author" },
+		],
+	});
+
+	it("reads estimates from timetracking as Jira's duration strings", () => {
+		expect(
+			getMappedJiraValue(
+				tracked,
+				mapping({ jira: "timeoriginalestimate", type: "string" }),
+			),
+		).toBe("1d");
+		expect(
+			getMappedJiraValue(
+				tracked,
+				mapping({ jira: "timeestimate", type: "string" }),
+			),
+		).toBe("4h");
+		expect(
+			getMappedJiraValue(
+				tracked,
+				mapping({ jira: "timespent", type: "string" }),
+			),
+		).toBe("2h");
+	});
+
+	it("has no estimate when timetracking lacks one", () => {
+		expect(
+			getMappedJiraValue(
+				makeIssue({ timetracking: {} }),
+				mapping({ jira: "timeoriginalestimate", type: "string" }),
+			),
+		).toBeNull();
+		expect(
+			getMappedJiraValue(
+				makeIssue({}),
+				mapping({ jira: "timeoriginalestimate", type: "string" }),
+			),
+		).toBeNull();
+	});
+
+	it("still reads a raw estimate when a server returns one", () => {
+		expect(
+			getJiraFieldValue(
+				makeIssue({ timeoriginalestimate: 28800 }),
+				"timeoriginalestimate",
+			),
+		).toBe(28800);
+	});
+
+	it("reads comments as one line per comment", () => {
+		expect(
+			getMappedJiraValue(tracked, mapping({ jira: "comment", type: "array" })),
+		).toEqual(["Ann (2026-09-09): First look", "No author"]);
+		expect(
+			getMappedJiraValue(tracked, mapping({ jira: "comment", type: "string" })),
+		).toBe("Ann (2026-09-09): First look | No author");
+		expect(
+			getMappedJiraValue(
+				makeIssue({ comments: [] }),
+				mapping({ jira: "comment", type: "string" }),
+			),
+		).toBeNull();
+	});
+
+	it("requests the fields MCP Atlassian returns the values in", () => {
+		const fields = getIssueFieldsParam([
+			mapping({ backlog: "frontmatter:a", jira: "timeoriginalestimate" }),
+			mapping({ backlog: "frontmatter:b", jira: "timeestimate" }),
+			mapping({ backlog: "frontmatter:c", jira: "comment", type: "array" }),
+		])?.split(",");
+		expect(fields).toContain("timetracking");
+		expect(fields).toContain("comment");
+		expect(fields).not.toContain("timeoriginalestimate");
+		expect(fields?.filter((f) => f === "timetracking")).toHaveLength(1);
+	});
+
+	it("rejects types that do not fit the returned value", () => {
+		const { errors } = validateFieldMappings([
+			{
+				backlog: "frontmatter:original_estimate",
+				jira: "timeoriginalestimate",
+				type: "number",
+			},
+			{ backlog: "frontmatter:comments", jira: "comment", type: "user" },
+		]);
+		expect(errors).toEqual([
+			'fieldMappings[0]: MCP Atlassian returns timeoriginalestimate as a duration string such as "1d 4h"; use "type": "string"',
+			'fieldMappings[1]: MCP Atlassian returns comment as one "Author (date): text" line per comment ("string" joins them with "|"); use "type": "array" or "type": "string"',
+		]);
+	});
+
+	it("only allows pulling aliased fields", () => {
+		const { errors } = validateFieldMappings([
+			{
+				backlog: "frontmatter:original_estimate",
+				jira: "timeoriginalestimate",
+				type: "string",
+				direction: "both",
+			},
+		]);
+		expect(errors).toEqual([
+			'fieldMappings[0]: timeoriginalestimate can only be pulled; omit "direction" or use "pull"',
+		]);
+	});
+
+	it("suggests the type of the returned value", () => {
+		expect(
+			suggestTypeForSchema({ type: "number", system: "timeoriginalestimate" }),
+		).toBe("string");
+		expect(
+			suggestTypeForSchema({ type: "comments-page", system: "comment" }),
+		).toBe("array");
+	});
+});

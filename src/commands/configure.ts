@@ -28,6 +28,7 @@ import {
 	PRIORITY_SYSTEM_FIELD,
 	type SprintPullScope,
 	isBuiltInPriorityMapping,
+	isMcpReturnedField,
 	suggestTypeForSchema,
 	validateBacklogTarget,
 	validateFieldMappings,
@@ -1573,9 +1574,12 @@ async function fieldsStep(ctx: WizardContext): Promise<StepOutcome> {
 			chalk.yellow(`  ⚠ Could not list Jira fields: ${describeError(error)}`),
 		);
 	}
-	// Sprints are set up in their own step
+	// Sprints are set up in their own step, and system fields MCP Atlassian
+	// does not return cannot be pulled
 	fields = fields
-		.filter((f) => f.schema?.custom !== SPRINT_FIELD_SCHEMA)
+		.filter(
+			(f) => f.schema?.custom !== SPRINT_FIELD_SCHEMA && isMcpReturnedField(f),
+		)
 		.sort((a, b) => a.name.localeCompare(b.name));
 
 	const { mappings, sprintMapping } = validateFieldMappings(

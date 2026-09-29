@@ -584,6 +584,27 @@ describe("suggestFieldMappings", () => {
 		expect(suggestions.every((s) => s.direction === "pull")).toBe(true);
 	});
 
+	it("offers estimates as strings and skips fields MCP Atlassian drops", () => {
+		const suggestions = suggestFieldMappings(
+			[
+				{
+					id: "timeoriginalestimate",
+					name: "Original estimate",
+					schema: { type: "number", system: "timeoriginalestimate" },
+				},
+				{
+					id: "workratio",
+					name: "Work Ratio",
+					schema: { type: "number", system: "workratio" },
+				},
+			],
+			[issue({ timetracking: { original_estimate: "1d" }, workratio: 5 })],
+		);
+		expect(suggestions.map((s) => [s.field.id, s.used, s.type])).toEqual([
+			["timeoriginalestimate", 1, "string"],
+		]);
+	});
+
 	it("uses one target for both story point field names", () => {
 		const [suggestion] = suggestFieldMappings(
 			[

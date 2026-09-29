@@ -352,6 +352,25 @@ export function validateFieldMappings(raw: unknown): {
 			);
 		}
 
+		const alias =
+			typeof e.jira === "string" ? MCP_FIELD_ALIASES[e.jira.trim()] : undefined;
+		if (alias) {
+			const jira = (e.jira as string).trim();
+			if (
+				typeof e.type === "string" &&
+				!(alias.types as readonly string[]).includes(e.type)
+			) {
+				entryErrors.push(
+					`${label}: MCP Atlassian returns ${jira} as ${alias.describe}; use ${alias.types.map((t) => `"type": "${t}"`).join(" or ")}`,
+				);
+			}
+			if (e.direction !== undefined && e.direction !== "pull") {
+				entryErrors.push(
+					`${label}: ${jira} can only be pulled; omit "direction" or use "pull"`,
+				);
+			}
+		}
+
 		for (const key of SPRINT_ONLY_KEYS) {
 			if (e[key] !== undefined) {
 				entryErrors.push(
@@ -648,11 +667,154 @@ export function frontmatterKeyForTarget(target: string): string {
 // ===== Type adapters (Jira → Backlog) =====
 
 /**
+ * A Jira system field that MCP Atlassian only returns inside another field
+ * of its simplified issue
+ */
+interface McpFieldAlias {
+	/** Field to request so MCP Atlassian returns the value */
+	request: string;
+	/** Read the value given a reader of the simplified issue's fields */
+	read: (get: (id: string) => unknown) => unknown;
+	/** Mapping types that fit the value */
+	types: readonly FieldMappingType[];
+	/** The value MCP Atlassian returns, for validation messages */
+	describe: string;
+}
+
+function timetrackingEntry(key: string) {
+	return (get: (id: string) => unknown): unknown => {
+		const tracking = get("timetracking");
+		if (!tracking || typeof tracking !== "object") return undefined;
+		return (tracking as Record<string, unknown>)[key] ?? null;
+	};
+}
+
+/**
+ * One comment on one line (frontmatter values are single-line):
+ * "Author (YYYY-MM-DD): body"
+ */
+function commentLine(comment: unknown): string | null {
+	if (!comment || typeof comment !== "object") return null;
+	const c = comment as Record<string, unknown>;
+	const body = typeof c.body === "string" ? c.body.replace(/\s+/g, " ") : "";
+	if (!body.trim()) return null;
+	const author =
+		c.author && typeof c.author === "object"
+			? scalarText(
+					(c.author as Record<string, unknown>).display_name ??
+						(c.author as Record<string, unknown>).displayName ??
+						(c.author as Record<string, unknown>).name,
+				)
+			: null;
+	const date = typeof c.created === "string" ? c.created.slice(0, 10) : "";
+	const prefix = [author, date && `(${date})`].filter(Boolean).join(" ");
+	return prefix ? `${prefix}: ${body.trim()}` : body.trim();
+}
+
+/** Separator of comments mapped to a single string */
+const COMMENT_SEPARATOR = " | ";
+
+/**
+ * System fields MCP Atlassian leaves out of its simplified issue unless they
+ * are read from the field it models them in: estimates live in `timetracking`
+ * as Jira's display strings ("1d 4h") and comments come back as `comments`
+ */
+export const MCP_FIELD_ALIASES: Readonly<Record<string, McpFieldAlias>> = {
+	timeoriginalestimate: {
+		request: "timetracking",
+		read: timetrackingEntry("original_estimate"),
+		types: ["string"],
+		describe: 'a duration string such as "1d 4h"',
+	},
+	timeestimate: {
+		request: "timetracking",
+		read: timetrackingEntry("remaining_estimate"),
+		types: ["string"],
+		describe: 'a duration string such as "1d 4h"',
+	},
+	timespent: {
+		request: "timetracking",
+		read: timetrackingEntry("time_spent"),
+		types: ["string"],
+		describe: 'a duration string such as "1d 4h"',
+	},
+	comment: {
+		request: "comment",
+		read: (get) => {
+			const comments = get("comments");
+			if (!Array.isArray(comments)) return undefined;
+			return comments
+				.map(commentLine)
+				.filter((line): line is string => line !== null);
+		},
+		types: ["array", "string"],
+		describe: `one "Author (date): text" line per comment ("string" joins them with "${COMMENT_SEPARATOR.trim()}")`,
+	},
+};
+
+/**
+ * Jira system fields MCP Atlassian's simplified issue returns (as requested
+ * field IDs); other system fields are dropped unless aliased above
+ */
+const MCP_RETURNED_SYSTEM_FIELDS: ReadonlySet<string> = new Set([
+	"summary",
+	"description",
+	"environment",
+	"status",
+	"issuetype",
+	"priority",
+	"project",
+	"resolution",
+	"duedate",
+	"resolutiondate",
+	"parent",
+	"subtasks",
+	"security",
+	"worklog",
+	"assignee",
+	"reporter",
+	"labels",
+	"components",
+	"fixVersions",
+	"versions",
+	"timetracking",
+	"created",
+	"updated",
+	"attachment",
+	"issuelinks",
+]);
+
+/**
+ * Whether MCP Atlassian returns a Jira field's value, so it can be mapped
+ */
+export function isMcpReturnedField(field: {
+	id: string;
+	custom?: boolean;
+}): boolean {
+	return (
+		field.custom === true ||
+		field.id.startsWith("customfield_") ||
+		MCP_RETURNED_SYSTEM_FIELDS.has(field.id) ||
+		field.id in MCP_FIELD_ALIASES
+	);
+}
+
+/**
  * Read a field value from a Jira issue.
  * MCP Atlassian may return fields at the top level or nested under `fields`,
  * and may snake_case system field names (fixVersions → fix_versions).
+ * Aliased system fields are read from the field MCP Atlassian returns them in.
  */
 export function getJiraFieldValue(issue: JiraIssue, fieldId: string): unknown {
+	const alias = MCP_FIELD_ALIASES[fieldId];
+	if (alias) {
+		const value = alias.read((id) => readRawField(issue, id));
+		if (value !== undefined) return value;
+	}
+	return readRawField(issue, fieldId);
+}
+
+function readRawField(issue: JiraIssue, fieldId: string): unknown {
 	const raw = issue.fields ?? {};
 	const nested =
 		raw.fields && typeof raw.fields === "object"
@@ -843,7 +1005,15 @@ export function getMappedJiraValue(
 	issue: JiraIssue,
 	mapping: FieldMapping,
 ): MappedValue {
-	const raw = getJiraFieldValue(issue, mapping.jira);
+	let raw = getJiraFieldValue(issue, mapping.jira);
+	// Comments mapped to a single string keep every comment
+	if (
+		mapping.jira === "comment" &&
+		mapping.type === "string" &&
+		Array.isArray(raw)
+	) {
+		raw = raw.length > 0 ? raw.join(COMMENT_SEPARATOR) : null;
+	}
 	return coerceForTarget(convertJiraValue(raw, mapping), mapping.backlog);
 }
 
@@ -1005,9 +1175,14 @@ export function hasMappedFieldUpdates(updates: MappedFieldUpdates): boolean {
 /**
  * Jira field IDs that must be requested when fetching issues.
  * Push mappings are included so their Jira values can be compared and shown.
+ * Aliased fields request the field MCP Atlassian returns them in.
  */
 export function getMappedJiraFieldIds(mappings: FieldMapping[]): string[] {
-	return [...new Set(mappings.map((m) => m.jira))];
+	return [
+		...new Set(
+			mappings.map((m) => MCP_FIELD_ALIASES[m.jira]?.request ?? m.jira),
+		),
+	];
 }
 
 /**
@@ -1050,6 +1225,8 @@ export function suggestTypeForSchema(schema?: {
 	system?: string;
 	custom?: string;
 }): FieldMappingType | undefined {
+	const alias = schema?.system ? MCP_FIELD_ALIASES[schema.system] : undefined;
+	if (alias) return alias.types[0];
 	if (!schema?.type) return undefined;
 	switch (schema.type) {
 		case "string":

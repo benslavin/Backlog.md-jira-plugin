@@ -24510,6 +24510,16 @@ function validateFieldMappings(raw) {
     if (e.direction !== undefined && (typeof e.direction !== "string" || !FIELD_MAPPING_DIRECTIONS.includes(e.direction))) {
       entryErrors.push(`${label}: "direction" must be one of ${FIELD_MAPPING_DIRECTIONS.join(", ")}`);
     }
+    const alias = typeof e.jira === "string" ? MCP_FIELD_ALIASES[e.jira.trim()] : undefined;
+    if (alias) {
+      const jira = e.jira.trim();
+      if (typeof e.type === "string" && !alias.types.includes(e.type)) {
+        entryErrors.push(`${label}: MCP Atlassian returns ${jira} as ${alias.describe}; use ${alias.types.map((t) => `"type": "${t}"`).join(" or ")}`);
+      }
+      if (e.direction !== undefined && e.direction !== "pull") {
+        entryErrors.push(`${label}: ${jira} can only be pulled; omit "direction" or use "pull"`);
+      }
+    }
     for (const key of SPRINT_ONLY_KEYS) {
       if (e[key] !== undefined) {
         entryErrors.push(`${label}: "${key}" is only valid for "type": "${SPRINT_MAPPING_TYPE}"`);
@@ -24667,7 +24677,39 @@ function isCoreOverrideTarget(target) {
 function frontmatterKeyForTarget(target) {
   return target.startsWith(FRONTMATTER_PREFIX) ? target.slice(FRONTMATTER_PREFIX.length) : target;
 }
+function timetrackingEntry(key) {
+  return (get) => {
+    const tracking = get("timetracking");
+    if (!tracking || typeof tracking !== "object")
+      return;
+    return tracking[key] ?? null;
+  };
+}
+function commentLine(comment) {
+  if (!comment || typeof comment !== "object")
+    return null;
+  const c = comment;
+  const body = typeof c.body === "string" ? c.body.replace(/\s+/g, " ") : "";
+  if (!body.trim())
+    return null;
+  const author = c.author && typeof c.author === "object" ? scalarText(c.author.display_name ?? c.author.displayName ?? c.author.name) : null;
+  const date = typeof c.created === "string" ? c.created.slice(0, 10) : "";
+  const prefix = [author, date && `(${date})`].filter(Boolean).join(" ");
+  return prefix ? `${prefix}: ${body.trim()}` : body.trim();
+}
+function isMcpReturnedField(field) {
+  return field.custom === true || field.id.startsWith("customfield_") || MCP_RETURNED_SYSTEM_FIELDS.has(field.id) || field.id in MCP_FIELD_ALIASES;
+}
 function getJiraFieldValue(issue, fieldId) {
+  const alias = MCP_FIELD_ALIASES[fieldId];
+  if (alias) {
+    const value = alias.read((id) => readRawField(issue, id));
+    if (value !== undefined)
+      return value;
+  }
+  return readRawField(issue, fieldId);
+}
+function readRawField(issue, fieldId) {
   const raw = issue.fields ?? {};
   const nested = raw.fields && typeof raw.fields === "object" ? raw.fields : {};
   const snake = fieldId.replace(/([a-z0-9])([A-Z])/g, "$1_$2").toLowerCase();
@@ -24803,7 +24845,10 @@ function coerceForTarget(value, target) {
   return value;
 }
 function getMappedJiraValue(issue, mapping) {
-  const raw = getJiraFieldValue(issue, mapping.jira);
+  let raw = getJiraFieldValue(issue, mapping.jira);
+  if (mapping.jira === "comment" && mapping.type === "string" && Array.isArray(raw)) {
+    raw = raw.length > 0 ? raw.join(COMMENT_SEPARATOR) : null;
+  }
   return coerceForTarget(convertJiraValue(raw, mapping), mapping.backlog);
 }
 function getBacklogTargetValue(frontmatter, target) {
@@ -24894,7 +24939,9 @@ function hasMappedFieldUpdates(updates) {
   return Object.keys(updates.cli).length > 0 || Object.keys(updates.frontmatter).length > 0;
 }
 function getMappedJiraFieldIds(mappings) {
-  return [...new Set(mappings.map((m) => m.jira))];
+  return [
+    ...new Set(mappings.map((m) => MCP_FIELD_ALIASES[m.jira]?.request ?? m.jira))
+  ];
 }
 function getIssueFieldsParam(mappings) {
   const extra = getMappedJiraFieldIds(mappings).filter((id) => !DEFAULT_ISSUE_FIELDS.includes(id));
@@ -24903,6 +24950,9 @@ function getIssueFieldsParam(mappings) {
   return [...DEFAULT_ISSUE_FIELDS, ...extra].join(",");
 }
 function suggestTypeForSchema(schema) {
+  const alias = schema?.system ? MCP_FIELD_ALIASES[schema.system] : undefined;
+  if (alias)
+    return alias.types[0];
   if (!schema?.type)
     return;
   switch (schema.type) {
@@ -25040,7 +25090,7 @@ function buildJiraValueUpdates(values, issue) {
   }
   return result;
 }
-var FIELD_MAPPING_TYPES, FIELD_MAPPING_DIRECTIONS, NATIVE_BACKLOG_TARGETS, CORE_OVERRIDE_TARGETS, ARRAY_NATIVE_TARGETS, FRONTMATTER_PREFIX = "frontmatter:", RESERVED_FRONTMATTER_KEYS, SPRINT_MAPPING_TYPE = "sprint", SPRINT_PULL_SCOPES, SPRINT_ONLY_KEYS, FieldMappingConfigError, PRIORITY_SYSTEM_FIELD = "priority", BACKLOG_PRIORITIES, DEFAULT_PRIORITY_MAPPING, FRONTMATTER_KEY_PATTERN, JIRA_FIELD_PATTERN, DEFAULT_ISSUE_FIELDS, FieldValueError, JIRA_LIST_FIELDS, ACCOUNT_ID_PATTERN;
+var FIELD_MAPPING_TYPES, FIELD_MAPPING_DIRECTIONS, NATIVE_BACKLOG_TARGETS, CORE_OVERRIDE_TARGETS, ARRAY_NATIVE_TARGETS, FRONTMATTER_PREFIX = "frontmatter:", RESERVED_FRONTMATTER_KEYS, SPRINT_MAPPING_TYPE = "sprint", SPRINT_PULL_SCOPES, SPRINT_ONLY_KEYS, FieldMappingConfigError, PRIORITY_SYSTEM_FIELD = "priority", BACKLOG_PRIORITIES, DEFAULT_PRIORITY_MAPPING, FRONTMATTER_KEY_PATTERN, JIRA_FIELD_PATTERN, COMMENT_SEPARATOR = " | ", MCP_FIELD_ALIASES, MCP_RETURNED_SYSTEM_FIELDS, DEFAULT_ISSUE_FIELDS, FieldValueError, JIRA_LIST_FIELDS, ACCOUNT_ID_PATTERN;
 var init_field_mapping = __esm(() => {
   init_assignee_mapping();
   init_frontmatter();
@@ -25137,6 +25187,64 @@ ${errors.map((e) => `  - ${e}`).join(`
   });
   FRONTMATTER_KEY_PATTERN = /^[A-Za-z_][A-Za-z0-9_-]*$/;
   JIRA_FIELD_PATTERN = /^(customfield_\d+|[A-Za-z][A-Za-z0-9_]*)$/;
+  MCP_FIELD_ALIASES = {
+    timeoriginalestimate: {
+      request: "timetracking",
+      read: timetrackingEntry("original_estimate"),
+      types: ["string"],
+      describe: 'a duration string such as "1d 4h"'
+    },
+    timeestimate: {
+      request: "timetracking",
+      read: timetrackingEntry("remaining_estimate"),
+      types: ["string"],
+      describe: 'a duration string such as "1d 4h"'
+    },
+    timespent: {
+      request: "timetracking",
+      read: timetrackingEntry("time_spent"),
+      types: ["string"],
+      describe: 'a duration string such as "1d 4h"'
+    },
+    comment: {
+      request: "comment",
+      read: (get) => {
+        const comments = get("comments");
+        if (!Array.isArray(comments))
+          return;
+        return comments.map(commentLine).filter((line) => line !== null);
+      },
+      types: ["array", "string"],
+      describe: `one "Author (date): text" line per comment ("string" joins them with "${COMMENT_SEPARATOR.trim()}")`
+    }
+  };
+  MCP_RETURNED_SYSTEM_FIELDS = new Set([
+    "summary",
+    "description",
+    "environment",
+    "status",
+    "issuetype",
+    "priority",
+    "project",
+    "resolution",
+    "duedate",
+    "resolutiondate",
+    "parent",
+    "subtasks",
+    "security",
+    "worklog",
+    "assignee",
+    "reporter",
+    "labels",
+    "components",
+    "fixVersions",
+    "versions",
+    "timetracking",
+    "created",
+    "updated",
+    "attachment",
+    "issuelinks"
+  ]);
   DEFAULT_ISSUE_FIELDS = [
     "summary",
     "description",
@@ -27395,7 +27503,7 @@ async function discoverFields(options) {
   const jira = new JiraClient({ ...getJiraClientOptions(), silentMode: true });
   try {
     const fields = await jira.searchFields(options.search ?? "");
-    const filtered = options.customOnly ? fields.filter((f) => f.custom || f.id.startsWith("customfield_")) : fields;
+    const filtered = fields.filter((f) => options.customOnly ? f.custom || f.id.startsWith("customfield_") : isMcpReturnedField(f));
     if (filtered.length === 0) {
       console.log(source_default.yellow("No Jira fields found."));
       return;
@@ -27817,6 +27925,8 @@ function suggestFieldMappings(fields, sampleIssues, options = {}) {
   const suggestions = [];
   for (const field of fields) {
     if (HIDDEN_FIELDS.has(field.id.toLowerCase()))
+      continue;
+    if (!isMcpReturnedField(field))
       continue;
     if (field.schema?.custom && HIDDEN_SCHEMAS.has(field.schema.custom))
       continue;
@@ -28536,11 +28646,14 @@ function formatMappedFieldsSection(mappings, frontmatter, issue, jiraUnavailable
   return lines;
 }
 function verifyFieldMappings(mappings, knownFields, screenFieldIds, scope) {
-  const known = new Set(knownFields.map((f) => f.id));
+  const known = new Map(knownFields.map((f) => [f.id, f]));
   return mappings.map((mapping) => {
     const problems = [];
-    if (!known.has(mapping.jira)) {
+    const field = known.get(mapping.jira);
+    if (!field) {
       problems.push(`Jira field "${mapping.jira}" does not exist`);
+    } else if (mapping.direction !== "push" && !isMcpReturnedField(field)) {
+      problems.push(`MCP Atlassian does not return the Jira system field "${mapping.jira}", so it cannot be pulled; remove the mapping or make it "push"`);
     } else if (mapping.direction !== "pull" && screenFieldIds && !screenFieldIds.has(mapping.jira)) {
       problems.push(`Jira field "${mapping.jira}" is not editable for ${scope.projectKey} / ${scope.issueType} (not on the issue type's screen)`);
     }
@@ -29839,7 +29952,7 @@ async function fieldsStep(ctx) {
   } catch (error) {
     console.log(source_default.yellow(`  ⚠ Could not list Jira fields: ${describeError(error)}`));
   }
-  fields = fields.filter((f) => f.schema?.custom !== SPRINT_FIELD_SCHEMA).sort((a, b) => a.name.localeCompare(b.name));
+  fields = fields.filter((f) => f.schema?.custom !== SPRINT_FIELD_SCHEMA && isMcpReturnedField(f)).sort((a, b) => a.name.localeCompare(b.name));
   const { mappings, sprintMapping } = validateFieldMappings(ctx.config.fieldMappings);
   const draft = {
     configured: [

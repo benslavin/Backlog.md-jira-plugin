@@ -2,6 +2,13 @@
 
 This project is a fork of [eciuca/Backlog.md-jira-plugin](https://github.com/eciuca/Backlog.md-jira-plugin), published as `@benslavin/backlog-jira`. It follows [Semantic Versioning](https://semver.org/) on its own version line, starting at 0.3.0. Changes to the `.backlog-jira/` file formats (config, link records, `sprints.json`) count as breaking. The CLI command is `backlog-jira`.
 
+## [Unreleased]
+
+### Fixed
+
+- Mappings of `timeoriginalestimate`, `timeestimate`, `timespent` and `comment` pull values. MCP Atlassian only returns these inside `timetracking` and `comments`, so they were silently empty. Estimates are pulled as Jira's duration strings (`"1d"`) and need `"type": "string"`. Validation now rejects other types and push directions for these fields.
+- `configure` and `map-fields fields` no longer offer system fields MCP Atlassian does not return, and `doctor` reports pull mappings of them.
+
 ## [0.3.0] - 2026-09-29
 
 First fork release. Forked from upstream `main` at `6c77390` (2025-10-28), which includes upstream work released after v0.2.0.

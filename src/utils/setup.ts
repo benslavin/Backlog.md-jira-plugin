@@ -16,6 +16,7 @@ import {
 	SPRINT_MAPPING_TYPE,
 	type SprintPullScope,
 	getJiraFieldValue,
+	isMcpReturnedField,
 	suggestTypeForSchema,
 	validateBacklogTarget,
 } from "./field-mapping.ts";
@@ -685,6 +686,7 @@ export function suggestFieldMappings(
 	const suggestions: FieldSuggestion[] = [];
 	for (const field of fields) {
 		if (HIDDEN_FIELDS.has(field.id.toLowerCase())) continue;
+		if (!isMcpReturnedField(field)) continue;
 		if (field.schema?.custom && HIDDEN_SCHEMAS.has(field.schema.custom))
 			continue;
 		if (mappedFields.has(field.id.toLowerCase())) continue;

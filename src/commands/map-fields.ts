@@ -12,6 +12,7 @@ import {
 	SPRINT_MAPPING_TYPE,
 	type SprintMapping,
 	isBuiltInPriorityMapping,
+	isMcpReturnedField,
 	suggestTypeForSchema,
 	validateFieldMappings,
 } from "../utils/field-mapping.ts";
@@ -224,9 +225,12 @@ async function discoverFields(options: {
 	const jira = new JiraClient({ ...getJiraClientOptions(), silentMode: true });
 	try {
 		const fields = await jira.searchFields(options.search ?? "");
-		const filtered = options.customOnly
-			? fields.filter((f) => f.custom || f.id.startsWith("customfield_"))
-			: fields;
+		// System fields MCP Atlassian does not return cannot be pulled
+		const filtered = fields.filter((f) =>
+			options.customOnly
+				? f.custom || f.id.startsWith("customfield_")
+				: isMcpReturnedField(f),
+		);
 
 		if (filtered.length === 0) {
 			console.log(chalk.yellow("No Jira fields found."));
