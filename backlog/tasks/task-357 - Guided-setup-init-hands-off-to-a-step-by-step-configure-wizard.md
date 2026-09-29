@@ -5,7 +5,7 @@ status: Done
 assignee:
   - '@claude'
 created_date: '2026-09-29 14:22'
-updated_date: '2026-09-29 15:05'
+updated_date: '2026-09-29 15:08'
 labels:
   - setup
   - cli
@@ -84,4 +84,6 @@ Status discovery for statuses no issue is in yet (AC #15):
 - Transition names, Backlog statuses and the Jira statuses of the current mapping are now candidates. `checkStatusNames` runs `project = KEY AND status in (...)`, drops the names Jira rejects ("The value 'X' does not exist for the field 'status'") and retries. If the error text is not recognised it asks about each name, and it reports unchecked when Jira cannot be searched
 - The status step shows statuses on issues by issue type, then the checked statuses no issue is in yet (noting that Jira checks names across the whole site), and pre-fills them in the "other statuses" prompt for editing
 - Tests: discovery candidates, rejected-name parsing, retry, per-name fallback, unchecked and escaping; the wizard's status test uses a fake Jira that rejects unknown statuses. 662 pass
+
+- Checked statuses are split by source: transition names of the project's issues are pre-filled as "Statuses <KEY> issues can move to". Checked Backlog statuses and mapping entries (e.g. init's default Open, Backlog, Closed, Resolved) are listed as "used elsewhere on this Jira site" and not pre-filled, because Jira checks names site-wide
 <!-- SECTION:NOTES:END -->

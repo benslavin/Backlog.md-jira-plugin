@@ -29008,10 +29008,16 @@ async function statusStep(ctx) {
     }
     const checked = check;
     if (checked?.checked) {
-      suggested = checked.statuses;
+      const transitionNames = new Set(perType.flatMap((t) => t.candidates).map((c) => c.toLowerCase()));
+      suggested = checked.statuses.filter((s) => transitionNames.has(s.toLowerCase()));
+      const elsewhere = checked.statuses.filter((s) => !transitionNames.has(s.toLowerCase()));
       if (suggested.length > 0) {
-        console.log(`  Jira statuses no ${projectKey} issue is in yet: ${source_default.yellow(suggested.join(", "))}`);
-        console.log(source_default.gray("  (From transition names, Backlog statuses and the current mapping, checked with Jira. Jira checks names across the whole site, so remove any that are not in this project's workflow.)"));
+        console.log(`  Statuses ${projectKey} issues can move to: ${source_default.yellow(suggested.join(", "))}`);
+        console.log(source_default.gray("  (Transition names of the project's issues that Jira confirms are statuses.)"));
+      }
+      if (elsewhere.length > 0) {
+        console.log(`  Statuses used elsewhere on this Jira site: ${source_default.gray(elsewhere.join(", "))}`);
+        console.log(source_default.gray(`  (Your Backlog statuses and current mapping. Add them below only if ${projectKey}'s workflow has them.)`));
       }
     } else {
       suggested = unverified;

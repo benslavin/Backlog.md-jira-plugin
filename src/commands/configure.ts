@@ -651,14 +651,34 @@ async function statusStep(ctx: WizardContext): Promise<StepOutcome> {
 		}
 		const checked = check as { statuses: string[]; checked: boolean } | null;
 		if (checked?.checked) {
-			suggested = checked.statuses;
+			// Transitions come from this project's workflow; the other names
+			// only prove the status exists somewhere on the Jira site
+			const transitionNames = new Set(
+				perType.flatMap((t) => t.candidates).map((c) => c.toLowerCase()),
+			);
+			suggested = checked.statuses.filter((s) =>
+				transitionNames.has(s.toLowerCase()),
+			);
+			const elsewhere = checked.statuses.filter(
+				(s) => !transitionNames.has(s.toLowerCase()),
+			);
 			if (suggested.length > 0) {
 				console.log(
-					`  Jira statuses no ${projectKey} issue is in yet: ${chalk.yellow(suggested.join(", "))}`,
+					`  Statuses ${projectKey} issues can move to: ${chalk.yellow(suggested.join(", "))}`,
 				);
 				console.log(
 					chalk.gray(
-						"  (From transition names, Backlog statuses and the current mapping, checked with Jira. Jira checks names across the whole site, so remove any that are not in this project's workflow.)",
+						"  (Transition names of the project's issues that Jira confirms are statuses.)",
+					),
+				);
+			}
+			if (elsewhere.length > 0) {
+				console.log(
+					`  Statuses used elsewhere on this Jira site: ${chalk.gray(elsewhere.join(", "))}`,
+				);
+				console.log(
+					chalk.gray(
+						`  (Your Backlog statuses and current mapping. Add them below only if ${projectKey}'s workflow has them.)`,
 					),
 				);
 			}

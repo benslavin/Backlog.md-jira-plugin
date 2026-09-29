@@ -417,18 +417,21 @@ describe("configure --step", () => {
 		expect(printed()).toContain("Backlog statuses: To Do, In Progress, Done");
 		expect(printed()).toMatch(/Task\s+Open, In Review/);
 		// Transition names, Backlog statuses and the mapping, checked with Jira:
-		// "Start Progress" and "In Progress" are not statuses on this site
+		// "Start Progress" and "In Progress" are not statuses on this site.
+		// Only the transition name is pre-filled; the others may belong to
+		// another project's workflow.
+		expect(printed()).toContain("Statuses API issues can move to: Closed");
 		expect(printed()).toContain(
-			"Jira statuses no API issue is in yet: Closed, To Do, Done",
+			"Statuses used elsewhere on this Jira site: To Do, Done",
 		);
 		expect(asked.find((q) => q.name === "extraStatuses")?.initial).toBe(
-			"Closed, To Do, Done",
+			"Closed",
 		);
 		const backlog = readConfig().backlog as RawConfig;
 		expect(backlog.statusMapping).toEqual({
-			"To Do": ["Open", "To Do"],
+			"To Do": ["Open"],
 			"In Progress": ["In Review"],
-			Done: ["Closed", "Done"],
+			Done: ["Done", "Closed"],
 		});
 		expect(backlog.unmappedJiraStatuses).toEqual(["Blocked"]);
 		expect(backlog.assigneeMapping).toEqual({ "@dev": "dev@acme.test" });
