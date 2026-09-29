@@ -14244,8 +14244,8 @@ var package_default = {
 };
 
 // src/commands/configure.ts
-import { existsSync as existsSync3, mkdirSync as mkdirSync2, readFileSync as readFileSync5, writeFileSync as writeFileSync4 } from "node:fs";
-import { join as join4 } from "node:path";
+import { existsSync as existsSync4, mkdirSync as mkdirSync3, readFileSync as readFileSync6, writeFileSync as writeFileSync5 } from "node:fs";
+import { join as join5 } from "node:path";
 
 // node_modules/chalk/source/vendor/ansi-styles/index.js
 var ANSI_BACKGROUND_OFFSET = 10;
@@ -23234,8 +23234,8 @@ class StdioClientTransport {
 }
 
 // src/utils/field-mapping.ts
-import { existsSync as existsSync2, readFileSync as readFileSync4 } from "node:fs";
-import { join as join3 } from "node:path";
+import { existsSync as existsSync3, readFileSync as readFileSync5 } from "node:fs";
+import { join as join4 } from "node:path";
 
 // src/utils/assignee-mapping.ts
 import { readFileSync, writeFileSync } from "node:fs";
@@ -23425,20 +23425,171 @@ function autoDiscoverAndSaveMapping(jiraDisplayName, backlogAssignees) {
 }
 
 // src/utils/frontmatter.ts
-import { readFileSync as readFileSync3, writeFileSync as writeFileSync3 } from "node:fs";
+import { readFileSync as readFileSync4, writeFileSync as writeFileSync4 } from "node:fs";
 
 // src/utils/task-links.ts
 import {
-  existsSync,
-  mkdirSync,
-  readFileSync as readFileSync2,
+  existsSync as existsSync2,
+  mkdirSync as mkdirSync2,
+  readFileSync as readFileSync3,
   unlinkSync,
-  writeFileSync as writeFileSync2
+  writeFileSync as writeFileSync3
 } from "node:fs";
-import { basename, join as join2 } from "node:path";
+import { basename, join as join3 } from "node:path";
 
 // src/state/sprint-registry.ts
+import { existsSync, mkdirSync, readFileSync as readFileSync2, writeFileSync as writeFileSync2 } from "node:fs";
+import { dirname, join as join2 } from "node:path";
+var SPRINT_REGISTRY_VERSION = 1;
 var SPRINTS_GITIGNORE_RULE = "!sprints.json";
+var SPRINT_DATA_KEYS = [
+  "boardId",
+  "name",
+  "state",
+  "startDate",
+  "endDate",
+  "completeDate",
+  "goal"
+];
+
+class SprintRegistryError extends Error {
+  path;
+  constructor(path, message) {
+    super(`Invalid sprint registry ${path}: ${message}`);
+    this.path = path;
+    this.name = "SprintRegistryError";
+  }
+}
+function getSprintRegistryPath(cwd = process.cwd()) {
+  return join2(cwd, ".backlog-jira", "sprints.json");
+}
+
+class SprintRegistry {
+  path;
+  root;
+  entries;
+  savedText;
+  constructor(path, root, entries) {
+    this.path = path;
+    this.root = root;
+    this.entries = entries;
+    this.savedText = this.serialize();
+  }
+  static load(cwd = process.cwd()) {
+    const path = getSprintRegistryPath(cwd);
+    if (!existsSync(path)) {
+      return new SprintRegistry(path, { version: SPRINT_REGISTRY_VERSION, sprints: [] }, []);
+    }
+    const text = readFileSync2(path, "utf-8");
+    let parsed;
+    try {
+      parsed = JSON.parse(text);
+    } catch (error) {
+      throw new SprintRegistryError(path, `not valid JSON (${error instanceof Error ? error.message : String(error)})`);
+    }
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      throw new SprintRegistryError(path, "expected a JSON object");
+    }
+    const root = parsed;
+    if (root.sprints === undefined)
+      root.sprints = [];
+    if (!Array.isArray(root.sprints)) {
+      throw new SprintRegistryError(path, '"sprints" must be an array');
+    }
+    const seen = new Set;
+    const entries = root.sprints;
+    entries.forEach((entry, index) => {
+      const label = `sprints[${index}]`;
+      if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+        throw new SprintRegistryError(path, `${label} must be an object`);
+      }
+      const e = entry;
+      for (const key of ["sprintId", "milestoneId"]) {
+        if (typeof e[key] === "number")
+          e[key] = String(e[key]);
+        if (typeof e[key] !== "string" || !e[key].trim()) {
+          throw new SprintRegistryError(path, `${label} is missing "${key}"`);
+        }
+      }
+      const sprintId = e.sprintId;
+      if (seen.has(sprintId)) {
+        throw new SprintRegistryError(path, `${label} repeats sprint ${sprintId}`);
+      }
+      seen.add(sprintId);
+    });
+    return new SprintRegistry(path, root, entries);
+  }
+  list() {
+    return this.entries.map((e) => ({ ...e }));
+  }
+  get(sprintId) {
+    const entry = this.find(String(sprintId));
+    return entry ? { ...entry } : undefined;
+  }
+  findByMilestone(milestoneId) {
+    const id = milestoneId.trim().toLowerCase();
+    const entry = this.entries.find((e) => String(e.milestoneId).toLowerCase() === id);
+    return entry ? { ...entry } : undefined;
+  }
+  upsert(sprint, milestoneId) {
+    let entry = this.find(sprint.id);
+    if (!entry) {
+      entry = { sprintId: sprint.id, milestoneId };
+      this.entries.push(entry);
+    }
+    entry.milestoneId = milestoneId;
+    for (const key of SPRINT_DATA_KEYS) {
+      const value = sprint[key];
+      if (value === undefined || value === "") {
+        const keep = key === "boardId" || key === "completeDate" && sprint.state === "closed";
+        if (!keep)
+          delete entry[key];
+      } else {
+        entry[key] = value;
+      }
+    }
+    return { ...entry };
+  }
+  isDirty() {
+    return this.serialize() !== this.savedText;
+  }
+  save() {
+    const text = this.serialize();
+    if (text === this.savedText)
+      return false;
+    mkdirSync(dirname(this.path), { recursive: true });
+    ensureRegistryTracked(dirname(this.path));
+    writeFileSync2(this.path, text, "utf-8");
+    this.savedText = text;
+    logger.debug({ path: this.path, count: this.entries.length }, "Saved sprint registry");
+    return true;
+  }
+  find(sprintId) {
+    return this.entries.find((e) => e.sprintId === sprintId);
+  }
+  serialize() {
+    this.root.sprints = this.entries;
+    return `${JSON.stringify(this.root, null, 2)}
+`;
+  }
+}
+function ensureRegistryTracked(configDir) {
+  const gitignorePath = join2(configDir, ".gitignore");
+  if (!existsSync(gitignorePath))
+    return;
+  try {
+    const content = readFileSync2(gitignorePath, "utf-8");
+    if (content.split(/\r?\n/).includes(SPRINTS_GITIGNORE_RULE))
+      return;
+    const separator = content.endsWith(`
+`) || content === "" ? "" : `
+`;
+    writeFileSync2(gitignorePath, `${content}${separator}${SPRINTS_GITIGNORE_RULE}
+`, "utf-8");
+  } catch (error) {
+    logger.debug({ error }, "Could not update .backlog-jira/.gitignore");
+  }
+}
 
 // src/utils/task-links.ts
 var LINK_FRONTMATTER_KEYS = {
@@ -23456,18 +23607,18 @@ function taskIdFromFilePath(filePath) {
   return match ? normalizeTaskId(match[1]) : null;
 }
 function getLinksDir() {
-  return join2(process.cwd(), ".backlog-jira", "links");
+  return join3(process.cwd(), ".backlog-jira", "links");
 }
 function getLinkPath(taskId) {
-  return join2(getLinksDir(), `${normalizeTaskId(taskId)}.json`);
+  return join3(getLinksDir(), `${normalizeTaskId(taskId)}.json`);
 }
 function readTaskLink(taskId) {
   const linkPath = getLinkPath(taskId);
-  if (!existsSync(linkPath)) {
+  if (!existsSync2(linkPath)) {
     return null;
   }
   try {
-    return JSON.parse(readFileSync2(linkPath, "utf-8"));
+    return JSON.parse(readFileSync3(linkPath, "utf-8"));
   } catch (error) {
     logger.warn({ error, taskId, linkPath }, "Failed to read task link");
     return null;
@@ -23477,14 +23628,14 @@ function writeTaskLink(taskId, link) {
   const linkPath = getLinkPath(taskId);
   const cleaned = cleanLink(link);
   if (Object.keys(cleaned).length === 0) {
-    if (existsSync(linkPath)) {
+    if (existsSync2(linkPath)) {
       unlinkSync(linkPath);
     }
     return;
   }
-  mkdirSync(getLinksDir(), { recursive: true });
+  mkdirSync2(getLinksDir(), { recursive: true });
   ensureLinksTracked();
-  writeFileSync2(linkPath, `${JSON.stringify(cleaned, null, 2)}
+  writeFileSync3(linkPath, `${JSON.stringify(cleaned, null, 2)}
 `, "utf-8");
 }
 function cleanLink(link) {
@@ -23497,6 +23648,12 @@ function cleanLink(link) {
   }
   if (link.frontmatter && Object.keys(link.frontmatter).length > 0) {
     cleaned.frontmatter = link.frontmatter;
+  }
+  if (link.sprints && link.sprints.length > 0) {
+    cleaned.sprints = link.sprints;
+  }
+  if (link.sprintSync) {
+    cleaned.sprintSync = link.sprintSync;
   }
   return cleaned;
 }
@@ -23524,17 +23681,17 @@ var CONFIG_DIR_GITIGNORE = `# Ignore all files in .backlog-jira/ except Jira lin
 ${LINKS_GITIGNORE_RULES}${SPRINTS_GITIGNORE_RULE}
 `;
 function ensureLinksTracked() {
-  const gitignorePath = join2(process.cwd(), ".backlog-jira", ".gitignore");
-  if (!existsSync(gitignorePath))
+  const gitignorePath = join3(process.cwd(), ".backlog-jira", ".gitignore");
+  if (!existsSync2(gitignorePath))
     return;
   try {
-    const content = readFileSync2(gitignorePath, "utf-8");
+    const content = readFileSync3(gitignorePath, "utf-8");
     if (content.includes("!links/"))
       return;
     const separator = content.endsWith(`
 `) || content === "" ? "" : `
 `;
-    writeFileSync2(gitignorePath, `${content}${separator}${LINKS_GITIGNORE_RULES}`, "utf-8");
+    writeFileSync3(gitignorePath, `${content}${separator}${LINKS_GITIGNORE_RULES}`, "utf-8");
   } catch (error) {
     logger.debug({ error }, "Could not update .backlog-jira/.gitignore");
   }
@@ -23678,7 +23835,7 @@ function serializeYamlValue(value) {
 }
 function updateJiraMetadata(filePath, metadata) {
   try {
-    const content = readFileSync3(filePath, "utf-8");
+    const content = readFileSync4(filePath, "utf-8");
     const { frontmatter, body } = parseFrontmatter(content);
     const taskId = taskIdFromFilePath(filePath);
     const link = taskId ? seedLink(taskId, frontmatter) : {};
@@ -23703,7 +23860,7 @@ function updateJiraMetadata(filePath, metadata) {
 ${newFrontmatter}
 ---
 ${body}`;
-    writeFileSync3(filePath, newContent, "utf-8");
+    writeFileSync4(filePath, newContent, "utf-8");
     logger.debug({ filePath, metadata }, "Updated Jira metadata in frontmatter");
   } catch (error) {
     logger.error({ error, filePath }, "Failed to update Jira metadata");
@@ -23712,7 +23869,7 @@ ${body}`;
 }
 function updateFrontmatterFields(filePath, fields) {
   try {
-    const content = readFileSync3(filePath, "utf-8");
+    const content = readFileSync4(filePath, "utf-8");
     const { frontmatter, body } = parseFrontmatter(content);
     const taskId = taskIdFromFilePath(filePath);
     const link = taskId ? seedLink(taskId, frontmatter) : {};
@@ -23731,7 +23888,7 @@ function updateFrontmatterFields(filePath, fields) {
     }
     fillMissing(frontmatter, linkToFrontmatter({ ...link, frontmatter: owned }));
     const newFrontmatter = serializeFrontmatter(frontmatter);
-    writeFileSync3(filePath, `---
+    writeFileSync4(filePath, `---
 ${newFrontmatter}
 ---
 ${body}`, "utf-8");
@@ -23762,7 +23919,7 @@ function seedLink(taskId, frontmatter) {
   return link;
 }
 function readPluginFrontmatter(filePath) {
-  const { frontmatter } = parseFrontmatter(readFileSync3(filePath, "utf-8"));
+  const { frontmatter } = parseFrontmatter(readFileSync4(filePath, "utf-8"));
   const taskId = taskIdFromFilePath(filePath);
   if (!taskId) {
     return frontmatter;
@@ -23775,12 +23932,12 @@ function restorePluginFrontmatter(taskId) {
     return false;
   }
   const filePath = getTaskFilePath(taskId);
-  const { frontmatter, body } = parseFrontmatter(readFileSync3(filePath, "utf-8"));
+  const { frontmatter, body } = parseFrontmatter(readFileSync4(filePath, "utf-8"));
   const restored = fillMissing(frontmatter, linkToFrontmatter(link));
   if (restored.length === 0) {
     return false;
   }
-  writeFileSync3(filePath, `---
+  writeFileSync4(filePath, `---
 ${serializeFrontmatter(frontmatter)}
 ---
 ${body}`, "utf-8");
@@ -24102,13 +24259,13 @@ function validateBuiltInPriorityEntry(label, e) {
   return errors;
 }
 function loadFieldMappingConfig(cwd) {
-  const configPath = join3(cwd, ".backlog-jira", "config.json");
-  if (!existsSync2(configPath)) {
+  const configPath = join4(cwd, ".backlog-jira", "config.json");
+  if (!existsSync3(configPath)) {
     return { mappings: [], sprintMapping: null };
   }
   let config;
   try {
-    config = JSON.parse(readFileSync4(configPath, "utf-8"));
+    config = JSON.parse(readFileSync5(configPath, "utf-8"));
   } catch (error) {
     logger.warn({ error }, "Failed to read config.json for field mappings");
     return { mappings: [], sprintMapping: null };
@@ -24121,6 +24278,9 @@ function loadFieldMappingConfig(cwd) {
 }
 function loadAllFieldMappings(cwd) {
   return loadFieldMappingConfig(cwd).mappings;
+}
+function loadSprintMapping(cwd = process.cwd()) {
+  return loadFieldMappingConfig(cwd).sprintMapping;
 }
 function loadFieldMappings(cwd = process.cwd()) {
   return withoutBuiltInMappings(loadAllFieldMappings(cwd));
@@ -24659,6 +24819,7 @@ class JiraClient {
   silentMode;
   extraEnv;
   sprintFieldId;
+  extraIssueFields = [];
   constructor(options = {}) {
     this.dockerImage = options.dockerImage || "ghcr.io/sooperset/mcp-atlassian:latest";
     this.useExternalServer = options.useExternalServer || false;
@@ -25024,11 +25185,25 @@ Current tool: ${toolName}`;
     }
   }
   getMappedIssueFields() {
+    let fields;
     try {
-      return getIssueFieldsParam(loadFieldMappings());
+      fields = getIssueFieldsParam(loadFieldMappings());
     } catch (error) {
       logger.debug({ error }, "Ignoring invalid fieldMappings for getIssue");
-      return;
+    }
+    if (this.extraIssueFields.length === 0)
+      return fields;
+    const list = (fields ?? DEFAULT_ISSUE_FIELDS.join(",")).split(",");
+    for (const id of this.extraIssueFields) {
+      if (!list.includes(id))
+        list.push(id);
+    }
+    return list.join(",");
+  }
+  includeIssueFields(fieldIds) {
+    for (const id of fieldIds) {
+      if (!this.extraIssueFields.includes(id))
+        this.extraIssueFields.push(id);
     }
   }
   async searchFields(keyword = "", limit = 500) {
@@ -25574,11 +25749,11 @@ async function configureCommand(options = {}) {
 `));
     console.log(source_default.gray(`Let's set up your Jira connection step by step.
 `));
-    const configDir = join4(process.cwd(), ".backlog-jira");
-    if (!existsSync3(configDir)) {
+    const configDir = join5(process.cwd(), ".backlog-jira");
+    if (!existsSync4(configDir)) {
       console.log(source_default.yellow(`Creating .backlog-jira/ directory...
 `));
-      mkdirSync2(join4(configDir, "logs"), { recursive: true });
+      mkdirSync3(join5(configDir, "logs"), { recursive: true });
     }
     console.log(source_default.bold.green("Step 1: Jira Instance Type"));
     console.log(source_default.gray(`Select your Jira deployment type.
@@ -26180,7 +26355,7 @@ Step 11: Save Configuration`));
       restoreEnv(originalEnv);
       process.exit(0);
     }
-    const configPath = join4(configDir, "config.json");
+    const configPath = join5(configDir, "config.json");
     const config = {
       jira: {
         baseUrl: jiraUrl,
@@ -26206,7 +26381,7 @@ Step 11: Save Configuration`));
         config.mcp.envVars = mcpEnvVars;
       }
     }
-    writeFileSync4(configPath, JSON.stringify(config, null, 2));
+    writeFileSync5(configPath, JSON.stringify(config, null, 2));
     console.log(source_default.green(`✓ Configuration saved to ${configPath}`));
     const saveToEnvResponse = await import_prompts.default({
       type: "confirm",
@@ -26222,10 +26397,10 @@ Step 11: Save Configuration`));
     }
     const saveToEnv = saveToEnvResponse.saveToEnv;
     if (saveToEnv) {
-      const envPath = join4(process.cwd(), ".env");
+      const envPath = join5(process.cwd(), ".env");
       let envContent = "";
-      if (existsSync3(envPath)) {
-        const existingContent = readFileSync5(envPath, "utf-8");
+      if (existsSync4(envPath)) {
+        const existingContent = readFileSync6(envPath, "utf-8");
         const lines = existingContent.split(`
 `);
         const filteredLines = lines.filter((line) => {
@@ -26261,12 +26436,12 @@ Step 11: Save Configuration`));
 `;
         }
       }
-      writeFileSync4(envPath, envContent);
+      writeFileSync5(envPath, envContent);
       console.log(source_default.green(`✓ Credentials saved to ${envPath}`));
-      const gitignorePath = join4(process.cwd(), ".gitignore");
+      const gitignorePath = join5(process.cwd(), ".gitignore");
       let gitignoreContent = "";
-      if (existsSync3(gitignorePath)) {
-        gitignoreContent = readFileSync5(gitignorePath, "utf-8");
+      if (existsSync4(gitignorePath)) {
+        gitignoreContent = readFileSync6(gitignorePath, "utf-8");
       }
       if (!gitignoreContent.includes(".env")) {
         console.log(source_default.yellow(`
@@ -26289,14 +26464,14 @@ Step 11: Save Configuration`));
 `) ? "" : `
 `)}.env
 `;
-          writeFileSync4(gitignorePath, newGitignore);
+          writeFileSync5(gitignorePath, newGitignore);
           console.log(source_default.green("✓ Added .env to .gitignore"));
         }
       }
     }
-    const backlogGitignorePath = join4(configDir, ".gitignore");
-    if (!existsSync3(backlogGitignorePath)) {
-      writeFileSync4(backlogGitignorePath, CONFIG_DIR_GITIGNORE);
+    const backlogGitignorePath = join5(configDir, ".gitignore");
+    if (!existsSync4(backlogGitignorePath)) {
+      writeFileSync5(backlogGitignorePath, CONFIG_DIR_GITIGNORE);
     }
     console.log(source_default.bold.green(`
 ✓ Configuration complete!
@@ -26643,15 +26818,15 @@ class BacklogClient {
 }
 
 // src/utils/jira-config.ts
-import { existsSync as existsSync4, readFileSync as readFileSync6 } from "node:fs";
-import { join as join5 } from "node:path";
+import { existsSync as existsSync5, readFileSync as readFileSync7 } from "node:fs";
+import { join as join6 } from "node:path";
 function getJiraClientOptions() {
   try {
-    const configPath = join5(process.cwd(), ".backlog-jira", "config.json");
-    if (!existsSync4(configPath)) {
+    const configPath = join6(process.cwd(), ".backlog-jira", "config.json");
+    if (!existsSync5(configPath)) {
       return {};
     }
-    const raw = readFileSync6(configPath, "utf-8");
+    const raw = readFileSync7(configPath, "utf-8");
     const config = JSON.parse(raw);
     const options = {};
     if (config.mcp) {
@@ -26725,30 +26900,30 @@ async function connectCommand() {
 }
 
 // src/commands/create-issue.ts
-import { readFileSync as readFileSync9 } from "node:fs";
-import { join as join8 } from "node:path";
+import { readFileSync as readFileSync10 } from "node:fs";
+import { join as join9 } from "node:path";
 
 // src/state/frontmatter-store.ts
 import {
-  existsSync as existsSync5,
-  mkdirSync as mkdirSync3,
-  readFileSync as readFileSync7,
+  existsSync as existsSync6,
+  mkdirSync as mkdirSync4,
+  readFileSync as readFileSync8,
   readdirSync,
-  writeFileSync as writeFileSync5
+  writeFileSync as writeFileSync6
 } from "node:fs";
-import { join as join6 } from "node:path";
+import { join as join7 } from "node:path";
 class FrontmatterStore {
   snapshotsDir;
   opsLogPath;
   constructor(configDir) {
-    const baseDir = configDir || join6(process.cwd(), ".backlog-jira");
-    if (!existsSync5(baseDir)) {
-      mkdirSync3(baseDir, { recursive: true });
+    const baseDir = configDir || join7(process.cwd(), ".backlog-jira");
+    if (!existsSync6(baseDir)) {
+      mkdirSync4(baseDir, { recursive: true });
     }
-    this.snapshotsDir = join6(baseDir, "snapshots");
-    this.opsLogPath = join6(baseDir, "ops-log.jsonl");
-    if (!existsSync5(this.snapshotsDir)) {
-      mkdirSync3(this.snapshotsDir, { recursive: true });
+    this.snapshotsDir = join7(baseDir, "snapshots");
+    this.opsLogPath = join7(baseDir, "ops-log.jsonl");
+    if (!existsSync6(this.snapshotsDir)) {
+      mkdirSync4(this.snapshotsDir, { recursive: true });
     }
     logger.debug({ baseDir, snapshotsDir: this.snapshotsDir }, "FrontmatterStore initialized");
   }
@@ -26769,7 +26944,7 @@ class FrontmatterStore {
       if (!metadata.jiraKey) {
         return null;
       }
-      const { frontmatter } = parseFrontmatter(readFileSync7(filePath, "utf-8"));
+      const { frontmatter } = parseFrontmatter(readFileSync8(filePath, "utf-8"));
       return {
         backlogId,
         jiraKey: metadata.jiraKey,
@@ -26782,13 +26957,13 @@ class FrontmatterStore {
   }
   getMappingByJiraKey(jiraKey) {
     try {
-      const tasksDir = join6(process.cwd(), "backlog", "tasks");
+      const tasksDir = join7(process.cwd(), "backlog", "tasks");
       const files = readdirSync(tasksDir).filter((f) => f.endsWith(".md"));
       for (const file of files) {
         const backlogId = taskIdFromFilePath(file);
         if (!backlogId)
           continue;
-        const frontmatter = readPluginFrontmatter(join6(tasksDir, file));
+        const frontmatter = readPluginFrontmatter(join7(tasksDir, file));
         if (frontmatter.jira_key === jiraKey) {
           return {
             backlogId,
@@ -26807,13 +26982,13 @@ class FrontmatterStore {
   getAllMappings() {
     const mappings = new Map;
     try {
-      const tasksDir = join6(process.cwd(), "backlog", "tasks");
+      const tasksDir = join7(process.cwd(), "backlog", "tasks");
       const files = readdirSync(tasksDir).filter((f) => f.endsWith(".md"));
       for (const file of files) {
         const backlogId = taskIdFromFilePath(file);
         if (!backlogId)
           continue;
-        const frontmatter = readPluginFrontmatter(join6(tasksDir, file));
+        const frontmatter = readPluginFrontmatter(join7(tasksDir, file));
         if (frontmatter.jira_key) {
           mappings.set(backlogId, frontmatter.jira_key);
         }
@@ -26839,7 +27014,7 @@ class FrontmatterStore {
     }
   }
   getSnapshotPath(backlogId, side) {
-    return join6(this.snapshotsDir, `${normalizeTaskId(backlogId)}-${side}.json`);
+    return join7(this.snapshotsDir, `${normalizeTaskId(backlogId)}-${side}.json`);
   }
   setSnapshot(backlogId, side, hash, payload) {
     const snapshotPath = this.getSnapshotPath(backlogId, side);
@@ -26851,7 +27026,7 @@ class FrontmatterStore {
       updatedAt: new Date().toISOString()
     };
     try {
-      writeFileSync5(snapshotPath, JSON.stringify(snapshot, null, 2), "utf-8");
+      writeFileSync6(snapshotPath, JSON.stringify(snapshot, null, 2), "utf-8");
       logger.debug({ backlogId, side, hash }, "Set snapshot");
     } catch (error) {
       logger.error({ error, backlogId, side }, "Failed to set snapshot");
@@ -26860,11 +27035,11 @@ class FrontmatterStore {
   }
   getSnapshot(backlogId, side) {
     const snapshotPath = this.getSnapshotPath(backlogId, side);
-    if (!existsSync5(snapshotPath)) {
+    if (!existsSync6(snapshotPath)) {
       return null;
     }
     try {
-      const content = readFileSync7(snapshotPath, "utf-8");
+      const content = readFileSync8(snapshotPath, "utf-8");
       return JSON.parse(content);
     } catch (error) {
       logger.error({ error, backlogId, side }, "Failed to get snapshot");
@@ -26920,18 +27095,18 @@ class FrontmatterStore {
     try {
       const line = `${JSON.stringify(logEntry)}
 `;
-      writeFileSync5(this.opsLogPath, line, { flag: "a", encoding: "utf-8" });
+      writeFileSync6(this.opsLogPath, line, { flag: "a", encoding: "utf-8" });
       logger.debug({ op, backlogId, jiraKey, outcome }, "Logged operation");
     } catch (error) {
       logger.error({ error, op }, "Failed to log operation");
     }
   }
   getRecentOps(limit = 100) {
-    if (!existsSync5(this.opsLogPath)) {
+    if (!existsSync6(this.opsLogPath)) {
       return [];
     }
     try {
-      const content = readFileSync7(this.opsLogPath, "utf-8");
+      const content = readFileSync8(this.opsLogPath, "utf-8");
       const lines = content.trim().split(`
 `).filter((l) => l.trim());
       const ops = lines.map((line) => {
@@ -26948,10 +27123,10 @@ class FrontmatterStore {
     }
   }
   testWriteAccess() {
-    const testFile = join6(this.snapshotsDir, ".write-test");
+    const testFile = join7(this.snapshotsDir, ".write-test");
     try {
-      writeFileSync5(testFile, "test", "utf-8");
-      readFileSync7(testFile, "utf-8");
+      writeFileSync6(testFile, "test", "utf-8");
+      readFileSync8(testFile, "utf-8");
       const { unlinkSync } = __require("node:fs");
       unlinkSync(testFile);
     } catch (error) {
@@ -26967,16 +27142,16 @@ class FrontmatterStore {
 import crypto from "node:crypto";
 
 // src/utils/status-mapping.ts
-import { existsSync as existsSync6, readFileSync as readFileSync8 } from "node:fs";
-import { join as join7 } from "node:path";
+import { existsSync as existsSync7, readFileSync as readFileSync9 } from "node:fs";
+import { join as join8 } from "node:path";
 function loadStatusMapping(cwd = process.cwd()) {
-  const configPath = join7(cwd, ".backlog-jira", "config.json");
-  if (!existsSync6(configPath)) {
+  const configPath = join8(cwd, ".backlog-jira", "config.json");
+  if (!existsSync7(configPath)) {
     logger.debug("No config.json found, using default status mapping");
     return buildStatusMapping(getDefaultBacklogToJiraMapping());
   }
   try {
-    const config = JSON.parse(readFileSync8(configPath, "utf-8"));
+    const config = JSON.parse(readFileSync9(configPath, "utf-8"));
     return buildStatusMapping(config.backlog?.statusMapping || getDefaultBacklogToJiraMapping(), config.backlog?.projectOverrides);
   } catch (error) {
     logger.warn({ error }, "Failed to load status mapping config, using defaults");
@@ -27735,9 +27910,9 @@ function buildJiraIssueFromBacklogTask(task, priorityMapping) {
 }
 function loadConfig(configDir) {
   try {
-    const baseDir = configDir || join8(process.cwd(), ".backlog-jira");
-    const configPath = join8(baseDir, "config.json");
-    const content = readFileSync9(configPath, "utf-8");
+    const baseDir = configDir || join9(process.cwd(), ".backlog-jira");
+    const configPath = join9(baseDir, "config.json");
+    const content = readFileSync10(configPath, "utf-8");
     return JSON.parse(content);
   } catch (error) {
     logger.warn({ error }, "Failed to load config, using defaults");
@@ -27747,9 +27922,9 @@ function loadConfig(configDir) {
 
 // src/commands/doctor.ts
 import { spawn as spawn3 } from "node:child_process";
-import { existsSync as existsSync7 } from "node:fs";
+import { existsSync as existsSync8 } from "node:fs";
 import { readFile } from "node:fs/promises";
-import { join as join9 } from "node:path";
+import { join as join10 } from "node:path";
 async function exec(command, args = []) {
   return new Promise((resolve, reject) => {
     const proc = spawn3(command, args, {
@@ -27795,8 +27970,8 @@ async function checkMCPServer() {
   }
 }
 async function checkDatabasePerms() {
-  const configDir = join9(process.cwd(), ".backlog-jira");
-  if (!existsSync7(configDir)) {
+  const configDir = join10(process.cwd(), ".backlog-jira");
+  if (!existsSync8(configDir)) {
     throw new Error(".backlog-jira/ not found. Run 'backlog-jira init' first.");
   }
   const store = new FrontmatterStore;
@@ -27837,8 +28012,8 @@ async function checkMCPConnectivity() {
   }
 }
 async function checkNodeModules() {
-  const nodeModulesPath = join9(process.cwd(), "node_modules");
-  if (!existsSync7(nodeModulesPath)) {
+  const nodeModulesPath = join10(process.cwd(), "node_modules");
+  if (!existsSync8(nodeModulesPath)) {
     throw new Error("node_modules not found. Install dependencies first (npm, pnpm or bun install).");
   }
   logger.info("  ✓ Dependencies installed");
@@ -27858,8 +28033,8 @@ async function checkDiskSpace() {
   }
 }
 async function checkConfigFile(cwd = process.cwd()) {
-  const configPath = join9(cwd, ".backlog-jira", "config.json");
-  if (!existsSync7(configPath)) {
+  const configPath = join10(cwd, ".backlog-jira", "config.json");
+  if (!existsSync8(configPath)) {
     throw new Error("Config file not found. Run 'backlog-jira init' first.");
   }
   let config;
@@ -27883,7 +28058,7 @@ async function checkFieldMappings(jira, cwd = process.cwd()) {
     logger.info("  ✓ No field mappings configured");
     return [];
   }
-  const config = JSON.parse(await readFile(join9(cwd, ".backlog-jira", "config.json"), "utf8"));
+  const config = JSON.parse(await readFile(join10(cwd, ".backlog-jira", "config.json"), "utf8"));
   const projectKey = config.jira?.projectKey || process.env.JIRA_PROJECT || "";
   const issueType = config.jira?.issueType || "Task";
   let knownFields;
@@ -27982,12 +28157,12 @@ async function doctorCommand() {
 }
 
 // src/commands/init.ts
-import { existsSync as existsSync9, mkdirSync as mkdirSync4, writeFileSync as writeFileSync7 } from "node:fs";
-import { join as join10 } from "node:path";
+import { existsSync as existsSync10, mkdirSync as mkdirSync5, writeFileSync as writeFileSync8 } from "node:fs";
+import { join as join11 } from "node:path";
 var import_prompts2 = __toESM(require_prompts3(), 1);
 
 // src/utils/agent-instructions.ts
-import { existsSync as existsSync8, readFileSync as readFileSync10, writeFileSync as writeFileSync6 } from "node:fs";
+import { existsSync as existsSync9, readFileSync as readFileSync11, writeFileSync as writeFileSync7 } from "node:fs";
 function getMarkers(filePath) {
   const fileName = filePath.toLowerCase();
   if (fileName.endsWith(".md")) {
@@ -28236,13 +28411,13 @@ export JIRA_API_TOKEN="your-api-token"
 }
 function addAgentInstructions(filePath, mode = "cli") {
   try {
-    if (!existsSync8(filePath)) {
+    if (!existsSync9(filePath)) {
       return {
         success: false,
         message: `File not found: ${filePath}`
       };
     }
-    const currentContent = readFileSync10(filePath, "utf-8");
+    const currentContent = readFileSync11(filePath, "utf-8");
     const guidelinesContent = mode === "cli" ? getCliModeContent() : getMcpModeContent();
     let newContent = currentContent;
     if (hasBacklogJiraGuidelines(currentContent)) {
@@ -28252,7 +28427,7 @@ function addAgentInstructions(filePath, mode = "cli") {
     newContent = `${wrappedContent}
 
 ${newContent.trimStart()}`;
-    writeFileSync6(filePath, newContent, "utf-8");
+    writeFileSync7(filePath, newContent, "utf-8");
     return {
       success: true,
       message: `Successfully added ${mode.toUpperCase()} mode guidelines to ${filePath}`
@@ -28268,12 +28443,12 @@ ${newContent.trimStart()}`;
 // src/commands/init.ts
 async function initCommand(options = {}) {
   const baseDir = options.baseDir || process.cwd();
-  const configDir = join10(baseDir, ".backlog-jira");
-  if (existsSync9(configDir)) {
+  const configDir = join11(baseDir, ".backlog-jira");
+  if (existsSync10(configDir)) {
     logger.warn(".backlog-jira/ already exists. Use 'backlog-jira config' to modify settings.");
     return;
   }
-  mkdirSync4(join10(configDir, "logs"), { recursive: true });
+  mkdirSync5(join11(configDir, "logs"), { recursive: true });
   const config = {
     jira: {
       baseUrl: "",
@@ -28294,18 +28469,18 @@ async function initCommand(options = {}) {
       watchInterval: 60
     }
   };
-  const configPath = join10(configDir, "config.json");
-  writeFileSync7(configPath, JSON.stringify(config, null, 2));
+  const configPath = join11(configDir, "config.json");
+  writeFileSync8(configPath, JSON.stringify(config, null, 2));
   const store = new FrontmatterStore(configDir);
   store.close();
-  const gitignorePath = join10(configDir, ".gitignore");
-  writeFileSync7(gitignorePath, CONFIG_DIR_GITIGNORE);
+  const gitignorePath = join11(configDir, ".gitignore");
+  writeFileSync8(gitignorePath, CONFIG_DIR_GITIGNORE);
   await setupAgentInstructions(baseDir);
   logger.info("");
   logger.info("✓ Initialized .backlog-jira/ configuration");
   logger.info(`  - Config: ${configPath}`);
-  logger.info(`  - Snapshots: ${join10(configDir, "snapshots/")}`);
-  logger.info(`  - Operations log: ${join10(configDir, "ops-log.jsonl")}`);
+  logger.info(`  - Snapshots: ${join11(configDir, "snapshots/")}`);
+  logger.info(`  - Operations log: ${join11(configDir, "ops-log.jsonl")}`);
   logger.info("");
   logger.info("Next steps:");
   logger.info("  1. Edit .backlog-jira/config.json with your Jira project settings");
@@ -28341,7 +28516,7 @@ async function setupAgentInstructions(projectRoot) {
     ".cursorrules",
     ".github/AGENTS.md"
   ];
-  const existingFiles = commonAgentFiles.map((file) => join10(projectRoot, file)).filter((filePath) => existsSync9(filePath));
+  const existingFiles = commonAgentFiles.map((file) => join11(projectRoot, file)).filter((filePath) => existsSync10(filePath));
   if (existingFiles.length === 0) {
     console.log(source_default.yellow("No agent instruction files found in project root (AGENTS.md, CLAUDE.md, etc.)"));
     console.log(source_default.gray("Create an agent instruction file first, then re-run initialization."));
@@ -28422,7 +28597,7 @@ async function offerGitCommit(files, mode) {
   const { exec } = await import("node:child_process");
   const { promisify } = await import("node:util");
   const execAsync = promisify(exec);
-  const projectRoot = files[0] ? join10(files[0], "..") : process.cwd();
+  const projectRoot = files[0] ? join11(files[0], "..") : process.cwd();
   try {
     await execAsync("git rev-parse --git-dir", { cwd: projectRoot });
   } catch {
@@ -28473,8 +28648,8 @@ Added via: backlog-jira init`;
 }
 
 // src/commands/map-assignees.ts
-import { existsSync as existsSync10, readFileSync as readFileSync11, writeFileSync as writeFileSync8 } from "node:fs";
-import { join as join11 } from "node:path";
+import { existsSync as existsSync11, readFileSync as readFileSync12, writeFileSync as writeFileSync9 } from "node:fs";
+import { join as join12 } from "node:path";
 import { stdin as input, stdout as output } from "node:process";
 import * as readline from "node:readline/promises";
 async function showMappings() {
@@ -28485,13 +28660,13 @@ async function showMappings() {
   console.log();
 }
 async function addMapping(backlogUser, jiraUser, options = {}) {
-  const configPath = join11(process.cwd(), ".backlog-jira", "config.json");
-  if (!existsSync10(configPath)) {
+  const configPath = join12(process.cwd(), ".backlog-jira", "config.json");
+  if (!existsSync11(configPath)) {
     console.error(source_default.red("❌ Configuration not found"));
     console.log(source_default.gray("   Run 'backlog-jira init' first"));
     process.exit(1);
   }
-  const content = readFileSync11(configPath, "utf-8");
+  const content = readFileSync12(configPath, "utf-8");
   const config = JSON.parse(content);
   if (!config.backlog) {
     config.backlog = {};
@@ -28507,18 +28682,18 @@ async function addMapping(backlogUser, jiraUser, options = {}) {
     process.exit(1);
   }
   config.backlog.assigneeMapping[cleanBacklogUser] = jiraUser;
-  writeFileSync8(configPath, JSON.stringify(config, null, 2));
+  writeFileSync9(configPath, JSON.stringify(config, null, 2));
   console.log(source_default.green(`✓ Added mapping: @${cleanBacklogUser} → ${jiraUser}`));
   logger.info({ backlogUser: cleanBacklogUser, jiraUser }, "Added assignee mapping");
 }
 async function removeMapping(backlogUser) {
-  const configPath = join11(process.cwd(), ".backlog-jira", "config.json");
-  if (!existsSync10(configPath)) {
+  const configPath = join12(process.cwd(), ".backlog-jira", "config.json");
+  if (!existsSync11(configPath)) {
     console.error(source_default.red("❌ Configuration not found"));
     console.log(source_default.gray("   Run 'backlog-jira init' first"));
     process.exit(1);
   }
-  const content = readFileSync11(configPath, "utf-8");
+  const content = readFileSync12(configPath, "utf-8");
   const config = JSON.parse(content);
   const cleanBacklogUser = backlogUser.startsWith("@") ? backlogUser.substring(1) : backlogUser;
   const explicitMapping = config.backlog?.assigneeMapping?.[cleanBacklogUser];
@@ -28537,17 +28712,17 @@ async function removeMapping(backlogUser) {
     delete config.backlog.autoMappedAssignees[cleanBacklogUser];
     console.log(source_default.green(`✓ Removed auto-discovered mapping: @${cleanBacklogUser} → ${jiraUser}`));
   }
-  writeFileSync8(configPath, JSON.stringify(config, null, 2));
+  writeFileSync9(configPath, JSON.stringify(config, null, 2));
   logger.info({ backlogUser: cleanBacklogUser, jiraUser }, "Removed assignee mapping");
 }
 async function promoteMapping(backlogUser) {
-  const configPath = join11(process.cwd(), ".backlog-jira", "config.json");
-  if (!existsSync10(configPath)) {
+  const configPath = join12(process.cwd(), ".backlog-jira", "config.json");
+  if (!existsSync11(configPath)) {
     console.error(source_default.red("❌ Configuration not found"));
     console.log(source_default.gray("   Run 'backlog-jira init' first"));
     process.exit(1);
   }
-  const content = readFileSync11(configPath, "utf-8");
+  const content = readFileSync12(configPath, "utf-8");
   const config = JSON.parse(content);
   const cleanBacklogUser = backlogUser.startsWith("@") ? backlogUser.substring(1) : backlogUser;
   const autoMapping = config.backlog?.autoMappedAssignees?.[cleanBacklogUser];
@@ -28563,7 +28738,7 @@ async function promoteMapping(backlogUser) {
   }
   config.backlog.assigneeMapping[cleanBacklogUser] = autoMapping;
   delete config.backlog.autoMappedAssignees[cleanBacklogUser];
-  writeFileSync8(configPath, JSON.stringify(config, null, 2));
+  writeFileSync9(configPath, JSON.stringify(config, null, 2));
   console.log(source_default.green(`✓ Promoted auto-discovered mapping to explicit: @${cleanBacklogUser} → ${autoMapping}`));
   logger.info({ backlogUser: cleanBacklogUser, jiraUser: autoMapping }, "Promoted auto-discovered mapping to explicit");
 }
@@ -28674,20 +28849,20 @@ function registerMapAssigneesCommand(program) {
 }
 
 // src/commands/map-fields.ts
-import { existsSync as existsSync11, readFileSync as readFileSync12, writeFileSync as writeFileSync9 } from "node:fs";
-import { join as join12 } from "node:path";
+import { existsSync as existsSync12, readFileSync as readFileSync13, writeFileSync as writeFileSync10 } from "node:fs";
+import { join as join13 } from "node:path";
 function getConfigPath() {
-  return join12(process.cwd(), ".backlog-jira", "config.json");
+  return join13(process.cwd(), ".backlog-jira", "config.json");
 }
 function readConfig() {
   const configPath = getConfigPath();
-  if (!existsSync11(configPath)) {
+  if (!existsSync12(configPath)) {
     throw new Error("Configuration not found. Run 'backlog-jira init' first.");
   }
-  return JSON.parse(readFileSync12(configPath, "utf-8"));
+  return JSON.parse(readFileSync13(configPath, "utf-8"));
 }
 function writeConfig(config) {
-  writeFileSync9(getConfigPath(), `${JSON.stringify(config, null, 2)}
+  writeFileSync10(getConfigPath(), `${JSON.stringify(config, null, 2)}
 `);
 }
 function parseValueMapEntries(entries = []) {
@@ -29109,8 +29284,8 @@ function registerMapCommand(program) {
 
 // src/commands/mcp.ts
 import { spawn as spawn4 } from "node:child_process";
-import { existsSync as existsSync12, readFileSync as readFileSync13 } from "node:fs";
-import { join as join13 } from "node:path";
+import { existsSync as existsSync13, readFileSync as readFileSync14 } from "node:fs";
+import { join as join14 } from "node:path";
 function registerMcpCommand(program) {
   const mcpCommand = program.command("mcp").description("MCP Atlassian server management");
   mcpCommand.command("start").description("Start MCP Atlassian server using plugin configuration").option("--debug", "Print startup info and debug output").option("-v, --verbose", "Display docker commands being executed").option("--dns-servers <servers...>", "DNS server IPs for the MCP server process (e.g., 8.8.8.8 1.1.1.1)").option("--dns-search-domains <domains...>", "DNS search domains for the MCP server process (e.g., company.com internal.local)").action(async (options) => {
@@ -29195,8 +29370,8 @@ function validateAndPrepareCredentials(debug) {
   return envVars;
 }
 function loadMcpConfiguration(debug) {
-  const configDir = join13(process.cwd(), ".backlog-jira");
-  const configPath = join13(configDir, "config.json");
+  const configDir = join14(process.cwd(), ".backlog-jira");
+  const configPath = join14(configDir, "config.json");
   const defaultConfig = {
     serverCommand: "mcp-atlassian",
     serverArgs: [],
@@ -29205,14 +29380,14 @@ function loadMcpConfiguration(debug) {
     dnsServers: [],
     dnsSearchDomains: []
   };
-  if (!existsSync12(configPath)) {
+  if (!existsSync13(configPath)) {
     if (debug) {
       console.log(source_default.yellow("⚠ No config.json found, using defaults"));
     }
     return defaultConfig;
   }
   try {
-    const configContent = readFileSync13(configPath, "utf-8");
+    const configContent = readFileSync14(configPath, "utf-8");
     const config = JSON.parse(configContent);
     const mcpConfig = {
       ...defaultConfig,
@@ -29377,8 +29552,622 @@ function logDockerCommand(command, args) {
 }
 
 // src/commands/pull.ts
-import { existsSync as existsSync13, readFileSync as readFileSync14 } from "node:fs";
-import { join as join14 } from "node:path";
+import { existsSync as existsSync15, readFileSync as readFileSync16 } from "node:fs";
+import { join as join16 } from "node:path";
+
+// src/integrations/milestones.ts
+import { spawn as spawn5 } from "node:child_process";
+import {
+  existsSync as existsSync14,
+  mkdirSync as mkdirSync6,
+  readFileSync as readFileSync15,
+  readdirSync as readdirSync3,
+  writeFileSync as writeFileSync11
+} from "node:fs";
+import { join as join15 } from "node:path";
+var DUE_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+function getMilestoneRefusalsPath(cwd = process.cwd()) {
+  return join15(cwd, ".backlog-jira", "milestone-refusals.json");
+}
+var spawnBacklogCli = (args, cwd) => new Promise((resolve, reject) => {
+  logger.debug({ args, cwd }, "Executing Backlog CLI command");
+  const proc = spawn5("backlog", args, {
+    cwd,
+    stdio: ["ignore", "pipe", "pipe"]
+  });
+  let stdout = "";
+  let stderr = "";
+  proc.stdout?.on("data", (data) => {
+    stdout += data.toString();
+  });
+  proc.stderr?.on("data", (data) => {
+    stderr += data.toString();
+  });
+  proc.on("close", (code) => {
+    if (code === 0)
+      resolve(stdout);
+    else
+      reject(new Error(`backlog ${args.join(" ")} failed with code ${code}: ${(stderr || stdout).trim()}`));
+  });
+  proc.on("error", reject);
+});
+function helpOptions(help) {
+  return new Set(help.match(/--[a-z][a-z-]*/g) ?? []);
+}
+
+class MilestoneAdapter {
+  cwd;
+  run;
+  registry;
+  capabilities = null;
+  constructor(options = {}) {
+    this.cwd = options.cwd ?? process.cwd();
+    this.run = options.runner ?? spawnBacklogCli;
+    const registry = options.registry;
+    this.registry = () => registry ?? SprintRegistry.load(this.cwd);
+  }
+  list() {
+    const backlogDir = join15(this.cwd, "backlog");
+    return [
+      ...readMilestoneDir(join15(backlogDir, "milestones"), false),
+      ...readMilestoneDir(join15(backlogDir, "archive", "milestones"), true)
+    ];
+  }
+  get(id) {
+    const wanted = id.trim().toLowerCase();
+    return this.list().find((m) => m.id.toLowerCase() === wanted);
+  }
+  findByTitle(title, isAdoptable = () => true) {
+    const wanted = title.trim().toLowerCase();
+    const matches = this.list().filter((m) => m.title.trim().toLowerCase() === wanted && isAdoptable(m));
+    return matches.find((m) => !m.archived) ?? matches[0];
+  }
+  async ensure(milestone, options = {}) {
+    const existing = this.findByTitle(milestone.title, options.isAdoptable);
+    if (existing) {
+      logger.debug({ id: existing.id, title: existing.title }, "Adopted existing milestone");
+      return { milestone: existing, created: false };
+    }
+    const args = ["milestone", "add"];
+    if (milestone.description) {
+      args.push(`--description=${milestone.description}`);
+    }
+    if (milestone.dueDate) {
+      args.push(`--due-date=${checkDueDate(milestone.dueDate)}`);
+    }
+    args.push("--", milestone.title.trim());
+    const output = await this.run(args, this.cwd);
+    const id = output.match(/^Created milestone .*\(([^()\s]+)\)\.?\s*$/m)?.[1];
+    const created = (id ? this.get(id) : undefined) ?? this.list().find((m) => !m.archived && m.title.trim().toLowerCase() === milestone.title.trim().toLowerCase());
+    if (!created) {
+      throw new Error(`Created milestone "${milestone.title}" but could not find its file`);
+    }
+    logger.info({ id: created.id, title: created.title }, "Created milestone");
+    return { milestone: created, created: true };
+  }
+  async rename(id, title) {
+    const milestone = this.require(id);
+    if (milestone.title === title.trim())
+      return false;
+    if (milestone.archived) {
+      logger.warn({ id, title }, "Archived milestones cannot be renamed through the Backlog CLI");
+      return false;
+    }
+    await this.run(["milestone", "rename", "--", milestone.id, title.trim()], this.cwd);
+    logger.info({ id, from: milestone.title, to: title }, "Renamed milestone");
+    return true;
+  }
+  async archive(id) {
+    const milestone = this.require(id);
+    if (milestone.archived)
+      return false;
+    await this.run(["milestone", "archive", "--", milestone.id], this.cwd);
+    logger.info({ id }, "Archived milestone");
+    return true;
+  }
+  async update(id, update) {
+    let milestone = this.require(id);
+    const methods = {};
+    const pending = {};
+    const dueDate = update.dueDate === undefined ? undefined : update.dueDate && checkDueDate(update.dueDate);
+    if (dueDate !== undefined && (dueDate || undefined) !== milestone.dueDate) {
+      pending.dueDate = dueDate;
+    }
+    if (update.description !== undefined && (update.description ?? "").trim() !== (milestone.description ?? "")) {
+      pending.description = update.description;
+    }
+    if (Object.keys(pending).length === 0) {
+      return { status: "unchanged", methods };
+    }
+    const caps = await this.getCapabilities();
+    if (caps.edit && !milestone.archived) {
+      const args = ["milestone", "edit"];
+      const handled = [];
+      if (pending.dueDate !== undefined) {
+        if (pending.dueDate && caps.edit.has("--due-date")) {
+          args.push(`--due-date=${pending.dueDate}`);
+          handled.push("dueDate");
+        } else if (!pending.dueDate && caps.edit.has("--clear-due-date")) {
+          args.push("--clear-due-date");
+          handled.push("dueDate");
+        }
+      }
+      if (pending.description !== undefined && caps.edit.has("--description")) {
+        args.push(`--description=${pending.description ?? ""}`);
+        handled.push("description");
+      }
+      if (handled.length > 0) {
+        args.push("--", milestone.id);
+        await this.run(args, this.cwd);
+        for (const field of handled) {
+          methods[field] = "edit";
+          delete pending[field];
+        }
+      }
+    }
+    if (pending.dueDate !== undefined && !milestone.archived) {
+      const flag = pending.dueDate ? "--due-date" : "--clear-due-date";
+      if (caps.rename.has(flag)) {
+        await this.run([
+          "milestone",
+          "rename",
+          pending.dueDate ? `--due-date=${pending.dueDate}` : flag,
+          "--no-update-tasks",
+          "--",
+          milestone.id,
+          milestone.title
+        ], this.cwd);
+        methods.dueDate = "rename";
+        delete pending.dueDate;
+      }
+    }
+    if (Object.keys(pending).length > 0) {
+      milestone = this.require(id);
+      const refusal = this.fallbackWrite(milestone, pending);
+      if (refusal) {
+        this.recordRefusal(milestone, pending, refusal);
+        return {
+          status: Object.keys(methods).length > 0 ? "updated" : "refused",
+          methods,
+          reason: refusal
+        };
+      }
+      for (const field of Object.keys(pending)) {
+        methods[field] = "file";
+      }
+    }
+    this.clearRefusal(milestone.id);
+    logger.info({ id, methods }, "Updated milestone");
+    return { status: "updated", methods };
+  }
+  require(id) {
+    const milestone = this.get(id);
+    if (!milestone)
+      throw new Error(`Milestone not found: ${id}`);
+    return milestone;
+  }
+  async getCapabilities() {
+    if (this.capabilities)
+      return this.capabilities;
+    const help = await this.run(["milestone", "--help"], this.cwd);
+    const hasEdit = /^\s+edit\b/m.test(help);
+    this.capabilities = {
+      edit: hasEdit ? helpOptions(await this.run(["milestone", "edit", "--help"], this.cwd)) : null,
+      rename: helpOptions(await this.run(["milestone", "rename", "--help"], this.cwd))
+    };
+    logger.debug({
+      edit: this.capabilities.edit && [...this.capabilities.edit],
+      rename: [...this.capabilities.rename]
+    }, "Detected Backlog milestone CLI capabilities");
+    return this.capabilities;
+  }
+  fallbackWrite(milestone, update) {
+    let registered;
+    try {
+      registered = !!this.registry().findByMilestone(milestone.id);
+    } catch (error) {
+      return `sprint registry unreadable: ${error instanceof Error ? error.message : String(error)}`;
+    }
+    if (!registered) {
+      return `milestone ${milestone.id} is not a sprint milestone in .backlog-jira/sprints.json`;
+    }
+    const original = readFileSync15(milestone.filePath, "utf-8");
+    const result = rewriteMilestoneFile(original, milestone.id, update);
+    if ("error" in result) {
+      return `${milestone.filePath} does not match the expected milestone format: ${result.error}`;
+    }
+    if (result.content !== original) {
+      writeFileSync11(milestone.filePath, result.content, "utf-8");
+    }
+    return null;
+  }
+  recordRefusal(milestone, update, reason) {
+    logger.warn({ id: milestone.id, reason }, "Refused milestone update");
+    this.writeRefusals((refusals) => {
+      refusals[milestone.id] = {
+        milestoneId: milestone.id,
+        title: milestone.title,
+        fields: Object.keys(update),
+        reason,
+        at: new Date().toISOString()
+      };
+    });
+  }
+  clearRefusal(id) {
+    this.writeRefusals((refusals) => {
+      delete refusals[id];
+    });
+  }
+  writeRefusals(change) {
+    const path = getMilestoneRefusalsPath(this.cwd);
+    let refusals = {};
+    if (existsSync14(path)) {
+      try {
+        refusals = JSON.parse(readFileSync15(path, "utf-8"));
+      } catch {
+        refusals = {};
+      }
+    }
+    const before = JSON.stringify(refusals);
+    change(refusals);
+    if (JSON.stringify(refusals) === before)
+      return;
+    mkdirSync6(join15(this.cwd, ".backlog-jira"), { recursive: true });
+    writeFileSync11(path, `${JSON.stringify(refusals, null, 2)}
+`, "utf-8");
+  }
+}
+function checkDueDate(value) {
+  const date = value.trim();
+  if (!DUE_DATE_PATTERN.test(date) || Number.isNaN(Date.parse(date))) {
+    throw new Error(`Invalid milestone due date "${value}" (use YYYY-MM-DD)`);
+  }
+  return date;
+}
+var FRONTMATTER_LINE = /^([A-Za-z_][A-Za-z0-9_-]*):(?: (.*))?$/;
+var DESCRIPTION_HEADING = "## Description";
+function parseScalar(raw) {
+  const value = raw.trim();
+  if (value.startsWith('"')) {
+    try {
+      return JSON.parse(value);
+    } catch {
+      return value.slice(1, -1);
+    }
+  }
+  if (value.startsWith("'") && value.endsWith("'")) {
+    return value.slice(1, -1).replace(/''/g, "'");
+  }
+  return value;
+}
+function splitFrontmatter(content) {
+  if (!content.startsWith(`---
+`))
+    return null;
+  const end = content.indexOf(`
+---
+`, 3);
+  if (end < 0)
+    return null;
+  return {
+    lines: content.slice(4, end).split(`
+`),
+    body: content.slice(end + 5),
+    bodyStart: end + 5
+  };
+}
+function descriptionRange(body) {
+  const headings = [...body.matchAll(/^## Description[ \t]*$/gm)];
+  if (headings.length === 0)
+    return null;
+  const heading = headings[0];
+  const start = (heading.index ?? 0) + heading[0].length;
+  const next = body.slice(start).search(/^## /m);
+  return {
+    start,
+    end: next < 0 ? body.length : start + next,
+    count: headings.length
+  };
+}
+function parseMilestoneFile(content, filePath, archived) {
+  const parts = splitFrontmatter(content.replace(/\r\n/g, `
+`));
+  if (!parts)
+    return null;
+  const fields = {};
+  for (const line of parts.lines) {
+    const match = line.match(FRONTMATTER_LINE);
+    if (match)
+      fields[match[1]] = parseScalar(match[2] ?? "");
+  }
+  if (!fields.id || !fields.title)
+    return null;
+  const milestone = {
+    id: fields.id,
+    title: fields.title,
+    archived,
+    filePath
+  };
+  if (fields.due_date)
+    milestone.dueDate = fields.due_date;
+  const range = descriptionRange(parts.body);
+  if (range) {
+    const description = parts.body.slice(range.start, range.end).trim();
+    if (description)
+      milestone.description = description;
+  }
+  return milestone;
+}
+function readMilestoneDir(dir, archived) {
+  if (!existsSync14(dir))
+    return [];
+  const milestones = [];
+  for (const file of readdirSync3(dir).sort()) {
+    if (!file.endsWith(".md"))
+      continue;
+    const filePath = join15(dir, file);
+    try {
+      const milestone = parseMilestoneFile(readFileSync15(filePath, "utf-8"), filePath, archived);
+      if (milestone)
+        milestones.push(milestone);
+    } catch (error) {
+      logger.debug({ error, filePath }, "Skipping unreadable milestone file");
+    }
+  }
+  return milestones;
+}
+function rewriteMilestoneFile(content, milestoneId, update) {
+  if (content.includes("\r"))
+    return { error: "CRLF line endings" };
+  const parts = splitFrontmatter(content);
+  if (!parts)
+    return { error: "missing --- frontmatter block" };
+  const keys = new Map;
+  for (const [index, line] of parts.lines.entries()) {
+    const match = line.match(FRONTMATTER_LINE);
+    if (!match) {
+      return { error: `unexpected frontmatter line "${line}"` };
+    }
+    keys.set(match[1], [...keys.get(match[1]) ?? [], index]);
+  }
+  for (const key of ["id", "title", "due_date"]) {
+    if ((keys.get(key)?.length ?? 0) > 1) {
+      return { error: `repeated "${key}" in frontmatter` };
+    }
+  }
+  const idLine = keys.get("id")?.[0];
+  if (idLine === undefined || !keys.has("title")) {
+    return { error: "frontmatter lacks id or title" };
+  }
+  const fileId = parseScalar(parts.lines[idLine].slice("id:".length));
+  if (fileId.toLowerCase() !== milestoneId.toLowerCase()) {
+    return { error: `file id "${fileId}" does not match ${milestoneId}` };
+  }
+  const lines = [...parts.lines];
+  if (update.dueDate !== undefined) {
+    const dueLine = keys.get("due_date")?.[0];
+    const newLine = update.dueDate ? `due_date: ${JSON.stringify(checkDueDate(update.dueDate))}` : null;
+    if (dueLine !== undefined) {
+      if (newLine)
+        lines[dueLine] = newLine;
+      else
+        lines.splice(dueLine, 1);
+    } else if (newLine) {
+      lines.splice((keys.get("title")?.[0] ?? idLine) + 1, 0, newLine);
+    }
+  }
+  let body = parts.body;
+  if (update.description !== undefined) {
+    const range = descriptionRange(body);
+    if (!range)
+      return { error: `no "${DESCRIPTION_HEADING}" section` };
+    if (range.count > 1) {
+      return { error: `more than one "${DESCRIPTION_HEADING}" section` };
+    }
+    const text = (update.description ?? "").trim();
+    const followed = range.end < body.length;
+    const section = `
+${text ? `
+${text}
+` : ""}${followed ? `
+` : ""}`;
+    body = body.slice(0, range.start) + section + body.slice(range.end);
+  }
+  return { content: `---
+${lines.join(`
+`)}
+---
+${body}` };
+}
+
+// src/utils/sprint-pull.ts
+async function createSprintPullContext(mapping, clients, options = {}) {
+  if (!mapping || mapping.direction === "push")
+    return null;
+  const sprintFieldId = await clients.jira.getSprintFieldId();
+  if (!sprintFieldId) {
+    throw new Error("Sprint sync is configured but this Jira site has no Sprint field (Jira Software). Remove the sprint fieldMappings entry or check the site.");
+  }
+  clients.jira.includeIssueFields([sprintFieldId]);
+  const cwd = options.cwd ?? process.cwd();
+  const registry = options.registry ?? SprintRegistry.load(cwd);
+  return {
+    mapping,
+    sprintFieldId,
+    jira: clients.jira,
+    backlog: clients.backlog,
+    registry,
+    milestones: options.milestones ?? new MilestoneAdapter({ cwd, registry }),
+    resolved: new Map,
+    queue: Promise.resolve(),
+    warnings: [],
+    dryRun: options.dryRun ?? false
+  };
+}
+function getIssueSprints(ctx, issue) {
+  return parseSprintFieldValue(getJiraFieldValue(issue, ctx.sprintFieldId));
+}
+function time2(value) {
+  const t = value ? Date.parse(value) : Number.NaN;
+  return Number.isNaN(t) ? Number.NEGATIVE_INFINITY : t;
+}
+function selectDisplayedSprint(sprints) {
+  const byRecency = (a, b) => time2(b.completeDate ?? b.endDate) - time2(a.completeDate ?? a.endDate) || Number(b.id) - Number(a.id);
+  const active = sprints.filter((s) => s.state === "active");
+  if (active.length > 0)
+    return [...active].sort(byRecency)[0];
+  const future = sprints.filter((s) => s.state === "future").sort((a, b) => time2(a.startDate) - time2(b.startDate) || Number(a.id) - Number(b.id));
+  if (future.length > 0)
+    return future[0];
+  const closed = sprints.filter((s) => s.state === "closed").sort(byRecency);
+  return closed[0] ?? null;
+}
+function sprintDueDate(sprint) {
+  return sprint.endDate?.match(/^(\d{4}-\d{2}-\d{2})/)?.[1] ?? null;
+}
+function applySprintPullScope(jql, mapping) {
+  if (!mapping || mapping.direction === "push" || mapping.pullScope !== "open")
+    return jql;
+  const match = jql.match(/^(.*?)(\s*\bORDER\s+BY\b.*)?$/is);
+  const where = (match?.[1] ?? jql).trim();
+  const order = match?.[2] ? ` ${match[2].trim()}` : "";
+  const scope = "sprint in openSprints()";
+  return where ? `(${where}) AND ${scope}${order}` : `${scope}${order}`;
+}
+function serialize(ctx, work) {
+  const run = ctx.queue.then(work, work);
+  ctx.queue = run.catch(() => {
+    return;
+  });
+  return run;
+}
+function warn(ctx, message) {
+  ctx.warnings.push(message);
+  logger.warn(message);
+}
+function resolveSprintMilestone(ctx, sprint) {
+  let pending = ctx.resolved.get(sprint.id);
+  if (!pending) {
+    pending = serialize(ctx, () => reconcileSprintMilestone(ctx, sprint));
+    ctx.resolved.set(sprint.id, pending);
+  }
+  return pending;
+}
+async function reconcileSprintMilestone(ctx, sprint) {
+  const { milestones, registry, mapping } = ctx;
+  const dueDate = sprintDueDate(sprint);
+  const description = sprint.goal ?? null;
+  const uniqueTitle = `${sprint.name} (sprint ${sprint.id})`;
+  const entry = registry.get(sprint.id);
+  let milestone = entry ? milestones.get(entry.milestoneId) : undefined;
+  if (!milestone) {
+    const linked = new Set(registry.list().filter((e) => e.sprintId !== sprint.id).map((e) => e.milestoneId.toLowerCase()));
+    const isAdoptable = (m) => !linked.has(m.id.toLowerCase());
+    const fields = {
+      dueDate: dueDate ?? undefined,
+      description: description ?? undefined
+    };
+    try {
+      milestone = (await milestones.ensure({ title: sprint.name, ...fields }, { isAdoptable })).milestone;
+    } catch (error) {
+      logger.debug({ error, title: uniqueTitle }, "Retrying milestone with a unique title");
+      milestone = (await milestones.ensure({ title: uniqueTitle, ...fields }, { isAdoptable })).milestone;
+    }
+  }
+  registry.upsert(sprint, milestone.id);
+  registry.save();
+  if (milestone.title !== sprint.name && milestone.title !== uniqueTitle && !milestone.archived) {
+    try {
+      await milestones.rename(milestone.id, sprint.name);
+    } catch (error) {
+      warn(ctx, `Could not rename milestone ${milestone.id} to sprint name "${sprint.name}": ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+  const update = await milestones.update(milestone.id, {
+    dueDate,
+    description
+  });
+  if (update.status === "refused") {
+    warn(ctx, `Milestone ${milestone.id} (sprint "${sprint.name}") was not updated: ${update.reason}`);
+  }
+  if (sprint.state === "closed" && mapping.archiveClosedSprints) {
+    await milestones.archive(milestone.id);
+  } else if (sprint.state !== "closed" && milestone.archived) {
+    warn(ctx, `Sprint "${sprint.name}" is ${sprint.state} again but its milestone ${milestone.id} is archived; restore it in Backlog.md`);
+  }
+  return milestone.id;
+}
+async function refreshRegisteredSprints(ctx) {
+  if (ctx.dryRun || ctx.registry.list().length === 0)
+    return;
+  const sprints = await ctx.jira.getBoardSprints(ctx.mapping.boardId);
+  for (const sprint of sprints) {
+    if (!ctx.registry.get(sprint.id))
+      continue;
+    const known = ctx.registry.get(sprint.id);
+    const merged = sprint.state === "closed" && !sprint.completeDate && known?.completeDate ? { ...sprint, completeDate: known.completeDate } : sprint;
+    await resolveSprintMilestone(ctx, merged);
+  }
+}
+function history(sprints) {
+  return sprints.map((s) => {
+    const entry = {
+      id: s.id,
+      name: s.name,
+      state: s.state
+    };
+    if (s.startDate)
+      entry.startDate = s.startDate;
+    if (s.endDate)
+      entry.endDate = s.endDate;
+    if (s.completeDate)
+      entry.completeDate = s.completeDate;
+    return entry;
+  });
+}
+function sameMilestone(a, b) {
+  const left = typeof a === "string" && a.trim() ? a.trim().toLowerCase() : null;
+  const right = b ? b.toLowerCase() : null;
+  return left === right;
+}
+function sprintNeedsPull(ctx, taskId, issue) {
+  const link = readTaskLink(taskId);
+  const sprints = getIssueSprints(ctx, issue);
+  const displayed = selectDisplayedSprint(sprints);
+  return !link?.sprintSync || link.sprintSync.sprintId !== (displayed?.id ?? null) || JSON.stringify(link.sprints ?? []) !== JSON.stringify(history(sprints));
+}
+async function pullTaskSprint(ctx, taskId, issue) {
+  const sprints = getIssueSprints(ctx, issue);
+  const displayed = selectDisplayedSprint(sprints);
+  const current = readTaskFrontmatter(taskId).milestone;
+  const link = readTaskLink(taskId) ?? {};
+  if (ctx.dryRun) {
+    logger.info({ taskId, sprint: displayed?.name ?? null }, "DRY RUN: Would set task milestone from Jira sprint");
+    return { milestoneId: null, changed: false, skipped: "dry-run" };
+  }
+  const localChange = ctx.mapping.direction === "both" && link.sprintSync !== undefined && !sameMilestone(current, link.sprintSync.milestoneId) && link.sprintSync.sprintId === (displayed?.id ?? null);
+  let milestoneId = null;
+  let changed = false;
+  if (localChange) {
+    milestoneId = typeof current === "string" ? current : null;
+    logger.info({ taskId, milestone: current }, "Milestone changed in Backlog; leaving it for push");
+  } else {
+    milestoneId = displayed ? await resolveSprintMilestone(ctx, displayed) : null;
+    if (!sameMilestone(current, milestoneId)) {
+      await serialize(ctx, () => ctx.backlog.updateTask(taskId, milestoneId ? { milestone: milestoneId } : { clearMilestone: true }));
+      changed = true;
+    }
+  }
+  const next = {
+    ...readTaskLink(taskId) ?? {},
+    sprints: history(sprints)
+  };
+  if (!localChange) {
+    next.sprintSync = { sprintId: displayed?.id ?? null, milestoneId };
+  }
+  writeTaskLink(taskId, next);
+  return localChange ? { milestoneId, changed, skipped: "local-change" } : { milestoneId, changed };
+}
 
 // src/utils/sync-state.ts
 function classifySyncState(currentBacklogHash, currentJiraHash, backlogSnapshot, jiraSnapshot, currentPayloads, options) {
@@ -29557,8 +30346,10 @@ async function pull(options = {}) {
   }
   logger.info({ options }, "Starting pull operation");
   let fieldMappings;
+  let sprintMapping;
   try {
     fieldMappings = loadFieldMappings();
+    sprintMapping = loadSprintMapping();
   } catch (error) {
     logger.level = originalLevel;
     throw error;
@@ -29571,10 +30362,20 @@ async function pull(options = {}) {
     pulled: [],
     imported: [],
     failed: [],
-    skipped: []
+    skipped: [],
+    warnings: []
   };
+  let sprints = null;
   try {
-    const { mapped, unmapped } = await getTaskIds(options, backlog, jira, store);
+    sprints = await createSprintPullContext(sprintMapping, { jira, backlog }, { dryRun: options.dryRun });
+    if (sprints && !options.taskIds?.length) {
+      try {
+        await refreshRegisteredSprints(sprints);
+      } catch (error) {
+        sprints.warnings.push(`Could not refresh sprints of board ${sprints.mapping.boardId}: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+    const { mapped, unmapped } = await getTaskIds(options, backlog, jira, store, sprints);
     logger.info({ mappedCount: mapped.length, unmappedCount: unmapped.length }, "Tasks to process");
     if (options.import && unmapped.length > 0) {
       logger.info({ count: unmapped.length }, "Importing unmapped issues");
@@ -29588,6 +30389,7 @@ async function pull(options = {}) {
               backlog,
               jira,
               fieldMappings,
+              sprints,
               dryRun: options.dryRun || false
             });
             result.imported.push(taskId);
@@ -29614,6 +30416,7 @@ async function pull(options = {}) {
               backlog,
               jira,
               fieldMappings,
+              sprints,
               force: options.force || false,
               dryRun: options.dryRun || false
             });
@@ -29631,6 +30434,8 @@ async function pull(options = {}) {
     }
     store.logOperation("pull", null, null, result.success ? "success" : "partial", JSON.stringify(result));
   } finally {
+    if (sprints)
+      result.warnings.push(...sprints.warnings);
     store.close();
     await jira.close();
     logger.level = originalLevel;
@@ -29638,7 +30443,7 @@ async function pull(options = {}) {
   logger.info({ result }, "Pull operation completed");
   return result;
 }
-async function getTaskIds(options, backlog, jira, store) {
+async function getTaskIds(options, backlog, jira, store, sprints) {
   if (options.taskIds && options.taskIds.length > 0) {
     return { mapped: options.taskIds, unmapped: [] };
   }
@@ -29647,7 +30452,7 @@ async function getTaskIds(options, backlog, jira, store) {
     return { mapped: Array.from(mappings.keys()), unmapped: [] };
   }
   if (options.import) {
-    return await getIssuesForImport(options, jira, store);
+    return await getIssuesForImport(options, jira, store, sprints?.mapping ?? null);
   }
   const mappings = store.getAllMappings();
   const needsPull = [];
@@ -29661,7 +30466,7 @@ async function getTaskIds(options, backlog, jira, store) {
       const jiraHash = computeHash(jiraPayload);
       const snapshots = store.getSnapshots(taskId);
       const state = classifySyncState(backlogHash, jiraHash, snapshots.backlog, snapshots.jira, { backlog: backlogPayload, jira: jiraPayload });
-      if (state.state === "NeedsPull") {
+      if (state.state === "NeedsPull" || state.state === "InSync" && sprints && sprintNeedsPull(sprints, taskId, issue)) {
         needsPull.push(taskId);
       }
     } catch (error) {
@@ -29670,13 +30475,13 @@ async function getTaskIds(options, backlog, jira, store) {
   }
   return { mapped: needsPull, unmapped: [] };
 }
-async function getIssuesForImport(options, jira, store) {
+async function getIssuesForImport(options, jira, store, sprintMapping) {
   let jql = options.jql;
   if (!jql) {
     try {
-      const configPath = join14(process.cwd(), ".backlog-jira", "config.json");
-      if (existsSync13(configPath)) {
-        const config = JSON.parse(readFileSync14(configPath, "utf-8"));
+      const configPath = join16(process.cwd(), ".backlog-jira", "config.json");
+      if (existsSync15(configPath)) {
+        const config = JSON.parse(readFileSync16(configPath, "utf-8"));
         jql = config.jira?.jqlFilter;
       }
     } catch (error) {
@@ -29691,6 +30496,7 @@ async function getIssuesForImport(options, jira, store) {
       throw new Error("No JQL filter provided. Use --jql option or configure jqlFilter in config.json");
     }
   }
+  jql = applySprintPullScope(jql, sprintMapping);
   logger.info({ jql }, "Fetching Jira issues for import");
   const result = await jira.searchIssues(jql, { maxResults: 50 });
   logger.info({ count: result.issues.length, total: result.total }, "Found Jira issues");
@@ -29724,7 +30530,7 @@ async function getAvailableBacklogAssignees(backlog) {
   }
 }
 async function pullTask(taskId, context) {
-  const { store, backlog, jira, fieldMappings, force, dryRun } = context;
+  const { store, backlog, jira, fieldMappings, sprints, force, dryRun } = context;
   const mapping = store.getMapping(taskId);
   logger.info({ taskId, mapping }, "Retrieved mapping from store");
   if (!mapping) {
@@ -29744,6 +30550,8 @@ async function pullTask(taskId, context) {
       throw new Error(`Conflict detected. Use --force to override or run 'backlog-jira sync' to resolve`);
     }
     if (state.state === "InSync") {
+      if (sprints)
+        await pullSprint(sprints, taskId, issue);
       logger.info({ taskId }, "Task already in sync, skipping");
       return;
     }
@@ -29766,11 +30574,15 @@ async function pullTask(taskId, context) {
   Object.assign(updates, mappedUpdates.cli);
   if (dryRun) {
     logger.info({ taskId, updates, frontmatter: mappedUpdates.frontmatter }, "DRY RUN: Would update Backlog task");
+    if (sprints)
+      await pullSprint(sprints, taskId, issue);
   } else {
     if (Object.keys(updates).length > 0) {
       await backlog.updateTask(taskId, updates);
     }
     applyMappedFrontmatter(taskId, issue, fieldMappings);
+    if (sprints)
+      await pullSprint(sprints, taskId, issue);
     const updatedTask = await backlog.getTask(taskId);
     recordSyncedSnapshots(store, taskId, {
       backlog: normalizeBacklogTask(updatedTask),
@@ -29793,6 +30605,14 @@ async function pullTask(taskId, context) {
       logger.error({ taskId, error }, "Failed to update frontmatter, but pull was successful");
     }
     logger.info({ taskId, jiraKey: mapping.jiraKey }, "Updated Backlog task from Jira");
+  }
+}
+async function pullSprint(sprints, taskId, issue) {
+  try {
+    await pullTaskSprint(sprints, taskId, issue);
+  } catch (error) {
+    sprints.warnings.push(`${taskId}: sprint not pulled: ${error instanceof Error ? error.message : String(error)}`);
+    logger.warn({ taskId, error }, "Failed to pull sprint");
   }
 }
 function buildBacklogUpdates(issue, currentTask, projectKey, fieldMappings = []) {
@@ -29907,7 +30727,7 @@ function syncAcceptanceCriteria(issue, currentTask) {
   return { addAc, removeAc, checkAc, uncheckAc };
 }
 async function importJiraIssue(jiraKey, context) {
-  const { store, backlog, jira, fieldMappings, dryRun } = context;
+  const { store, backlog, jira, fieldMappings, sprints, dryRun } = context;
   const issue = await jira.getIssue(jiraKey);
   logger.info({ jiraKey, summary: issue.summary }, "Importing Jira issue");
   const normalized = normalizeJiraIssue(issue);
@@ -29970,6 +30790,8 @@ async function importJiraIssue(jiraKey, context) {
     applyMappedFrontmatter(taskId, issue, fieldMappings);
     logger.debug({ taskId, jiraKey }, "Applied mapped fields to imported task");
   }
+  if (sprints)
+    await pullSprint(sprints, taskId, issue);
   store.addMapping(taskId, jiraKey);
   logger.info({ taskId, jiraKey }, "Created mapping");
   const task = await backlog.getTask(taskId);
@@ -29997,8 +30819,8 @@ async function importJiraIssue(jiraKey, context) {
 }
 
 // src/commands/push.ts
-import { readFileSync as readFileSync15 } from "node:fs";
-import { join as join15 } from "node:path";
+import { readFileSync as readFileSync17 } from "node:fs";
+import { join as join17 } from "node:path";
 async function push(options = {}) {
   const originalLevel = logger.level;
   if (!options.verbose) {
@@ -30283,8 +31105,8 @@ async function buildJiraUpdates(task, currentIssue, jiraClient, projectKey, over
 }
 function loadConfig2() {
   try {
-    const configPath = join15(process.cwd(), ".backlog-jira", "config.json");
-    const content = readFileSync15(configPath, "utf-8");
+    const configPath = join17(process.cwd(), ".backlog-jira", "config.json");
+    const content = readFileSync17(configPath, "utf-8");
     return JSON.parse(content);
   } catch (error) {
     logger.warn({ error }, "Failed to load config, using defaults");
@@ -30428,8 +31250,8 @@ function registerStatusCommand(program) {
 }
 
 // src/commands/sync.ts
-import { readFileSync as readFileSync16, writeFileSync as writeFileSync10 } from "node:fs";
-import { join as join16 } from "node:path";
+import { readFileSync as readFileSync18, writeFileSync as writeFileSync12 } from "node:fs";
+import { join as join18 } from "node:path";
 
 // src/ui/conflict-resolver.ts
 var import_prompts3 = __toESM(require_prompts3(), 1);
@@ -31058,8 +31880,8 @@ async function resolveConflict(conflict, strategy, context) {
 }
 function loadConfig3() {
   try {
-    const configPath = join16(process.cwd(), ".backlog-jira", "config.json");
-    const content = readFileSync16(configPath, "utf-8");
+    const configPath = join18(process.cwd(), ".backlog-jira", "config.json");
+    const content = readFileSync18(configPath, "utf-8");
     return JSON.parse(content);
   } catch (error) {
     logger.warn({ error }, "Failed to load config, using defaults");
@@ -31153,11 +31975,11 @@ function determinePreferredSource(resolutions) {
 }
 function saveConflictPreference(preference) {
   try {
-    const configPath = join16(process.cwd(), ".backlog-jira", "config.json");
+    const configPath = join18(process.cwd(), ".backlog-jira", "config.json");
     const config = loadConfig3();
     config.sync = config.sync || {};
     config.sync.conflictStrategy = preference;
-    writeFileSync10(configPath, JSON.stringify(config, null, 2));
+    writeFileSync12(configPath, JSON.stringify(config, null, 2));
     logger.info({ preference }, "Saved conflict resolution preference");
   } catch (error) {
     logger.warn({ error }, "Failed to save conflict preference");
@@ -31549,6 +32371,13 @@ Pull Results:`);
     }
     console.log(`  Failed: ${result.failed.length}`);
     console.log(`  Skipped: ${result.skipped.length}`);
+    if (result.warnings.length > 0) {
+      console.log(`
+Warnings:`);
+      for (const warning of result.warnings) {
+        console.log(`  ${warning}`);
+      }
+    }
     if (result.failed.length > 0) {
       console.log(`
 Failures:`);

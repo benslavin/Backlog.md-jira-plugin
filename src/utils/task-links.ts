@@ -6,6 +6,7 @@ import {
 	writeFileSync,
 } from "node:fs";
 import { basename, join } from "node:path";
+import type { JiraSprintState } from "../integrations/jira-sprints.ts";
 import { SPRINTS_GITIGNORE_RULE } from "../state/sprint-registry.ts";
 import { logger } from "./logger.ts";
 
@@ -24,6 +25,19 @@ export interface TaskLink {
 	jiraSyncState?: string;
 	/** Mapped frontmatter fields written by the plugin (frontmatter:<key>) */
 	frontmatter?: Record<string, string | string[]>;
+	/** Sprint history of the linked Jira issue, in Jira's order */
+	sprints?: SprintHistoryEntry[];
+	/** Displayed sprint and its milestone as of the last sprint sync */
+	sprintSync?: { sprintId: string | null; milestoneId: string | null };
+}
+
+export interface SprintHistoryEntry {
+	id: string;
+	name: string;
+	state: JiraSprintState;
+	startDate?: string;
+	endDate?: string;
+	completeDate?: string;
 }
 
 /** Frontmatter key for each Jira link field */
@@ -116,6 +130,12 @@ function cleanLink(link: TaskLink): TaskLink {
 	}
 	if (link.frontmatter && Object.keys(link.frontmatter).length > 0) {
 		cleaned.frontmatter = link.frontmatter;
+	}
+	if (link.sprints && link.sprints.length > 0) {
+		cleaned.sprints = link.sprints;
+	}
+	if (link.sprintSync) {
+		cleaned.sprintSync = link.sprintSync;
 	}
 	return cleaned;
 }

@@ -14,10 +14,12 @@ import {
 import {
 	type FieldMapping,
 	type MappedCliUpdates,
+	type SprintMapping,
 	buildMappedFieldUpdates,
 	hasMappedFieldUpdates,
 	isCoreOverrideTarget,
 	loadFieldMappings,
+	loadSprintMapping,
 	readTaskFrontmatter,
 } from "../utils/field-mapping.ts";
 import {
@@ -35,6 +37,14 @@ import {
 	stripAcceptanceCriteriaFromDescription,
 } from "../utils/normalizer.ts";
 import { mapJiraPriorityToBacklog } from "../utils/priority-mapping.ts";
+import {
+	type SprintPullContext,
+	applySprintPullScope,
+	createSprintPullContext,
+	pullTaskSprint,
+	refreshRegisteredSprints,
+	sprintNeedsPull,
+} from "../utils/sprint-pull.ts";
 import { mapJiraStatusToBacklog } from "../utils/status-mapping.ts";
 import { classifySyncState } from "../utils/sync-state.ts";
 import { sanitizeTitle } from "../utils/title-sanitizer.ts";
@@ -55,6 +65,8 @@ export interface PullResult {
 	imported: string[];
 	failed: Array<{ taskId: string; error: string }>;
 	skipped: string[];
+	/** Problems that did not fail a task (e.g. sprint milestone updates) */
+	warnings: string[];
 }
 
 /**
@@ -72,8 +84,10 @@ export async function pull(options: PullOptions = {}): Promise<PullResult> {
 
 	// Validate field mappings up front so config errors are reported clearly
 	let fieldMappings: FieldMapping[];
+	let sprintMapping: SprintMapping | null;
 	try {
 		fieldMappings = loadFieldMappings();
+		sprintMapping = loadSprintMapping();
 	} catch (error) {
 		logger.level = originalLevel;
 		throw error;
@@ -89,15 +103,36 @@ export async function pull(options: PullOptions = {}): Promise<PullResult> {
 		imported: [],
 		failed: [],
 		skipped: [],
+		warnings: [],
 	};
 
+	let sprints: SprintPullContext | null = null;
 	try {
+		sprints = await createSprintPullContext(
+			sprintMapping,
+			{ jira, backlog },
+			{ dryRun: options.dryRun },
+		);
+		// Bulk pulls also bring milestones of registered sprints in step with
+		// the board; pulls of given tasks (as from sync) reconcile only the
+		// sprints of those tasks
+		if (sprints && !options.taskIds?.length) {
+			try {
+				await refreshRegisteredSprints(sprints);
+			} catch (error) {
+				sprints.warnings.push(
+					`Could not refresh sprints of board ${sprints.mapping.boardId}: ${error instanceof Error ? error.message : String(error)}`,
+				);
+			}
+		}
+
 		// Get list of tasks to pull and issues to import
 		const { mapped, unmapped } = await getTaskIds(
 			options,
 			backlog,
 			jira,
 			store,
+			sprints,
 		);
 
 		logger.info(
@@ -118,6 +153,7 @@ export async function pull(options: PullOptions = {}): Promise<PullResult> {
 							backlog,
 							jira,
 							fieldMappings,
+							sprints,
 							dryRun: options.dryRun || false,
 						});
 
@@ -152,6 +188,7 @@ export async function pull(options: PullOptions = {}): Promise<PullResult> {
 							backlog,
 							jira,
 							fieldMappings,
+							sprints,
 							force: options.force || false,
 							dryRun: options.dryRun || false,
 						});
@@ -179,6 +216,7 @@ export async function pull(options: PullOptions = {}): Promise<PullResult> {
 			JSON.stringify(result),
 		);
 	} finally {
+		if (sprints) result.warnings.push(...sprints.warnings);
 		store.close();
 		await jira.close();
 		// Restore original log level
@@ -198,6 +236,7 @@ async function getTaskIds(
 	backlog: BacklogClient,
 	jira: JiraClient,
 	store: FrontmatterStore,
+	sprints: SprintPullContext | null,
 ): Promise<{ mapped: string[]; unmapped: string[] }> {
 	if (options.taskIds && options.taskIds.length > 0) {
 		return { mapped: options.taskIds, unmapped: [] };
@@ -211,7 +250,12 @@ async function getTaskIds(
 
 	// Import mode: fetch Jira issues via JQL
 	if (options.import) {
-		return await getIssuesForImport(options, jira, store);
+		return await getIssuesForImport(
+			options,
+			jira,
+			store,
+			sprints?.mapping ?? null,
+		);
 	}
 
 	// Default: get tasks that need pull (changed on Jira side)
@@ -237,7 +281,13 @@ async function getTaskIds(
 				{ backlog: backlogPayload, jira: jiraPayload },
 			);
 
-			if (state.state === "NeedsPull") {
+			if (
+				state.state === "NeedsPull" ||
+				// Sprint changes are not part of the synced payload
+				(state.state === "InSync" &&
+					sprints &&
+					sprintNeedsPull(sprints, taskId, issue))
+			) {
 				needsPull.push(taskId);
 			}
 		} catch (error) {
@@ -255,6 +305,7 @@ async function getIssuesForImport(
 	options: PullOptions,
 	jira: JiraClient,
 	store: FrontmatterStore,
+	sprintMapping: SprintMapping | null,
 ): Promise<{ mapped: string[]; unmapped: string[] }> {
 	// Get JQL from options or config
 	let jql = options.jql;
@@ -283,6 +334,9 @@ async function getIssuesForImport(
 			);
 		}
 	}
+
+	// pullScope "open" limits pulled issues to open sprints
+	jql = applySprintPullScope(jql, sprintMapping);
 
 	logger.info({ jql }, "Fetching Jira issues for import");
 
@@ -358,11 +412,13 @@ async function pullTask(
 		backlog: BacklogClient;
 		jira: JiraClient;
 		fieldMappings: FieldMapping[];
+		sprints: SprintPullContext | null;
 		force: boolean;
 		dryRun: boolean;
 	},
 ): Promise<void> {
-	const { store, backlog, jira, fieldMappings, force, dryRun } = context;
+	const { store, backlog, jira, fieldMappings, sprints, force, dryRun } =
+		context;
 
 	// Get mapping
 	const mapping = store.getMapping(taskId);
@@ -402,6 +458,8 @@ async function pullTask(
 		}
 
 		if (state.state === "InSync") {
+			// Sprint changes are not part of the synced payload
+			if (sprints) await pullSprint(sprints, taskId, issue);
 			logger.info({ taskId }, "Task already in sync, skipping");
 			return;
 		}
@@ -452,6 +510,7 @@ async function pullTask(
 			{ taskId, updates, frontmatter: mappedUpdates.frontmatter },
 			"DRY RUN: Would update Backlog task",
 		);
+		if (sprints) await pullSprint(sprints, taskId, issue);
 	} else {
 		// Apply updates via Backlog CLI
 		if (Object.keys(updates).length > 0) {
@@ -461,6 +520,8 @@ async function pullTask(
 		// Plugin-owned frontmatter fields are written after the CLI edit,
 		// which may rewrite the task file
 		applyMappedFrontmatter(taskId, issue, fieldMappings);
+
+		if (sprints) await pullSprint(sprints, taskId, issue);
 
 		// Update snapshots with freshly updated data
 		const updatedTask = await backlog.getTask(taskId);
@@ -508,6 +569,25 @@ async function pullTask(
 			{ taskId, jiraKey: mapping.jiraKey },
 			"Updated Backlog task from Jira",
 		);
+	}
+}
+
+/**
+ * Apply an issue's sprint to its task; a failure is reported as a warning
+ * so the rest of the task still pulls
+ */
+async function pullSprint(
+	sprints: SprintPullContext,
+	taskId: string,
+	issue: JiraIssue,
+): Promise<void> {
+	try {
+		await pullTaskSprint(sprints, taskId, issue);
+	} catch (error) {
+		sprints.warnings.push(
+			`${taskId}: sprint not pulled: ${error instanceof Error ? error.message : String(error)}`,
+		);
+		logger.warn({ taskId, error }, "Failed to pull sprint");
 	}
 }
 
@@ -749,10 +829,11 @@ async function importJiraIssue(
 		backlog: BacklogClient;
 		jira: JiraClient;
 		fieldMappings: FieldMapping[];
+		sprints: SprintPullContext | null;
 		dryRun: boolean;
 	},
 ): Promise<string> {
-	const { store, backlog, jira, fieldMappings, dryRun } = context;
+	const { store, backlog, jira, fieldMappings, sprints, dryRun } = context;
 
 	// Get Jira issue
 	const issue = await jira.getIssue(jiraKey);
@@ -877,6 +958,8 @@ async function importJiraIssue(
 		applyMappedFrontmatter(taskId, issue, fieldMappings);
 		logger.debug({ taskId, jiraKey }, "Applied mapped fields to imported task");
 	}
+
+	if (sprints) await pullSprint(sprints, taskId, issue);
 
 	// Create mapping
 	store.addMapping(taskId, jiraKey);

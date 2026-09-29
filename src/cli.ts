@@ -202,6 +202,12 @@ program
 			}
 			console.log(`  Failed: ${result.failed.length}`);
 			console.log(`  Skipped: ${result.skipped.length}`);
+			if (result.warnings.length > 0) {
+				console.log("\nWarnings:");
+				for (const warning of result.warnings) {
+					console.log(`  ${warning}`);
+				}
+			}
 			if (result.failed.length > 0) {
 				console.log("\nFailures:");
 				for (const fail of result.failed) {

@@ -1,6 +1,7 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import {
+	DEFAULT_ISSUE_FIELDS,
 	getIssueFieldsParam,
 	getJiraFieldValue,
 	loadFieldMappings,
@@ -73,6 +74,7 @@ export class JiraClient {
 	private silentMode: boolean;
 	private extraEnv: Record<string, string>;
 	private sprintFieldId: string | null | undefined;
+	private extraIssueFields: string[] = [];
 
 	constructor(options: JiraClientOptions = {}) {
 		this.dockerImage =
@@ -658,12 +660,27 @@ export class JiraClient {
 	 * Returns undefined when no field mappings are configured (server defaults).
 	 */
 	private getMappedIssueFields(): string | undefined {
+		let fields: string | undefined;
 		try {
-			return getIssueFieldsParam(loadFieldMappings());
+			fields = getIssueFieldsParam(loadFieldMappings());
 		} catch (error) {
 			// Invalid mappings are reported when they are applied
 			logger.debug({ error }, "Ignoring invalid fieldMappings for getIssue");
-			return undefined;
+		}
+		if (this.extraIssueFields.length === 0) return fields;
+		const list = (fields ?? DEFAULT_ISSUE_FIELDS.join(",")).split(",");
+		for (const id of this.extraIssueFields) {
+			if (!list.includes(id)) list.push(id);
+		}
+		return list.join(",");
+	}
+
+	/**
+	 * Also request these fields (e.g. the Sprint field) when fetching issues
+	 */
+	includeIssueFields(fieldIds: string[]): void {
+		for (const id of fieldIds) {
+			if (!this.extraIssueFields.includes(id)) this.extraIssueFields.push(id);
 		}
 	}
 
