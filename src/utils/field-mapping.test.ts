@@ -43,6 +43,7 @@ describe("validateFieldMappings", () => {
 		expect(validateFieldMappings(undefined)).toEqual({
 			mappings: [],
 			errors: [],
+			sprintMapping: null,
 		});
 	});
 

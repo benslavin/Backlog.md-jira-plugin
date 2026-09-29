@@ -23436,6 +23436,11 @@ import {
   writeFileSync as writeFileSync2
 } from "node:fs";
 import { basename, join as join2 } from "node:path";
+
+// src/state/sprint-registry.ts
+var SPRINTS_GITIGNORE_RULE = "!sprints.json";
+
+// src/utils/task-links.ts
 var LINK_FRONTMATTER_KEYS = {
   jiraKey: "jira_key",
   jiraUrl: "jira_url",
@@ -23513,10 +23518,11 @@ function linkToFrontmatter(link) {
 var LINKS_GITIGNORE_RULES = `!links/
 !links/*.json
 `;
-var CONFIG_DIR_GITIGNORE = `# Ignore all files in .backlog-jira/ except Jira link records
+var CONFIG_DIR_GITIGNORE = `# Ignore all files in .backlog-jira/ except Jira link records and the sprint registry
 *
 !.gitignore
-${LINKS_GITIGNORE_RULES}`;
+${LINKS_GITIGNORE_RULES}${SPRINTS_GITIGNORE_RULE}
+`;
 function ensureLinksTracked() {
   const gitignorePath = join2(process.cwd(), ".backlog-jira", ".gitignore");
   if (!existsSync(gitignorePath))
@@ -23864,6 +23870,14 @@ var RESERVED_FRONTMATTER_KEYS = new Set([
   "onStatusChange",
   "final_summary"
 ]);
+var SPRINT_MAPPING_TYPE = "sprint";
+var SPRINT_PULL_SCOPES = ["all", "open"];
+var SPRINT_ONLY_KEYS = [
+  "boardId",
+  "createSprints",
+  "archiveClosedSprints",
+  "pullScope"
+];
 
 class FieldMappingConfigError extends Error {
   errors;
@@ -23925,13 +23939,19 @@ function validateBacklogTarget(target) {
 function validateFieldMappings(raw) {
   const mappings = [];
   const errors = [];
+  let sprintMapping = null;
   if (raw === undefined || raw === null) {
-    return { mappings, errors };
+    return { mappings, errors, sprintMapping };
   }
   if (!Array.isArray(raw)) {
-    return { mappings, errors: ["fieldMappings must be an array"] };
+    return {
+      mappings,
+      errors: ["fieldMappings must be an array"],
+      sprintMapping
+    };
   }
-  const seenTargets = new Set;
+  const targetOwners = new Map;
+  let sprintLabel = null;
   raw.forEach((entry, index) => {
     const label = `fieldMappings[${index}]`;
     if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
@@ -23939,15 +23959,37 @@ function validateFieldMappings(raw) {
       return;
     }
     const e = entry;
+    if (e.type === SPRINT_MAPPING_TYPE) {
+      const result = validateSprintEntry(label, e);
+      if (sprintLabel) {
+        result.errors.push(`${label}: only one sprint mapping is allowed (already configured by ${sprintLabel})`);
+      }
+      const owner = targetOwners.get("milestone");
+      if (owner && e.backlog === "milestone") {
+        result.errors.push(`${label}: sprint mapping targets "milestone", which ${owner.label} already maps to ${String(owner.jira)}; remove that mapping to sync sprints`);
+      }
+      if (result.errors.length > 0) {
+        errors.push(...result.errors);
+        return;
+      }
+      sprintLabel = label;
+      targetOwners.set("milestone", { label, jira: "sprint", sprint: true });
+      sprintMapping = result.mapping;
+      return;
+    }
     const entryErrors = [];
     if (typeof e.backlog !== "string" || !e.backlog.trim()) {
       entryErrors.push(`${label}: "backlog" is required`);
     } else {
-      const targetError = validateBacklogTarget(e.backlog.trim());
+      const target = e.backlog.trim();
+      const targetError = validateBacklogTarget(target);
+      const owner = targetOwners.get(target);
       if (targetError) {
         entryErrors.push(`${label}: ${targetError}`);
-      } else if (seenTargets.has(e.backlog.trim())) {
-        entryErrors.push(`${label}: backlog target "${e.backlog.trim()}" is mapped more than once`);
+      } else if (owner?.sprint) {
+        entryErrors.push(`${label}: backlog target "${target}" is already mapped to Jira sprints by ${owner.label}; a sprint mapping needs the milestone to itself`);
+      } else if (owner) {
+        entryErrors.push(`${label}: backlog target "${target}" is mapped more than once`);
       }
     }
     if (typeof e.jira !== "string" || !e.jira.trim()) {
@@ -23956,10 +23998,15 @@ function validateFieldMappings(raw) {
       entryErrors.push(`${label}: "${e.jira}" is not a valid Jira field ID (use customfield_NNNNN or a system field name)`);
     }
     if (typeof e.type !== "string" || !FIELD_MAPPING_TYPES.includes(e.type)) {
-      entryErrors.push(`${label}: "type" must be one of ${FIELD_MAPPING_TYPES.join(", ")}`);
+      entryErrors.push(`${label}: "type" must be one of ${[...FIELD_MAPPING_TYPES, SPRINT_MAPPING_TYPE].join(", ")}`);
     }
     if (e.direction !== undefined && (typeof e.direction !== "string" || !FIELD_MAPPING_DIRECTIONS.includes(e.direction))) {
       entryErrors.push(`${label}: "direction" must be one of ${FIELD_MAPPING_DIRECTIONS.join(", ")}`);
+    }
+    for (const key of SPRINT_ONLY_KEYS) {
+      if (e[key] !== undefined) {
+        entryErrors.push(`${label}: "${key}" is only valid for "type": "${SPRINT_MAPPING_TYPE}"`);
+      }
     }
     if (e.valueMap !== undefined) {
       const valueMap = e.valueMap;
@@ -23979,7 +24026,7 @@ function validateFieldMappings(raw) {
       return;
     }
     const backlog = e.backlog.trim();
-    seenTargets.add(backlog);
+    targetOwners.set(backlog, { label, jira: e.jira, sprint: false });
     mappings.push({
       backlog,
       jira: e.jira.trim(),
@@ -23988,7 +24035,54 @@ function validateFieldMappings(raw) {
       ...e.valueMap ? { valueMap: e.valueMap } : undefined
     });
   });
-  return { mappings, errors };
+  return { mappings, errors, sprintMapping };
+}
+function validateSprintEntry(label, e) {
+  const errors = [];
+  if (e.backlog !== "milestone") {
+    errors.push(`${label}: a sprint mapping must target the Backlog "milestone" (got ${JSON.stringify(e.backlog ?? null)})`);
+  }
+  if (e.jira !== "sprint") {
+    errors.push(`${label}: a sprint mapping must use "jira": "sprint" (the Sprint field is discovered automatically)`);
+  }
+  let boardId = null;
+  if (e.boardId === undefined || e.boardId === null || e.boardId === "") {
+    errors.push(`${label}: a sprint mapping requires "boardId", the Jira board whose sprints become milestones`);
+  } else if (typeof e.boardId === "number" && Number.isInteger(e.boardId) && e.boardId > 0 || typeof e.boardId === "string" && /^[1-9]\d*$/.test(e.boardId.trim())) {
+    boardId = String(e.boardId).trim();
+  } else {
+    errors.push(`${label}: "boardId" must be a positive integer board id (got ${JSON.stringify(e.boardId)})`);
+  }
+  if (e.direction !== undefined && (typeof e.direction !== "string" || !FIELD_MAPPING_DIRECTIONS.includes(e.direction))) {
+    errors.push(`${label}: "direction" must be one of ${FIELD_MAPPING_DIRECTIONS.join(", ")}`);
+  }
+  for (const key of ["createSprints", "archiveClosedSprints"]) {
+    if (e[key] !== undefined && typeof e[key] !== "boolean") {
+      errors.push(`${label}: "${key}" must be true or false`);
+    }
+  }
+  if (e.pullScope !== undefined && !SPRINT_PULL_SCOPES.includes(e.pullScope)) {
+    errors.push(`${label}: "pullScope" must be one of ${SPRINT_PULL_SCOPES.join(", ")}`);
+  }
+  if (e.valueMap !== undefined) {
+    errors.push(`${label}: "valueMap" is not supported for sprint mappings; sprints map to milestones by id and name`);
+  }
+  if (errors.length > 0 || boardId === null) {
+    return { mapping: null, errors };
+  }
+  return {
+    mapping: {
+      backlog: "milestone",
+      jira: "sprint",
+      type: SPRINT_MAPPING_TYPE,
+      direction: e.direction ?? "pull",
+      boardId,
+      createSprints: e.createSprints ?? false,
+      archiveClosedSprints: e.archiveClosedSprints ?? true,
+      pullScope: e.pullScope ?? "all"
+    },
+    errors
+  };
 }
 function validateBuiltInPriorityEntry(label, e) {
   const errors = [];
@@ -24007,23 +24101,26 @@ function validateBuiltInPriorityEntry(label, e) {
   }
   return errors;
 }
-function loadAllFieldMappings(cwd) {
+function loadFieldMappingConfig(cwd) {
   const configPath = join3(cwd, ".backlog-jira", "config.json");
   if (!existsSync2(configPath)) {
-    return [];
+    return { mappings: [], sprintMapping: null };
   }
   let config;
   try {
     config = JSON.parse(readFileSync4(configPath, "utf-8"));
   } catch (error) {
     logger.warn({ error }, "Failed to read config.json for field mappings");
-    return [];
+    return { mappings: [], sprintMapping: null };
   }
-  const { mappings, errors } = validateFieldMappings(config.fieldMappings);
+  const { mappings, errors, sprintMapping } = validateFieldMappings(config.fieldMappings);
   if (errors.length > 0) {
     throw new FieldMappingConfigError(errors);
   }
-  return mappings;
+  return { mappings, sprintMapping };
+}
+function loadAllFieldMappings(cwd) {
+  return loadFieldMappingConfig(cwd).mappings;
 }
 function loadFieldMappings(cwd = process.cwd()) {
   return withoutBuiltInMappings(loadAllFieldMappings(cwd));

@@ -6,6 +6,7 @@ import {
 	writeFileSync,
 } from "node:fs";
 import { basename, join } from "node:path";
+import { SPRINTS_GITIGNORE_RULE } from "../state/sprint-registry.ts";
 import { logger } from "./logger.ts";
 
 /**
@@ -147,10 +148,11 @@ export function linkToFrontmatter(
 export const LINKS_GITIGNORE_RULES = "!links/\n!links/*.json\n";
 
 /** Content of a freshly generated .backlog-jira/.gitignore */
-export const CONFIG_DIR_GITIGNORE = `# Ignore all files in .backlog-jira/ except Jira link records
+export const CONFIG_DIR_GITIGNORE = `# Ignore all files in .backlog-jira/ except Jira link records and the sprint registry
 *
 !.gitignore
-${LINKS_GITIGNORE_RULES}`;
+${LINKS_GITIGNORE_RULES}${SPRINTS_GITIGNORE_RULE}
+`;
 
 function ensureLinksTracked(): void {
 	const gitignorePath = join(process.cwd(), ".backlog-jira", ".gitignore");
