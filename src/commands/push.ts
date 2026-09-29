@@ -491,10 +491,10 @@ async function pushTask(
 /**
  * Build Jira updates from Backlog task
  */
-async function buildJiraUpdates(
+export async function buildJiraUpdates(
 	task: BacklogTask,
 	currentIssue: JiraIssue,
-	jiraClient: JiraClient,
+	jiraClient: Pick<JiraClient, "getTransitions">,
 	projectKey: string,
 	overridden: Set<string> = new Set(),
 ): Promise<{

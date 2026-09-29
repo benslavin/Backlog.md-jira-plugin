@@ -31,6 +31,12 @@ import {
 import { type SyncState, classifySyncState } from "../utils/sync-state.ts";
 import { pull } from "./pull.ts";
 import { push } from "./push.ts";
+import {
+	BUILTIN_CONFLICT_FIELDS,
+	applyBuiltinFieldMerge,
+	detectBuiltinFieldConflicts,
+	planBuiltinFieldMerge,
+} from "./sync-merge.ts";
 
 export type ConflictStrategy =
 	| "prefer-backlog"
@@ -362,7 +368,7 @@ async function syncTask(
 					taskId,
 					jiraKey: mapping.jiraKey,
 					fields: [
-						...detectFieldConflicts(task, issue, snapshots, fieldMappings),
+						...detectBuiltinFieldConflicts(mappedState, task, fieldMappings),
 						...detectMappedFieldConflicts(mappedState, fieldMappings),
 					],
 					backlogTask: task,
@@ -443,110 +449,6 @@ function parsePayload(
 }
 
 /**
- * Detect field-level conflicts on the built-in fields.
- * Priority and labels are skipped when a field mapping carries them; mapped
- * fields are checked by detectMappedFieldConflicts.
- */
-function detectFieldConflicts(
-	task: BacklogTask,
-	issue: JiraIssue,
-	snapshots: ReturnType<typeof FrontmatterStore.prototype.getSnapshots>,
-	fieldMappings: FieldMapping[] = [],
-): FieldConflict[] {
-	const conflicts: FieldConflict[] = [];
-
-	if (!snapshots.backlog || !snapshots.jira) {
-		return conflicts;
-	}
-
-	const overridden = getOverriddenCoreFields(fieldMappings);
-
-	const baseBacklog = JSON.parse(snapshots.backlog.payload);
-	const baseJira = JSON.parse(snapshots.jira.payload);
-
-	// Check title/summary
-	if (task.title !== baseBacklog.title && issue.summary !== baseJira.summary) {
-		conflicts.push({
-			field: "title/summary",
-			backlogValue: task.title,
-			jiraValue: issue.summary,
-			baseValue: baseBacklog.title,
-		});
-	}
-
-	// Check description
-	if (
-		task.description !== baseBacklog.description &&
-		issue.description !== baseJira.description
-	) {
-		conflicts.push({
-			field: "description",
-			backlogValue: task.description,
-			jiraValue: issue.description,
-			baseValue: baseBacklog.description,
-		});
-	}
-
-	// Check status
-	if (task.status !== baseBacklog.status && issue.status !== baseJira.status) {
-		conflicts.push({
-			field: "status",
-			backlogValue: task.status,
-			jiraValue: issue.status,
-			baseValue: baseBacklog.status,
-		});
-	}
-
-	// Check assignee
-	if (
-		task.assignee !== baseBacklog.assignee &&
-		issue.assignee !== baseJira.assignee
-	) {
-		conflicts.push({
-			field: "assignee",
-			backlogValue: task.assignee,
-			jiraValue: issue.assignee,
-			baseValue: baseBacklog.assignee,
-		});
-	}
-
-	// Check priority
-	if (
-		!overridden.has("priority") &&
-		task.priority !== baseBacklog.priority &&
-		issue.priority !== baseJira.priority
-	) {
-		conflicts.push({
-			field: "priority",
-			backlogValue: task.priority,
-			jiraValue: issue.priority,
-			baseValue: baseBacklog.priority,
-		});
-	}
-
-	// Check labels
-	const taskLabelsStr = JSON.stringify(task.labels || []);
-	const baseLabelsStr = JSON.stringify(baseBacklog.labels);
-	const issueLabelsStr = JSON.stringify(issue.labels || []);
-	const baseJiraLabelsStr = JSON.stringify(baseJira.labels);
-
-	if (
-		!overridden.has("labels") &&
-		taskLabelsStr !== baseLabelsStr &&
-		issueLabelsStr !== baseJiraLabelsStr
-	) {
-		conflicts.push({
-			field: "labels",
-			backlogValue: task.labels,
-			jiraValue: issue.labels,
-			baseValue: baseBacklog.labels,
-		});
-	}
-
-	return conflicts;
-}
-
-/**
  * Resolve a conflict using the specified strategy
  */
 async function resolveConflict(
@@ -589,6 +491,21 @@ async function resolveConflict(
 			return { type: "conflict", resolution: "preferred-jira" };
 
 		case "prompt":
+			// Different fields changed on each side: merge without prompting
+			if (conflict.fields.length === 0) {
+				if (!dryRun) {
+					await applyFieldResolutions(conflict.taskId, conflict.jiraKey, [], {
+						backlog,
+						jira,
+						store,
+						fieldMappings,
+						backlogTask: conflict.backlogTask,
+						mappedState: conflict.mappedState,
+					});
+				}
+				return { type: "conflict", resolution: "merged" };
+			}
+
 			// Interactive resolution in terminal
 			try {
 				const resolution = await promptForConflictResolution(conflict);
@@ -604,6 +521,7 @@ async function resolveConflict(
 							jira,
 							store,
 							fieldMappings,
+							backlogTask: conflict.backlogTask,
 							mappedState: conflict.mappedState,
 						},
 					);
@@ -665,9 +583,11 @@ function loadConfig(): {
 }
 
 /**
- * Apply field-by-field resolutions from interactive prompt
+ * Apply field-by-field resolutions from interactive prompt. Every field is
+ * merged individually: fields changed on one side propagate to the other,
+ * conflicting fields take the chosen value.
  */
-async function applyFieldResolutions(
+export async function applyFieldResolutions(
 	taskId: string,
 	jiraKey: string,
 	resolutions: Array<{
@@ -676,22 +596,26 @@ async function applyFieldResolutions(
 		value: unknown;
 	}>,
 	context: {
-		backlog: BacklogClient;
-		jira: JiraClient;
-		store: FrontmatterStore;
+		backlog: Pick<BacklogClient, "getTask" | "updateTask">;
+		jira: Pick<
+			JiraClient,
+			"getIssue" | "updateIssue" | "getTransitions" | "transitionIssue"
+		>;
+		store: Pick<
+			FrontmatterStore,
+			"getMapping" | "setSnapshot" | "updateSyncState"
+		>;
 		fieldMappings?: FieldMapping[];
+		backlogTask?: BacklogTask;
 		mappedState?: MappedFieldState;
 	},
 ): Promise<void> {
 	const { backlog, jira, store, fieldMappings = [], mappedState } = context;
 
-	// Group resolutions by source
-	const backlogUpdates: Record<string, unknown> = {};
-	const jiraUpdates: Record<string, unknown> = {};
-
 	// Mapped fields are resolved individually after the built-in fields
 	const mappingsByTarget = new Map(fieldMappings.map((m) => [m.backlog, m]));
 	const mappedResolutions = new Map<string, MappedValue>();
+	const builtinResolutions: typeof resolutions = [];
 
 	for (const resolution of resolutions) {
 		const fieldMapping = mappingsByTarget.get(resolution.field);
@@ -702,41 +626,32 @@ async function applyFieldResolutions(
 					? parseManualMappedValue(resolution.value, fieldMapping)
 					: (resolution.value as MappedValue),
 			);
-			continue;
-		}
-
-		const fieldKey = resolution.field.replace("/", "_"); // Normalize field names
-
-		if (resolution.source === "backlog" || resolution.source === "manual") {
-			// Apply to Jira (push from Backlog or manual value)
-			jiraUpdates[fieldKey] = resolution.value;
-		} else if (resolution.source === "jira") {
-			// Apply to Backlog (pull from Jira)
-			backlogUpdates[fieldKey] = resolution.value;
+		} else if (BUILTIN_CONFLICT_FIELDS.has(resolution.field)) {
+			builtinResolutions.push(resolution);
 		}
 	}
 
-	// Update Backlog via CLI if needed
-	if (Object.keys(backlogUpdates).length > 0) {
-		logger.info(
-			{ taskId, fields: Object.keys(backlogUpdates) },
-			"Updating Backlog from Jira",
+	// Merge built-in fields
+	if (mappedState) {
+		const plan = planBuiltinFieldMerge(
+			mappedState,
+			fieldMappings,
+			builtinResolutions,
 		);
-		assertSucceeded(await pull({ taskIds: [taskId], force: true }));
-	}
-
-	// Update Jira if needed
-	if (Object.keys(jiraUpdates).length > 0) {
-		logger.info(
-			{ jiraKey, fields: Object.keys(jiraUpdates) },
-			"Updating Jira from Backlog",
-		);
-		assertSucceeded(await push({ taskIds: [taskId], force: true }));
+		await applyBuiltinFieldMerge(plan, {
+			taskId,
+			issueKey: jiraKey,
+			task: context.backlogTask ?? (await backlog.getTask(taskId)),
+			issue: mappedState.issue,
+			backlog,
+			jira,
+			fieldMappings,
+		});
 	}
 
 	// Merge mapped fields: one-sided changes propagate, conflicting ones take
 	// the chosen value, and each mapping's direction is honoured. Applied last
-	// so the built-in pull/push above cannot overwrite the choices.
+	// so the built-in merge above cannot overwrite the choices.
 	if (mappedState && fieldMappings.length > 0) {
 		const plan = planMappedFieldMerge(
 			mappedState,
@@ -758,11 +673,12 @@ async function applyFieldResolutions(
 		}
 	}
 
-	// Update snapshots after resolution
+	// Snapshot the merged state, normalized as sync classifies it, so the
+	// next sync sees the task InSync
 	const task = await backlog.getTask(taskId);
 	const issue = await jira.getIssue(jiraKey);
-	const backlogPayload = normalizeBacklogTask(task);
-	const jiraPayload = normalizeJiraIssue(issue);
+	const backlogPayload = normalizeBacklogTask(task, { fieldMappings });
+	const jiraPayload = normalizeJiraIssue(issue, { fieldMappings });
 	const backlogHash = computeHash(backlogPayload);
 	const jiraHash = computeHash(jiraPayload);
 

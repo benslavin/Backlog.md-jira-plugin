@@ -817,7 +817,10 @@ backlog-jira sync task-123 --dry-run
 **Conflict Strategies:**
 - `prefer-backlog`: Use Backlog value when conflict detected
 - `prefer-jira`: Use Jira value when conflict detected
-- `prompt`: Ask user for each conflict (interactive)
+- `prompt`: Ask user for each conflicting field (interactive). Fields changed
+  on only one side are merged automatically, so each side keeps its own edits
+  and every per-field choice is kept; when no field conflicts, the task is
+  merged without prompting
 - `manual`: Skip conflicts, log them for manual resolution
 
 Mapped fields with direction `both` are compared per field; `pull` and `push`

@@ -116,7 +116,7 @@ This will automatically sync changes every 60 seconds (configurable).
 
 When conflicts occur (both sides modified), the plugin will:
 
-- **prompt mode** (default): Ask you to choose which version to keep
+- **prompt mode** (default): Ask you to choose which version to keep for each field changed on both sides; fields changed on only one side are merged automatically
 - **prefer-backlog**: Always use Backlog.md version
 - **prefer-jira**: Always use Jira version
 

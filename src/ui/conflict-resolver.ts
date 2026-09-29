@@ -51,11 +51,16 @@ export async function promptForConflictResolution(
 					value: "jira",
 					description: formatValue(fieldConflict.jiraValue),
 				},
-				{
-					title: `${chalk.yellow("✎")} Enter manually`,
-					value: "manual",
-					description: "Type a custom value",
-				},
+				// Acceptance criteria are a checklist, not a single typed value
+				...(fieldConflict.field === "acceptanceCriteria"
+					? []
+					: [
+							{
+								title: `${chalk.yellow("✎")} Enter manually`,
+								value: "manual",
+								description: "Type a custom value",
+							},
+						]),
 			],
 		});
 

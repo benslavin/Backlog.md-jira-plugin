@@ -150,7 +150,7 @@ export function mapJiraStatusToBacklog(
  * @returns Transition result with ID if found
  */
 export async function findTransitionForStatus(
-	jiraClient: JiraClient,
+	jiraClient: Pick<JiraClient, "getTransitions">,
 	issueKey: string,
 	targetBacklogStatus: string,
 	projectKey?: string,

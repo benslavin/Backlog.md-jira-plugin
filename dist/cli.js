@@ -30161,11 +30161,13 @@ async function promptForConflictResolution(conflict) {
           value: "jira",
           description: formatValue(fieldConflict.jiraValue)
         },
-        {
-          title: `${source_default.yellow("✎")} Enter manually`,
-          value: "manual",
-          description: "Type a custom value"
-        }
+        ...fieldConflict.field === "acceptanceCriteria" ? [] : [
+          {
+            title: `${source_default.yellow("✎")} Enter manually`,
+            value: "manual",
+            description: "Type a custom value"
+          }
+        ]
       ]
     });
     if (!choiceResponse.choice) {
@@ -30263,6 +30265,190 @@ function truncate(text, maxWidth) {
     return text;
   }
   return `${text.substring(0, maxWidth - 3)}...`;
+}
+
+// src/commands/sync-merge.ts
+var BUILTIN_FIELDS = {
+  title: "title/summary",
+  description: "description",
+  status: "status",
+  assignee: "assignee",
+  priority: "priority",
+  labels: "labels",
+  acceptanceCriteria: "acceptanceCriteria"
+};
+var BUILTIN_CONFLICT_FIELDS = new Set(Object.values(BUILTIN_FIELDS));
+function mergeableFields(fieldMappings) {
+  const overridden = getOverriddenCoreFields(fieldMappings);
+  return Object.keys(BUILTIN_FIELDS).filter((f) => !overridden.has(f));
+}
+function comparable(payload, field) {
+  if (!payload)
+    return "";
+  switch (field) {
+    case "description":
+      return stripAcceptanceCriteriaFromDescription(payload.description ?? "");
+    case "labels":
+      return JSON.stringify(payload.labels ?? []);
+    case "acceptanceCriteria":
+      return JSON.stringify((payload.acceptanceCriteria ?? []).map((ac) => ({
+        text: ac.text,
+        checked: ac.checked
+      })));
+    default:
+      return payload[field] ?? "";
+  }
+}
+function sideChanges2(state, field) {
+  const backlogNow = comparable(state.current.backlog, field);
+  const jiraNow = comparable(state.current.jira, field);
+  return {
+    backlogChanged: backlogNow !== comparable(state.base.backlog, field),
+    jiraChanged: jiraNow !== comparable(state.base.jira, field),
+    differ: backlogNow !== jiraNow
+  };
+}
+function formatCriteria(criteria) {
+  return (criteria ?? []).map((ac) => `[${ac.checked ? "x" : " "}] ${ac.text}`);
+}
+function displayValues(field, task, issue, state) {
+  const base = state.base.backlog;
+  switch (field) {
+    case "title":
+      return {
+        backlogValue: task.title,
+        jiraValue: issue.summary,
+        baseValue: base?.title
+      };
+    case "description":
+      return {
+        backlogValue: task.description,
+        jiraValue: stripAcceptanceCriteriaFromDescription(issue.description ?? ""),
+        baseValue: base?.description
+      };
+    case "acceptanceCriteria":
+      return {
+        backlogValue: formatCriteria(task.acceptanceCriteria),
+        jiraValue: formatCriteria(state.current.jira.acceptanceCriteria),
+        baseValue: formatCriteria(base?.acceptanceCriteria)
+      };
+    default:
+      return {
+        backlogValue: task[field],
+        jiraValue: issue[field],
+        baseValue: base?.[field]
+      };
+  }
+}
+function detectBuiltinFieldConflicts(state, task, fieldMappings = []) {
+  if (!state.base.backlog || !state.base.jira)
+    return [];
+  const conflicts = [];
+  for (const field of mergeableFields(fieldMappings)) {
+    const { backlogChanged, jiraChanged, differ } = sideChanges2(state, field);
+    if (!backlogChanged || !jiraChanged || !differ)
+      continue;
+    conflicts.push({
+      field: BUILTIN_FIELDS[field],
+      ...displayValues(field, task, state.issue, state)
+    });
+  }
+  return conflicts;
+}
+function planBuiltinFieldMerge(state, fieldMappings, resolutions) {
+  const byName = new Map(resolutions.map((r) => [r.field, r]));
+  const plan = [];
+  for (const field of mergeableFields(fieldMappings)) {
+    const resolution = byName.get(BUILTIN_FIELDS[field]);
+    if (resolution) {
+      plan.push({
+        field,
+        source: resolution.source,
+        value: resolution.value
+      });
+      continue;
+    }
+    const { backlogChanged, jiraChanged, differ } = sideChanges2(state, field);
+    if (!differ)
+      continue;
+    if (backlogChanged && !jiraChanged) {
+      plan.push({ field, source: "backlog" });
+    } else if (jiraChanged && !backlogChanged) {
+      plan.push({ field, source: "jira" });
+    }
+  }
+  return plan;
+}
+var BACKLOG_UPDATE_KEYS = {
+  title: ["title"],
+  description: ["description"],
+  status: ["status"],
+  assignee: ["assignee"],
+  priority: ["priority"],
+  labels: ["labels"],
+  acceptanceCriteria: ["addAc", "removeAc", "checkAc", "uncheckAc"]
+};
+function manualBacklogValue(field, value) {
+  if (field === "labels") {
+    const list = Array.isArray(value) ? value : String(value ?? "").split(",");
+    return list.map((l) => String(l).trim()).filter(Boolean);
+  }
+  return String(value ?? "").trim();
+}
+async function applyBuiltinFieldMerge(plan, context) {
+  const { taskId, issueKey, issue, backlog, jira, fieldMappings } = context;
+  if (plan.length === 0)
+    return;
+  const projectKey = issueKey.split("-")[0];
+  const pulled = plan.filter((c) => c.source === "jira");
+  const fromJira = pulled.length > 0 ? {
+    ...buildBacklogUpdates(issue, context.task, projectKey, fieldMappings)
+  } : {};
+  const backlogUpdates = {};
+  for (const choice of plan) {
+    if (choice.source === "jira") {
+      for (const key of BACKLOG_UPDATE_KEYS[choice.field]) {
+        if (fromJira[key] !== undefined)
+          backlogUpdates[key] = fromJira[key];
+      }
+    } else if (choice.source === "manual" && choice.field !== "acceptanceCriteria") {
+      backlogUpdates[choice.field] = manualBacklogValue(choice.field, choice.value);
+    }
+  }
+  let task = context.task;
+  if (Object.keys(backlogUpdates).length > 0) {
+    logger.info({ taskId, fields: Object.keys(backlogUpdates) }, "Merging Jira fields into Backlog");
+    await backlog.updateTask(taskId, backlogUpdates);
+    task = await backlog.getTask(taskId);
+  }
+  const pushed = new Set(plan.filter((c) => c.source !== "jira").map((c) => c.field));
+  if (pushed.size === 0)
+    return;
+  const updates = await buildJiraUpdates(task, issue, jira, projectKey, getOverriddenCoreFields(fieldMappings));
+  const fields = {};
+  if (pushed.has("title") && updates.fields.summary !== undefined) {
+    fields.summary = updates.fields.summary;
+  }
+  for (const field of ["assignee", "priority", "labels"]) {
+    if (pushed.has(field) && updates.fields[field] !== undefined) {
+      fields[field] = updates.fields[field];
+    }
+  }
+  if (pushed.has("description") || pushed.has("acceptanceCriteria")) {
+    const description = task.acceptanceCriteria ? mergeDescriptionWithAc(task.description || "", task.acceptanceCriteria, task.implementationPlan, task.implementationNotes) : task.description || "";
+    if (description !== (issue.description || "")) {
+      fields.description = description;
+    }
+  }
+  if (Object.keys(fields).length > 0) {
+    logger.info({ issueKey, fields: Object.keys(fields) }, "Merging Backlog fields into Jira");
+    await jira.updateIssue(issueKey, fields);
+  }
+  if (pushed.has("status") && updates.transition) {
+    await jira.transitionIssue(issueKey, updates.transition.id, {
+      comment: updates.transition.comment
+    });
+  }
 }
 
 // src/commands/sync.ts
@@ -30453,7 +30639,7 @@ async function syncTask(taskId, context) {
         taskId,
         jiraKey: mapping.jiraKey,
         fields: [
-          ...detectFieldConflicts(task, issue, snapshots, fieldMappings),
+          ...detectBuiltinFieldConflicts(mappedState, task, fieldMappings),
           ...detectMappedFieldConflicts(mappedState, fieldMappings)
         ],
         backlogTask: task,
@@ -30503,68 +30689,6 @@ function parsePayload(payload) {
     return null;
   }
 }
-function detectFieldConflicts(task, issue, snapshots, fieldMappings = []) {
-  const conflicts = [];
-  if (!snapshots.backlog || !snapshots.jira) {
-    return conflicts;
-  }
-  const overridden = getOverriddenCoreFields(fieldMappings);
-  const baseBacklog = JSON.parse(snapshots.backlog.payload);
-  const baseJira = JSON.parse(snapshots.jira.payload);
-  if (task.title !== baseBacklog.title && issue.summary !== baseJira.summary) {
-    conflicts.push({
-      field: "title/summary",
-      backlogValue: task.title,
-      jiraValue: issue.summary,
-      baseValue: baseBacklog.title
-    });
-  }
-  if (task.description !== baseBacklog.description && issue.description !== baseJira.description) {
-    conflicts.push({
-      field: "description",
-      backlogValue: task.description,
-      jiraValue: issue.description,
-      baseValue: baseBacklog.description
-    });
-  }
-  if (task.status !== baseBacklog.status && issue.status !== baseJira.status) {
-    conflicts.push({
-      field: "status",
-      backlogValue: task.status,
-      jiraValue: issue.status,
-      baseValue: baseBacklog.status
-    });
-  }
-  if (task.assignee !== baseBacklog.assignee && issue.assignee !== baseJira.assignee) {
-    conflicts.push({
-      field: "assignee",
-      backlogValue: task.assignee,
-      jiraValue: issue.assignee,
-      baseValue: baseBacklog.assignee
-    });
-  }
-  if (!overridden.has("priority") && task.priority !== baseBacklog.priority && issue.priority !== baseJira.priority) {
-    conflicts.push({
-      field: "priority",
-      backlogValue: task.priority,
-      jiraValue: issue.priority,
-      baseValue: baseBacklog.priority
-    });
-  }
-  const taskLabelsStr = JSON.stringify(task.labels || []);
-  const baseLabelsStr = JSON.stringify(baseBacklog.labels);
-  const issueLabelsStr = JSON.stringify(issue.labels || []);
-  const baseJiraLabelsStr = JSON.stringify(baseJira.labels);
-  if (!overridden.has("labels") && taskLabelsStr !== baseLabelsStr && issueLabelsStr !== baseJiraLabelsStr) {
-    conflicts.push({
-      field: "labels",
-      backlogValue: task.labels,
-      jiraValue: issue.labels,
-      baseValue: baseBacklog.labels
-    });
-  }
-  return conflicts;
-}
 async function resolveConflict(conflict, strategy, context) {
   const { store, backlog, jira, fieldMappings, dryRun } = context;
   logger.info({ taskId: conflict.taskId, strategy, fieldCount: conflict.fields.length }, "Resolving conflict");
@@ -30580,6 +30704,19 @@ async function resolveConflict(conflict, strategy, context) {
       }
       return { type: "conflict", resolution: "preferred-jira" };
     case "prompt":
+      if (conflict.fields.length === 0) {
+        if (!dryRun) {
+          await applyFieldResolutions(conflict.taskId, conflict.jiraKey, [], {
+            backlog,
+            jira,
+            store,
+            fieldMappings,
+            backlogTask: conflict.backlogTask,
+            mappedState: conflict.mappedState
+          });
+        }
+        return { type: "conflict", resolution: "merged" };
+      }
       try {
         const resolution = await promptForConflictResolution(conflict);
         if (!dryRun) {
@@ -30588,6 +30725,7 @@ async function resolveConflict(conflict, strategy, context) {
             jira,
             store,
             fieldMappings,
+            backlogTask: conflict.backlogTask,
             mappedState: conflict.mappedState
           });
           if (resolution.savePreference) {
@@ -30629,30 +30767,28 @@ function loadConfig3() {
 }
 async function applyFieldResolutions(taskId, jiraKey, resolutions, context) {
   const { backlog, jira, store, fieldMappings = [], mappedState } = context;
-  const backlogUpdates = {};
-  const jiraUpdates = {};
   const mappingsByTarget = new Map(fieldMappings.map((m) => [m.backlog, m]));
   const mappedResolutions = new Map;
+  const builtinResolutions = [];
   for (const resolution of resolutions) {
     const fieldMapping = mappingsByTarget.get(resolution.field);
     if (fieldMapping && fieldMapping.direction === "both") {
       mappedResolutions.set(resolution.field, resolution.source === "manual" ? parseManualMappedValue(resolution.value, fieldMapping) : resolution.value);
-      continue;
-    }
-    const fieldKey = resolution.field.replace("/", "_");
-    if (resolution.source === "backlog" || resolution.source === "manual") {
-      jiraUpdates[fieldKey] = resolution.value;
-    } else if (resolution.source === "jira") {
-      backlogUpdates[fieldKey] = resolution.value;
+    } else if (BUILTIN_CONFLICT_FIELDS.has(resolution.field)) {
+      builtinResolutions.push(resolution);
     }
   }
-  if (Object.keys(backlogUpdates).length > 0) {
-    logger.info({ taskId, fields: Object.keys(backlogUpdates) }, "Updating Backlog from Jira");
-    assertSucceeded(await pull({ taskIds: [taskId], force: true }));
-  }
-  if (Object.keys(jiraUpdates).length > 0) {
-    logger.info({ jiraKey, fields: Object.keys(jiraUpdates) }, "Updating Jira from Backlog");
-    assertSucceeded(await push({ taskIds: [taskId], force: true }));
+  if (mappedState) {
+    const plan = planBuiltinFieldMerge(mappedState, fieldMappings, builtinResolutions);
+    await applyBuiltinFieldMerge(plan, {
+      taskId,
+      issueKey: jiraKey,
+      task: context.backlogTask ?? await backlog.getTask(taskId),
+      issue: mappedState.issue,
+      backlog,
+      jira,
+      fieldMappings
+    });
   }
   if (mappedState && fieldMappings.length > 0) {
     const plan = planMappedFieldMerge(mappedState, fieldMappings, mappedResolutions);
@@ -30672,8 +30808,8 @@ async function applyFieldResolutions(taskId, jiraKey, resolutions, context) {
   }
   const task = await backlog.getTask(taskId);
   const issue = await jira.getIssue(jiraKey);
-  const backlogPayload = normalizeBacklogTask(task);
-  const jiraPayload = normalizeJiraIssue(issue);
+  const backlogPayload = normalizeBacklogTask(task, { fieldMappings });
+  const jiraPayload = normalizeJiraIssue(issue, { fieldMappings });
   const backlogHash = computeHash(backlogPayload);
   const jiraHash = computeHash(jiraPayload);
   store.setSnapshot(taskId, "backlog", backlogHash, backlogPayload);
