@@ -5,7 +5,7 @@ status: Done
 assignee:
   - '@claude'
 created_date: '2026-09-29 14:22'
-updated_date: '2026-09-29 15:29'
+updated_date: '2026-09-29 16:05'
 labels:
   - setup
   - cli
@@ -41,6 +41,7 @@ One guided path should take a user from an empty Backlog.md project to a verifie
 - [x] #15 The status step also offers Jira statuses no issue is in yet: transition names, Backlog statuses and current mappings are checked against Jira via JQL, shown with their source, and pre-filled for confirmation
 - [x] #16 The status step picks the project's Jira statuses from one checkbox list labelled by source and issue type, proposes the whole mapping at once and only asks per status for the ones chosen to change; unticked statuses are dropped from the mapping
 - [x] #17 The field mappings step ranks fields by how many sampled project issues use them, hides core-synced, unsupported and noise fields, and adds the ticked ones from one checkbox list with suggested target, type and direction (adjusting one by one and searching all fields stay available)
+- [x] #18 pull --import imports every issue matching the filter (paging past MCP Atlassian's 50-issue page size, up to 1,000 per run with a warning beyond that), and the filter step counts matches on Jira Cloud
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -97,4 +98,11 @@ Status and field steps reworked after a real run (AC #16, #17):
 - The ticked fields are shown as one plan with "Yes / Adjust target, type or direction / Cancel". "Search all fields…" keeps the old per-field flow
 - Multiselect summary lines show short names (onRender hook) instead of full titles with labels
 - Checked by rendering both steps in a pseudo-terminal with a fake Jira; 672 tests pass
+
+Import paging (AC #18):
+- pull --import only fetched the first 50 matching issues, and re-running returned the same 50, so larger projects could never be fully imported (72 open issues found only 50)
+- New `JiraClient.searchAllIssues`: pages by `page_token` on Jira Cloud (MCP Atlassian ignores start_at there and reports total -1) and by `start_at` on Server/Data Center. It stops on an empty page or a page with nothing new (offset ignored), and caps at 1,000 (`DEFAULT_SEARCH_ALL_LIMIT`) with `truncated`. `searchIssues` passes and returns the page token
+- pull --import uses it and adds a warning when the cap is hit
+- The filter step counts matches by paging when Jira reports no total (Cloud previously showed no count). The 50-issue caveats are gone from the wizard and README
+- Tests: token paging (72 issues over 2 pages), offset paging, ignored offset, truncation, exact-limit edge, Cloud count and over-cap warning in the filter step. 679 pass
 <!-- SECTION:NOTES:END -->

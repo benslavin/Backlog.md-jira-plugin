@@ -678,7 +678,7 @@ describe("configure --step", () => {
 		]);
 	});
 
-	it("filter: suggests the project JQL and reports the 50-issue import limit", async () => {
+	it("filter: suggests the project JQL and shows how many issues match", async () => {
 		writeExistingConfig();
 		const asked = await answer({
 			jqlFilter: (q: PromptObject) => q.initial,
@@ -690,10 +690,57 @@ describe("configure --step", () => {
 			"project = API ORDER BY created DESC",
 		);
 		expect(printed()).toContain("120 issues match");
-		expect(printed()).toContain("first 50");
+		expect(printed()).not.toContain("50");
 		expect((readConfig().jira as RawConfig).jqlFilter).toBe(
 			"project = API ORDER BY created DESC",
 		);
+	});
+
+	it("filter: counts by paging when Jira reports no total (Jira Cloud)", async () => {
+		writeExistingConfig();
+		await answer({ jqlFilter: "project = CR2" });
+		const searchAllIssues = mock(async () => ({
+			issues: Array.from({ length: 72 }, (_, i) => ({ key: `CR2-${i}` })),
+			truncated: false,
+		}));
+		const jira = fakeJira({
+			searchIssues: mock(async () => ({
+				issues: [],
+				total: -1,
+				startAt: 0,
+				maxResults: 1,
+			})),
+			searchAllIssues,
+		});
+
+		await run({ step: "filter" }, jira);
+
+		expect(searchAllIssues).toHaveBeenCalledWith("project = CR2", {
+			fields: "summary",
+		});
+		expect(printed()).toContain("72 issues match");
+	});
+
+	it("filter: warns when more issues match than one import handles", async () => {
+		writeExistingConfig();
+		await answer({ jqlFilter: "project = BIG" });
+		const jira = fakeJira({
+			searchIssues: mock(async () => ({
+				issues: [],
+				total: -1,
+				startAt: 0,
+				maxResults: 1,
+			})),
+			searchAllIssues: mock(async () => ({
+				issues: Array.from({ length: 1000 }, (_, i) => ({ key: `B-${i}` })),
+				truncated: true,
+			})),
+		});
+
+		await run({ step: "filter" }, jira);
+
+		expect(printed()).toContain("More than 1000 issues match");
+		expect(printed()).toContain("up to 1000 issues");
 	});
 });
 
@@ -734,7 +781,9 @@ describe("configure wizard", () => {
 		expect(jira.close).toHaveBeenCalled();
 		expect(printed()).toContain("backlog-jira configure --step sprints");
 		expect(printed()).toContain("pull --import --dry-run");
-		expect(printed()).toContain("at most 50 issues per run");
+		expect(printed()).toContain(
+			"2. Import:               backlog-jira pull --import",
+		);
 		expect(printed()).toContain("git add .backlog-jira");
 		expectUnmanagedKept(readConfig());
 	});

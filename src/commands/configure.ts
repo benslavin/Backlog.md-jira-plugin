@@ -3,7 +3,11 @@ import { join } from "node:path";
 import chalk from "chalk";
 import prompts from "prompts";
 import { SPRINT_FIELD_SCHEMA } from "../integrations/jira-sprints.ts";
-import { JiraClient, type JiraIssue } from "../integrations/jira.ts";
+import {
+	DEFAULT_SEARCH_ALL_LIMIT,
+	JiraClient,
+	type JiraIssue,
+} from "../integrations/jira.ts";
 import {
 	CONFLICT_STRATEGIES,
 	type ConflictStrategy,
@@ -107,9 +111,6 @@ const STEP_INFO: Record<ConfigureStep, { title: string; about: string }> = {
 /** Project issues sampled to rank fields by use */
 const FIELD_SAMPLE_SIZE = 50;
 
-/** Maximum number of issues one `pull --import` run handles */
-const IMPORT_LIMIT = 50;
-
 /** Jira operations the wizard uses */
 export type WizardJira = Pick<
 	JiraClient,
@@ -117,6 +118,7 @@ export type WizardJira = Pick<
 	| "getAllProjects"
 	| "getProjectIssueTypes"
 	| "searchIssues"
+	| "searchAllIssues"
 	| "getTransitions"
 	| "listBoards"
 	| "searchFields"
@@ -1346,7 +1348,7 @@ async function filterStep(ctx: WizardContext): Promise<StepOutcome> {
 		: "";
 	console.log(
 		chalk.gray(
-			`  'backlog-jira pull --import' imports up to ${IMPORT_LIMIT} unlinked issues matching this JQL per run.`,
+			"  'backlog-jira pull --import' imports the unlinked issues matching this JQL.",
 		),
 	);
 	if (findSprintEntry(ctx.config)?.pullScope === "open") {
@@ -1369,20 +1371,27 @@ async function filterStep(ctx: WizardContext): Promise<StepOutcome> {
 		let problem: string | null = null;
 		if (detectCredentials().auth) {
 			try {
-				const result = await withJira(ctx, (jira) =>
-					jira.searchIssues(jql, { maxResults: 1, fields: "summary" }),
-				);
-				if (typeof result.total === "number" && result.total >= 0) {
-					console.log(
-						`  ${result.total} issue${result.total === 1 ? "" : "s"} match`,
-					);
-					if (result.total > IMPORT_LIMIT) {
-						console.log(
-							chalk.yellow(
-								`  More than ${IMPORT_LIMIT} issues match: one import run takes the first ${IMPORT_LIMIT}. Import in batches with narrower filters (pull --import --jql '...'), e.g. by sprint or created date.`,
-							),
-						);
+				const count = await withJira(ctx, async (jira) => {
+					const first = await jira.searchIssues(jql, {
+						maxResults: 1,
+						fields: "summary",
+					});
+					if (typeof first.total === "number" && first.total >= 0) {
+						return { total: first.total, truncated: false };
 					}
+					// Jira Cloud reports no total: count by paging
+					const all = await jira.searchAllIssues(jql, { fields: "summary" });
+					return { total: all.issues.length, truncated: all.truncated };
+				});
+				console.log(
+					`  ${count.truncated ? "More than " : ""}${count.total} issue${count.total === 1 ? "" : "s"} match`,
+				);
+				if (count.truncated || count.total > DEFAULT_SEARCH_ALL_LIMIT) {
+					console.log(
+						chalk.yellow(
+							`  One import run handles up to ${DEFAULT_SEARCH_ALL_LIMIT} issues; narrow the filter or import in batches with --jql.`,
+						),
+					);
 				}
 			} catch (error) {
 				problem = describeError(error);
@@ -1425,9 +1434,7 @@ function printNextSteps(): void {
 	console.log(
 		"  1. Preview the import:   backlog-jira pull --import --dry-run",
 	);
-	console.log(
-		`  2. Import:               backlog-jira pull --import   (at most ${IMPORT_LIMIT} issues per run; narrow with --jql to import more)`,
-	);
+	console.log("  2. Import:               backlog-jira pull --import");
 	console.log(
 		'  3. Commit the setup:     git add .backlog-jira && git commit -m "Configure backlog-jira"',
 	);

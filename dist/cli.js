@@ -26477,6 +26477,9 @@ Original error: ${message}`);
         start_at: options?.startAt || 0,
         limit: options?.maxResults || 50
       };
+      if (options?.pageToken) {
+        input.page_token = options.pageToken;
+      }
       if (options?.fields) {
         input.fields = options.fields;
       }
@@ -26519,12 +26522,57 @@ Original error: ${message}`);
         issues,
         total: result.total,
         startAt: result.startAt || result.start_at || 0,
-        maxResults: result.maxResults || result.max_results || 50
+        maxResults: result.maxResults || result.max_results || 50,
+        nextPageToken: result.next_page_token || result.nextPageToken || undefined
       };
     } catch (error) {
       logger.error({ error, jql }, "Failed to search Jira issues");
       throw error;
     }
+  }
+  async searchAllIssues(jql, options = {}) {
+    const limit = options.limit ?? DEFAULT_SEARCH_ALL_LIMIT;
+    const pageSize = options.pageSize ?? 50;
+    const issues = [];
+    const seen = new Set;
+    let startAt = 0;
+    let pageToken;
+    let more = true;
+    while (more) {
+      const page = await this.searchIssues(jql, {
+        startAt,
+        maxResults: pageSize,
+        fields: options.fields,
+        pageToken
+      });
+      let added = 0;
+      for (const issue of page.issues) {
+        if (seen.has(issue.key))
+          continue;
+        if (issues.length === limit)
+          return { issues, truncated: true };
+        seen.add(issue.key);
+        issues.push(issue);
+        added++;
+      }
+      if (page.issues.length === 0 || added === 0) {
+        more = false;
+      } else if (page.nextPageToken) {
+        pageToken = page.nextPageToken;
+      } else if (pageToken) {
+        more = false;
+      } else if (page.total >= 0) {
+        startAt += page.issues.length;
+        more = startAt < page.total;
+      } else {
+        startAt += page.issues.length;
+        more = page.issues.length >= pageSize;
+      }
+      if (more && issues.length === limit) {
+        return { issues, truncated: true };
+      }
+    }
+    return { issues, truncated: false };
   }
   async getIssue(issueKey, options) {
     try {
@@ -26841,7 +26889,7 @@ function getJsonErrorText(json) {
   }
   return messages.length > 0 ? messages.join("; ") : null;
 }
-var MAX_AGILE_RESULTS = 5000;
+var DEFAULT_SEARCH_ALL_LIMIT = 1000, MAX_AGILE_RESULTS = 5000;
 var init_jira = __esm(() => {
   init_client2();
   init_stdio2();
@@ -29663,7 +29711,7 @@ async function conflictStep(ctx) {
 async function filterStep(ctx) {
   const { projectKey, jqlFilter } = jiraSection(ctx);
   const suggested = projectKey ? `project = ${projectKey} ORDER BY created DESC` : "";
-  console.log(source_default.gray(`  'backlog-jira pull --import' imports up to ${IMPORT_LIMIT} unlinked issues matching this JQL per run.`));
+  console.log(source_default.gray("  'backlog-jira pull --import' imports the unlinked issues matching this JQL."));
   if (findSprintEntry(ctx.config)?.pullScope === "open") {
     console.log(source_default.gray('  pullScope "open" adds: AND sprint in openSprints()'));
   }
@@ -29678,12 +29726,20 @@ async function filterStep(ctx) {
     let problem = null;
     if (detectCredentials().auth) {
       try {
-        const result = await withJira(ctx, (jira) => jira.searchIssues(jql, { maxResults: 1, fields: "summary" }));
-        if (typeof result.total === "number" && result.total >= 0) {
-          console.log(`  ${result.total} issue${result.total === 1 ? "" : "s"} match`);
-          if (result.total > IMPORT_LIMIT) {
-            console.log(source_default.yellow(`  More than ${IMPORT_LIMIT} issues match: one import run takes the first ${IMPORT_LIMIT}. Import in batches with narrower filters (pull --import --jql '...'), e.g. by sprint or created date.`));
+        const count = await withJira(ctx, async (jira) => {
+          const first = await jira.searchIssues(jql, {
+            maxResults: 1,
+            fields: "summary"
+          });
+          if (typeof first.total === "number" && first.total >= 0) {
+            return { total: first.total, truncated: false };
           }
+          const all = await jira.searchAllIssues(jql, { fields: "summary" });
+          return { total: all.issues.length, truncated: all.truncated };
+        });
+        console.log(`  ${count.truncated ? "More than " : ""}${count.total} issue${count.total === 1 ? "" : "s"} match`);
+        if (count.truncated || count.total > DEFAULT_SEARCH_ALL_LIMIT) {
+          console.log(source_default.yellow(`  One import run handles up to ${DEFAULT_SEARCH_ALL_LIMIT} issues; narrow the filter or import in batches with --jql.`));
         }
       } catch (error) {
         problem = describeError(error);
@@ -29709,7 +29765,7 @@ function printNextSteps() {
   console.log(source_default.bold.cyan(`
 Next steps:`));
   console.log("  1. Preview the import:   backlog-jira pull --import --dry-run");
-  console.log(`  2. Import:               backlog-jira pull --import   (at most ${IMPORT_LIMIT} issues per run; narrow with --jql to import more)`);
+  console.log("  2. Import:               backlog-jira pull --import");
   console.log('  3. Commit the setup:     git add .backlog-jira && git commit -m "Configure backlog-jira"');
   console.log(source_default.gray(`
   Revisit a step any time: backlog-jira configure --step <${CONFIGURE_STEPS.join("|")}>
@@ -29870,7 +29926,7 @@ async function configureCommand(options = {}) {
   const result = await runConfigure(options);
   process.exit(result.failed ? 1 : 0);
 }
-var import_prompts, CONFIGURE_STEPS, STEP_INFO, FIELD_SAMPLE_SIZE = 50, IMPORT_LIMIT = 50, WizardCancelled, STEP_RUNNERS;
+var import_prompts, CONFIGURE_STEPS, STEP_INFO, FIELD_SAMPLE_SIZE = 50, WizardCancelled, STEP_RUNNERS;
 var init_configure = __esm(() => {
   init_source();
   init_jira_sprints();
@@ -32166,7 +32222,8 @@ async function pull(options = {}) {
         sprints.warnings.push(`Could not refresh sprints of board ${sprints.mapping.boardId}: ${error instanceof Error ? error.message : String(error)}`);
       }
     }
-    const { mapped, unmapped } = await getTaskIds(options, backlog, jira, store, sprints);
+    const { mapped, unmapped, warnings } = await getTaskIds(options, backlog, jira, store, sprints);
+    result.warnings.push(...warnings ?? []);
     logger.info({ mappedCount: mapped.length, unmappedCount: unmapped.length }, "Tasks to process");
     if (options.import && unmapped.length > 0) {
       logger.info({ count: unmapped.length }, "Importing unmapped issues");
@@ -32291,8 +32348,13 @@ async function getIssuesForImport(options, jira, store, sprintMapping) {
   }
   jql = applySprintPullScope(jql, sprintMapping);
   logger.info({ jql }, "Fetching Jira issues for import");
-  const result = await jira.searchIssues(jql, { maxResults: 50 });
-  logger.info({ count: result.issues.length, total: result.total }, "Found Jira issues");
+  const result = await jira.searchAllIssues(jql, {
+    limit: DEFAULT_SEARCH_ALL_LIMIT
+  });
+  logger.info({ count: result.issues.length, truncated: result.truncated }, "Found Jira issues");
+  const warnings = result.truncated ? [
+    `More than ${DEFAULT_SEARCH_ALL_LIMIT} Jira issues match the import filter; only the first ${DEFAULT_SEARCH_ALL_LIMIT} were processed. Narrow the filter (--jql) to import the rest.`
+  ] : [];
   const mapped = [];
   const unmapped = [];
   for (const issue of result.issues) {
@@ -32304,7 +32366,7 @@ async function getIssuesForImport(options, jira, store, sprintMapping) {
     }
   }
   logger.info({ mappedCount: mapped.length, unmappedCount: unmapped.length }, "Categorized issues for import");
-  return { mapped, unmapped };
+  return { mapped, unmapped, warnings };
 }
 async function getAvailableBacklogAssignees(backlog) {
   try {

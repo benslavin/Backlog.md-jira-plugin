@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { BacklogClient, type BacklogTask } from "../integrations/backlog.ts";
 import {
+	DEFAULT_SEARCH_ALL_LIMIT,
 	JiraClient,
 	type JiraClientOptions,
 	type JiraIssue,
@@ -142,13 +143,14 @@ export async function pull(options: PullOptions = {}): Promise<PullResult> {
 		}
 
 		// Get list of tasks to pull and issues to import
-		const { mapped, unmapped } = await getTaskIds(
+		const { mapped, unmapped, warnings } = await getTaskIds(
 			options,
 			backlog,
 			jira,
 			store,
 			sprints,
 		);
+		result.warnings.push(...(warnings ?? []));
 
 		logger.info(
 			{ mappedCount: mapped.length, unmappedCount: unmapped.length },
@@ -252,7 +254,7 @@ async function getTaskIds(
 	jira: JiraClient,
 	store: FrontmatterStore,
 	sprints: SprintPullContext | null,
-): Promise<{ mapped: string[]; unmapped: string[] }> {
+): Promise<{ mapped: string[]; unmapped: string[]; warnings?: string[] }> {
 	if (options.taskIds && options.taskIds.length > 0) {
 		return { mapped: options.taskIds, unmapped: [] };
 	}
@@ -321,7 +323,7 @@ async function getIssuesForImport(
 	jira: JiraClient,
 	store: FrontmatterStore,
 	sprintMapping: SprintMapping | null,
-): Promise<{ mapped: string[]; unmapped: string[] }> {
+): Promise<{ mapped: string[]; unmapped: string[]; warnings?: string[] }> {
 	// Get JQL from options or config
 	let jql = options.jql;
 	let configProjectKey: string | undefined;
@@ -357,12 +359,19 @@ async function getIssuesForImport(
 
 	logger.info({ jql }, "Fetching Jira issues for import");
 
-	// Search for issues
-	const result = await jira.searchIssues(jql, { maxResults: 50 });
+	// Search for issues, page by page
+	const result = await jira.searchAllIssues(jql, {
+		limit: DEFAULT_SEARCH_ALL_LIMIT,
+	});
 	logger.info(
-		{ count: result.issues.length, total: result.total },
+		{ count: result.issues.length, truncated: result.truncated },
 		"Found Jira issues",
 	);
+	const warnings = result.truncated
+		? [
+				`More than ${DEFAULT_SEARCH_ALL_LIMIT} Jira issues match the import filter; only the first ${DEFAULT_SEARCH_ALL_LIMIT} were processed. Narrow the filter (--jql) to import the rest.`,
+			]
+		: [];
 
 	// Separate mapped and unmapped issues
 	const mapped: string[] = [];
@@ -384,7 +393,7 @@ async function getIssuesForImport(
 		"Categorized issues for import",
 	);
 
-	return { mapped, unmapped };
+	return { mapped, unmapped, warnings };
 }
 
 /**

@@ -165,6 +165,96 @@ describe("JiraClient", () => {
 		});
 	});
 
+	describe("searchAllIssues", () => {
+		const issues = (from: number, count: number) =>
+			Array.from({ length: count }, (_, i) => ({
+				key: `CR2-${from + i}`,
+				id: String(from + i),
+				fields: { summary: "x", status: { name: "To Do" } },
+			}));
+		function clientWith(tool: (input: Record<string, unknown>) => unknown) {
+			const client = new JiraClient();
+			const calls: Array<Record<string, unknown>> = [];
+			(client as unknown as { callMcpTool: unknown }).callMcpTool = mock(
+				async (_name: string, input: Record<string, unknown>) => {
+					calls.push(input);
+					return tool(input);
+				},
+			);
+			return { client, calls };
+		}
+
+		it("follows page tokens on Jira Cloud (no total)", async () => {
+			const { client, calls } = clientWith((input) =>
+				input.page_token === "p2"
+					? { issues: issues(51, 22), total: -1 }
+					: { issues: issues(1, 50), total: -1, next_page_token: "p2" },
+			);
+
+			const result = await client.searchAllIssues("project = CR2");
+
+			expect(result.issues).toHaveLength(72);
+			expect(result.truncated).toBe(false);
+			expect(calls.map((c) => c.page_token)).toEqual([undefined, "p2"]);
+		});
+
+		it("pages by offset on Server/Data Center", async () => {
+			const { client, calls } = clientWith((input) => {
+				const start = input.start_at as number;
+				return {
+					issues: issues(start + 1, Math.min(50, 72 - start)),
+					total: 72,
+					start_at: start,
+				};
+			});
+
+			const result = await client.searchAllIssues("project = CR2");
+
+			expect(result.issues.map((i) => i.key).at(-1)).toBe("CR2-72");
+			expect(calls.map((c) => c.start_at)).toEqual([0, 50]);
+		});
+
+		it("stops when the server ignores the offset", async () => {
+			const { client, calls } = clientWith(() => ({
+				issues: issues(1, 50),
+				total: -1,
+			}));
+
+			const result = await client.searchAllIssues("project = CR2");
+
+			expect(result.issues).toHaveLength(50);
+			expect(calls).toHaveLength(2);
+		});
+
+		it("reports truncation at the limit", async () => {
+			const { client } = clientWith((input) => ({
+				issues: issues((input.start_at as number) + 1, 50),
+				total: 500,
+			}));
+
+			const result = await client.searchAllIssues("project = CR2", {
+				limit: 60,
+			});
+
+			expect(result.issues).toHaveLength(60);
+			expect(result.truncated).toBe(true);
+		});
+
+		it("is not truncated when the last page fills the limit exactly", async () => {
+			const { client } = clientWith((input) => ({
+				issues: issues((input.start_at as number) + 1, 50),
+				total: 100,
+			}));
+
+			const result = await client.searchAllIssues("project = CR2", {
+				limit: 100,
+			});
+
+			expect(result.issues).toHaveLength(100);
+			expect(result.truncated).toBe(false);
+		});
+	});
+
 	describe("getAllProjects", () => {
 		it("accepts the plain array MCP Atlassian returns", async () => {
 			const client = new JiraClient();

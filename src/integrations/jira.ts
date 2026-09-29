@@ -36,10 +36,16 @@ export interface JiraIssue {
 
 export interface JiraSearchResult {
 	issues: JiraIssue[];
+	/** -1 when Jira does not report it (Jira Cloud) */
 	total: number;
 	startAt: number;
 	maxResults: number;
+	/** Token of the next page (Jira Cloud) */
+	nextPageToken?: string;
 }
+
+/** Most issues searchAllIssues returns unless told otherwise */
+export const DEFAULT_SEARCH_ALL_LIMIT = 1000;
 
 export interface JiraTransition {
 	id: string;
@@ -1067,7 +1073,13 @@ export class JiraClient {
 	 */
 	async searchIssues(
 		jql: string,
-		options?: { startAt?: number; maxResults?: number; fields?: string },
+		options?: {
+			startAt?: number;
+			maxResults?: number;
+			fields?: string;
+			/** Jira Cloud pages by token; start_at is ignored there */
+			pageToken?: string;
+		},
 	): Promise<JiraSearchResult> {
 		try {
 			const input: Record<string, unknown> = {
@@ -1075,6 +1087,9 @@ export class JiraClient {
 				start_at: options?.startAt || 0,
 				limit: options?.maxResults || 50,
 			};
+			if (options?.pageToken) {
+				input.page_token = options.pageToken;
+			}
 
 			if (options?.fields) {
 				input.fields = options.fields;
@@ -1087,6 +1102,8 @@ export class JiraClient {
 				start_at?: number;
 				maxResults?: number;
 				max_results?: number;
+				next_page_token?: string;
+				nextPageToken?: string;
 			};
 
 			// Validate the result has the expected structure
@@ -1163,11 +1180,70 @@ export class JiraClient {
 				total: result.total,
 				startAt: result.startAt || result.start_at || 0,
 				maxResults: result.maxResults || result.max_results || 50,
+				nextPageToken:
+					result.next_page_token || result.nextPageToken || undefined,
 			};
 		} catch (error) {
 			logger.error({ error, jql }, "Failed to search Jira issues");
 			throw error;
 		}
+	}
+
+	/**
+	 * All issues matching a JQL query, up to limit. MCP Atlassian returns at
+	 * most 50 issues per call, so pages are fetched by token (Jira Cloud) or
+	 * by offset (Server/Data Center). truncated is true when more issues
+	 * matched than limit.
+	 */
+	async searchAllIssues(
+		jql: string,
+		options: { fields?: string; limit?: number; pageSize?: number } = {},
+	): Promise<{ issues: JiraIssue[]; truncated: boolean }> {
+		const limit = options.limit ?? DEFAULT_SEARCH_ALL_LIMIT;
+		const pageSize = options.pageSize ?? 50;
+		const issues: JiraIssue[] = [];
+		const seen = new Set<string>();
+		let startAt = 0;
+		let pageToken: string | undefined;
+		let more = true;
+
+		while (more) {
+			const page = await this.searchIssues(jql, {
+				startAt,
+				maxResults: pageSize,
+				fields: options.fields,
+				pageToken,
+			});
+			let added = 0;
+			for (const issue of page.issues) {
+				if (seen.has(issue.key)) continue;
+				if (issues.length === limit) return { issues, truncated: true };
+				seen.add(issue.key);
+				issues.push(issue);
+				added++;
+			}
+
+			if (page.issues.length === 0 || added === 0) {
+				// Empty page, or the server ignored the offset
+				more = false;
+			} else if (page.nextPageToken) {
+				pageToken = page.nextPageToken;
+			} else if (pageToken) {
+				// Last page of a token-paged (Cloud) search
+				more = false;
+			} else if (page.total >= 0) {
+				startAt += page.issues.length;
+				more = startAt < page.total;
+			} else {
+				// Total unknown and no token: a full page may have a successor
+				startAt += page.issues.length;
+				more = page.issues.length >= pageSize;
+			}
+			if (more && issues.length === limit) {
+				return { issues, truncated: true };
+			}
+		}
+		return { issues, truncated: false };
 	}
 
 	/**

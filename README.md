@@ -237,9 +237,9 @@ This creates `.backlog-jira/` directory with:
 | `sprints` | Lists the project's boards, and for a board with sprints writes the sprint mapping (direction, `createSprints`, `archiveClosedSprints`, `pullScope`) and sets `mcp.envVars.TOOLSETS` so the `jira_agile` tools stay enabled. |
 | `fields` | Samples the 50 most recently updated project issues and lists the fields they use, most used first, with a suggested target and type. Fields the plugin already syncs (summary, status, assignee…), the sprint and noise fields (watchers, rank) and unsupported types are left out. Tick the ones to sync, then accept or adjust; "Search all fields…" covers the rest. Mappings go through the same validation as `map-fields add`. |
 | `conflict` | Chooses the conflict strategy. |
-| `filter` | Sets the import JQL (default `project = KEY ORDER BY created DESC`) and shows how many issues match. |
+| `filter` | Sets the import JQL (default `project = KEY ORDER BY created DESC`) and shows how many issues match. `pull --import` pages through all matching issues (up to 1,000 per run). |
 
-The wizard ends by running `backlog-jira doctor` and printing the next steps: preview the import with `backlog-jira pull --import --dry-run`, import (one `pull --import` run handles at most 50 issues, so import larger projects in batches with `--jql`), and commit `.backlog-jira/`.
+The wizard ends by running `backlog-jira doctor` and printing the next steps: preview the import with `backlog-jira pull --import --dry-run`, import with `backlog-jira pull --import`, and commit `.backlog-jira/`.
 
 Revisit any single step later:
 
