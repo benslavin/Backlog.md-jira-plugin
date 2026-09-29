@@ -36,7 +36,7 @@ export const logger = isDevelopment
  * Useful for temporarily suppressing logs in commands
  */
 export function setLogLevel(
-	level: "trace" | "debug" | "info" | "warn" | "error" | "fatal",
+	level: "trace" | "debug" | "info" | "warn" | "error" | "fatal" | "silent",
 ) {
 	logger.level = level;
 }
@@ -46,4 +46,18 @@ export function setLogLevel(
  */
 export function getLogLevel(): string {
 	return logger.level;
+}
+
+/**
+ * Wait until log lines are written. The pino-pretty transport writes from a
+ * worker thread, so its output can appear after later console output.
+ */
+export function flushLogger(): Promise<void> {
+	return new Promise((resolve) => {
+		try {
+			logger.flush(() => resolve());
+		} catch {
+			resolve();
+		}
+	});
 }

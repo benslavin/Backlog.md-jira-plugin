@@ -25,7 +25,12 @@ import {
 	validateFieldMappings,
 } from "../utils/field-mapping.ts";
 import { jiraClientOptionsFromConfig } from "../utils/jira-config.ts";
-import { getLogLevel, logger, setLogLevel } from "../utils/logger.ts";
+import {
+	flushLogger,
+	getLogLevel,
+	logger,
+	setLogLevel,
+} from "../utils/logger.ts";
 import {
 	applyRequiredToolsets,
 	applySprintSettings,
@@ -443,6 +448,13 @@ async function projectStep(ctx: WizardContext): Promise<StepOutcome> {
 	let projects: Array<{ key: string; name: string }> = [];
 	try {
 		projects = await withJira(ctx, (jira) => jira.getAllProjects());
+		if (projects.length === 0) {
+			console.log(
+				chalk.yellow(
+					"  ⚠ Jira returned no projects. Check the connection (backlog-jira configure --step connection) or enter the key manually.",
+				),
+			);
+		}
 	} catch (error) {
 		console.log(
 			chalk.yellow(`  ⚠ Could not list Jira projects: ${describeError(error)}`),
@@ -457,7 +469,7 @@ async function projectStep(ctx: WizardContext): Promise<StepOutcome> {
 			message: "Jira project key (e.g. PROJ):",
 			initial: current.projectKey,
 			validate: (value: string) =>
-				/^[A-Za-z][A-Za-z0-9_]*$/.test(value.trim())
+				/^[A-Za-z][A-Za-z0-9_]+$/.test(value.trim())
 					? true
 					: "Enter a project key such as PROJ",
 		});
@@ -1150,7 +1162,9 @@ export async function runConfigure(
 	options: ConfigureOptions = {},
 ): Promise<ConfigureResult> {
 	const originalLogLevel = getLogLevel();
-	if (!options.verbose) setLogLevel("warn");
+	// The wizard reports errors itself; log lines (written asynchronously by
+	// a logger transport) would print over its prompts
+	if (!options.verbose) setLogLevel("silent");
 	try {
 		if (options.nonInteractive) return configureNonInteractive(options);
 
@@ -1274,7 +1288,9 @@ export async function runConfigure(
 					console.log(chalk.red(`  ✗ doctor failed: ${describeError(error)}`));
 					result.failed = true;
 				} finally {
-					if (!options.verbose) setLogLevel("warn");
+					// The wizard reports errors itself; log lines (written asynchronously by
+					// a logger transport) would print over its prompts
+					if (!options.verbose) setLogLevel("silent");
 				}
 				printNextSteps();
 			}

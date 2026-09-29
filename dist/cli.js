@@ -25869,6 +25869,7 @@ class JiraClient {
   extraEnv;
   sprintFieldId;
   extraIssueFields = [];
+  serverStderr = "";
   constructor(options = {}) {
     this.dockerImage = options.dockerImage || "ghcr.io/sooperset/mcp-atlassian:latest";
     this.useExternalServer = options.useExternalServer || false;
@@ -25937,9 +25938,13 @@ class JiraClient {
       }
       return this.client;
     } catch (error) {
-      logger.error({ error }, "Failed to connect to MCP Atlassian server");
+      if (this.silentMode) {
+        logger.debug({ error }, "Failed to connect to MCP Atlassian server");
+      } else {
+        logger.error({ error }, "Failed to connect to MCP Atlassian server");
+      }
       this.client = null;
-      throw error;
+      throw this.withServerOutput(error);
     }
   }
   validateAndPrepareCredentials() {
@@ -25974,11 +25979,12 @@ class JiraClient {
   }
   async createExternalServerTransport(envVars) {
     logger.debug({ command: this.serverCommand, args: this.serverArgs }, "Connecting to external MCP server");
-    return new StdioClientTransport({
+    return this.captureStderr(new StdioClientTransport({
       command: this.serverCommand,
       args: this.serverArgs,
-      env: envVars
-    });
+      env: envVars,
+      ...this.silentMode ? { stderr: "pipe" } : {}
+    }));
   }
   createDockerTransport(envVars) {
     const dockerArgs = ["run", "-i", "-e", "JIRA_URL"];
@@ -26008,11 +26014,33 @@ class JiraClient {
       const fullCommand = `docker ${dockerArgs.join(" ")}`;
       logger.info({ command: fullCommand, dockerArgs }, "Creating Docker-based MCP transport");
     }
-    return new StdioClientTransport({
+    return this.captureStderr(new StdioClientTransport({
       command: "docker",
       args: dockerArgs,
-      env: envVars
-    });
+      env: envVars,
+      ...this.silentMode ? { stderr: "pipe" } : {}
+    }));
+  }
+  captureStderr(transport) {
+    const stream = transport.stderr;
+    if (stream) {
+      this.serverStderr = "";
+      stream.on("data", (chunk) => {
+        this.serverStderr = (this.serverStderr + String(chunk)).slice(-4000);
+      });
+    }
+    return transport;
+  }
+  withServerOutput(error) {
+    const output = this.serverStderr.trim();
+    if (!output || !(error instanceof Error))
+      return error;
+    const tail = output.split(`
+`).slice(-10).join(`
+`);
+    return new Error(`${error.message}
+MCP server output:
+${tail}`);
   }
   async waitForServerReady() {
     const maxRetries = 10;
@@ -26249,8 +26277,14 @@ Current tool: ${toolName}`;
   async getAllProjects() {
     try {
       const result = await this.callMcpTool("jira_get_all_projects", {});
-      logger.info({ count: result.projects.length }, "Retrieved Jira projects");
-      return result.projects;
+      const projects = Array.isArray(result) ? result : result?.projects ?? [];
+      const parsed = projects.filter((p) => p && typeof p.key === "string").map((p) => ({
+        key: p.key,
+        name: String(p.name ?? p.key),
+        id: String(p.id ?? "")
+      }));
+      logger.info({ count: parsed.length }, "Retrieved Jira projects");
+      return parsed;
     } catch (error) {
       logger.error({ error }, "Failed to get Jira projects");
       throw error;
@@ -28774,6 +28808,9 @@ async function projectStep(ctx) {
   let projects = [];
   try {
     projects = await withJira(ctx, (jira) => jira.getAllProjects());
+    if (projects.length === 0) {
+      console.log(source_default.yellow("  ⚠ Jira returned no projects. Check the connection (backlog-jira configure --step connection) or enter the key manually."));
+    }
   } catch (error) {
     console.log(source_default.yellow(`  ⚠ Could not list Jira projects: ${describeError(error)}`));
   }
@@ -28783,7 +28820,7 @@ async function projectStep(ctx) {
     name: "projectKey",
     message: "Jira project key (e.g. PROJ):",
     initial: current.projectKey,
-    validate: (value) => /^[A-Za-z][A-Za-z0-9_]*$/.test(value.trim()) ? true : "Enter a project key such as PROJ"
+    validate: (value) => /^[A-Za-z][A-Za-z0-9_]+$/.test(value.trim()) ? true : "Enter a project key such as PROJ"
   });
   if (projects.length > 0) {
     const sorted = [...projects].sort((a, b) => a.key.localeCompare(b.key));
@@ -29246,7 +29283,7 @@ Next steps:`));
 async function runConfigure(options = {}) {
   const originalLogLevel = getLogLevel();
   if (!options.verbose)
-    setLogLevel("warn");
+    setLogLevel("silent");
   try {
     if (options.nonInteractive)
       return configureNonInteractive(options);
@@ -29346,7 +29383,7 @@ Checking the setup (backlog-jira doctor)
           result.failed = true;
         } finally {
           if (!options.verbose)
-            setLogLevel("warn");
+            setLogLevel("silent");
         }
         printNextSteps();
       }
@@ -30480,17 +30517,17 @@ async function initCommand(options = {}) {
   const baseDir = options.baseDir || process.cwd();
   const configDir = getConfigDir(baseDir);
   if (existsSync13(configDir)) {
-    logger.warn(".backlog-jira/ already exists. Use 'backlog-jira configure' to modify settings.");
+    console.log(source_default.yellow(".backlog-jira/ already exists. Use 'backlog-jira configure' to modify settings."));
     return;
   }
   bootstrapConfigDir(baseDir);
   const configPath = getConfigPath(baseDir);
   await setupAgentInstructions(baseDir);
-  logger.info("");
-  logger.info("✓ Initialized .backlog-jira/ configuration");
-  logger.info(`  - Config: ${configPath}`);
-  logger.info(`  - Snapshots: ${join14(configDir, "snapshots/")}`);
-  logger.info(`  - Operations log: ${join14(configDir, "ops-log.jsonl")}`);
+  console.log("");
+  console.log(source_default.green("✓ Initialized .backlog-jira/ configuration"));
+  console.log(`  - Config: ${configPath}`);
+  console.log(`  - Snapshots: ${join14(configDir, "snapshots/")}`);
+  console.log(`  - Operations log: ${join14(configDir, "ops-log.jsonl")}`);
   await offerGuidedSetup(baseDir, options.runWizard);
 }
 async function offerGuidedSetup(baseDir, runWizard) {
@@ -30533,12 +30570,12 @@ async function setupAgentInstructions(projectRoot) {
     initial: true
   });
   if (response.shouldSetup === undefined) {
-    logger.info("Setup cancelled.");
+    console.log("Setup cancelled.");
     return;
   }
   const shouldSetup = response.shouldSetup;
   if (!shouldSetup) {
-    logger.info("Skipping agent instructions setup. You can add them later manually.");
+    console.log("Skipping agent instructions setup. You can add them later manually.");
     return;
   }
   const commonAgentFiles = [
@@ -30571,12 +30608,12 @@ Found ${existingFiles.length} agent instruction file(s):
     instructions: false
   });
   if (filesResponse.selectedFiles === undefined) {
-    logger.info("Setup cancelled.");
+    console.log("Setup cancelled.");
     return;
   }
   const selectedFiles = filesResponse.selectedFiles;
   if (selectedFiles.length === 0) {
-    logger.info("No files selected. Skipping agent instructions setup.");
+    console.log("No files selected. Skipping agent instructions setup.");
     return;
   }
   console.log(source_default.cyan(`
@@ -30604,7 +30641,7 @@ Choose how agent instructions should be added:
     initial: 0
   });
   if (modeResponse.mode === undefined) {
-    logger.info("Setup cancelled.");
+    console.log("Setup cancelled.");
     return;
   }
   const mode = modeResponse.mode;

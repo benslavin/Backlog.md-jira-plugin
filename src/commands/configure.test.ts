@@ -351,7 +351,7 @@ describe("configure --step", () => {
 	});
 
 	it("project: falls back to manual entry when projects cannot be listed", async () => {
-		await answer({ projectKey: "ops", issueType: "Task" });
+		const asked = await answer({ projectKey: "ops", issueType: "Task" });
 		const jira = fakeJira({
 			getAllProjects: mock(async () => {
 				throw new Error("MCP tool jira_get_all_projects failed: 401");
@@ -361,6 +361,10 @@ describe("configure --step", () => {
 		await run({ step: "project" }, jira);
 
 		expect(printed()).toContain("jira_get_all_projects failed: 401");
+		const keyQuestion = asked.find((q) => q.name === "projectKey");
+		const validate = keyQuestion?.validate as (value: string) => unknown;
+		expect(validate("X")).not.toBe(true);
+		expect(validate("ops")).toBe(true);
 		expect(readConfig().jira).toMatchObject({ projectKey: "OPS" });
 	});
 
@@ -579,6 +583,36 @@ describe("configure wizard", () => {
 		expect(result.failed).toBe(true);
 		expect(printed()).toContain("401 Unauthorized");
 		expect(doctor).not.toHaveBeenCalled();
+	});
+});
+
+describe("configure project list", () => {
+	it("explains an empty project list", async () => {
+		await answer({ projectKey: "OPS", issueType: "Task" });
+		await run(
+			{ step: "project" },
+			fakeJira({ getAllProjects: mock(async () => []) }),
+		);
+		expect(printed()).toContain("Jira returned no projects");
+	});
+});
+
+describe("configure logging", () => {
+	it("silences the logger during the wizard so log lines cannot cover prompts", async () => {
+		const { getLogLevel } = await import("../utils/logger.ts");
+		const before = getLogLevel();
+		let during = "";
+		await answer({
+			conflictStrategy: () => {
+				during = getLogLevel();
+				return "prompt";
+			},
+		});
+
+		await run({ step: "conflict" });
+
+		expect(during).toBe("silent");
+		expect(getLogLevel()).toBe(before);
 	});
 });
 

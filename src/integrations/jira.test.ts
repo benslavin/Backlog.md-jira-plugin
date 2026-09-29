@@ -165,6 +165,28 @@ describe("JiraClient", () => {
 		});
 	});
 
+	describe("getAllProjects", () => {
+		it("accepts the plain array MCP Atlassian returns", async () => {
+			const client = new JiraClient();
+			(client as unknown as { callMcpTool: unknown }).callMcpTool = mock(
+				async () => [{ key: "WEB", name: "Website", id: 10001 }],
+			);
+			expect(await client.getAllProjects()).toEqual([
+				{ key: "WEB", name: "Website", id: "10001" },
+			]);
+		});
+
+		it("accepts a projects wrapper", async () => {
+			const client = new JiraClient();
+			(client as unknown as { callMcpTool: unknown }).callMcpTool = mock(
+				async () => ({ projects: [{ key: "API", name: "Backend", id: "2" }] }),
+			);
+			expect(await client.getAllProjects()).toEqual([
+				{ key: "API", name: "Backend", id: "2" },
+			]);
+		});
+	});
+
 	describe("getTransitions to_status", () => {
 		it("uses the to_status name MCP Atlassian returns", async () => {
 			const client = new JiraClient();

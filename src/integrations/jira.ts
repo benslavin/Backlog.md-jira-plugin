@@ -76,6 +76,8 @@ export class JiraClient {
 	private extraEnv: Record<string, string>;
 	private sprintFieldId: string | null | undefined;
 	private extraIssueFields: string[] = [];
+	/** Tail of the MCP server's stderr (silent mode only) */
+	private serverStderr = "";
 
 	constructor(options: JiraClientOptions = {}) {
 		this.dockerImage =
@@ -169,9 +171,13 @@ export class JiraClient {
 			}
 			return this.client;
 		} catch (error) {
-			logger.error({ error }, "Failed to connect to MCP Atlassian server");
+			if (this.silentMode) {
+				logger.debug({ error }, "Failed to connect to MCP Atlassian server");
+			} else {
+				logger.error({ error }, "Failed to connect to MCP Atlassian server");
+			}
 			this.client = null;
-			throw error;
+			throw this.withServerOutput(error);
 		}
 	}
 
@@ -230,11 +236,14 @@ export class JiraClient {
 			"Connecting to external MCP server",
 		);
 
-		return new StdioClientTransport({
-			command: this.serverCommand,
-			args: this.serverArgs,
-			env: envVars,
-		});
+		return this.captureStderr(
+			new StdioClientTransport({
+				command: this.serverCommand,
+				args: this.serverArgs,
+				env: envVars,
+				...(this.silentMode ? { stderr: "pipe" as const } : {}),
+			}),
+		);
 	}
 
 	/**
@@ -289,11 +298,39 @@ export class JiraClient {
 			);
 		}
 
-		return new StdioClientTransport({
-			command: "docker",
-			args: dockerArgs,
-			env: envVars,
-		});
+		return this.captureStderr(
+			new StdioClientTransport({
+				command: "docker",
+				args: dockerArgs,
+				env: envVars,
+				...(this.silentMode ? { stderr: "pipe" as const } : {}),
+			}),
+		);
+	}
+
+	/**
+	 * In silent mode the server's stderr (startup banner, warnings) is piped
+	 * instead of printed; its tail explains a server that fails to start
+	 */
+	private captureStderr(transport: StdioClientTransport): StdioClientTransport {
+		const stream = transport.stderr;
+		if (stream) {
+			this.serverStderr = "";
+			stream.on("data", (chunk: Buffer | string) => {
+				this.serverStderr = (this.serverStderr + String(chunk)).slice(-4000);
+			});
+		}
+		return transport;
+	}
+
+	/**
+	 * Add the last lines the MCP server wrote to stderr to a connection error
+	 */
+	private withServerOutput(error: unknown): unknown {
+		const output = this.serverStderr.trim();
+		if (!output || !(error instanceof Error)) return error;
+		const tail = output.split("\n").slice(-10).join("\n");
+		return new Error(`${error.message}\nMCP server output:\n${tail}`);
 	}
 
 	/**
@@ -674,16 +711,23 @@ export class JiraClient {
 		Array<{ key: string; name: string; id: string }>
 	> {
 		try {
-			const result = (await this.callMcpTool("jira_get_all_projects", {})) as {
-				projects: Array<{
-					key: string;
-					name: string;
-					id: string;
-				}>;
-			};
+			const result = await this.callMcpTool("jira_get_all_projects", {});
+			// MCP Atlassian returns a plain array; older versions wrap it
+			const projects = (
+				Array.isArray(result)
+					? result
+					: ((result as { projects?: unknown[] } | null)?.projects ?? [])
+			) as Array<{ key: string; name: string; id: string | number }>;
+			const parsed = projects
+				.filter((p) => p && typeof p.key === "string")
+				.map((p) => ({
+					key: p.key,
+					name: String(p.name ?? p.key),
+					id: String(p.id ?? ""),
+				}));
 
-			logger.info({ count: result.projects.length }, "Retrieved Jira projects");
-			return result.projects;
+			logger.info({ count: parsed.length }, "Retrieved Jira projects");
+			return parsed;
 		} catch (error) {
 			logger.error({ error }, "Failed to get Jira projects");
 			throw error;

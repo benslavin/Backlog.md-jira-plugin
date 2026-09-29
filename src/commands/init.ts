@@ -50,8 +50,10 @@ export async function initCommand(
 
 	// Check if already initialized
 	if (existsSync(configDir)) {
-		logger.warn(
-			".backlog-jira/ already exists. Use 'backlog-jira configure' to modify settings.",
+		console.log(
+			chalk.yellow(
+				".backlog-jira/ already exists. Use 'backlog-jira configure' to modify settings.",
+			),
 		);
 		return;
 	}
@@ -63,11 +65,13 @@ export async function initCommand(
 	// Agent instructions setup
 	await setupAgentInstructions(baseDir);
 
-	logger.info("");
-	logger.info("✓ Initialized .backlog-jira/ configuration");
-	logger.info(`  - Config: ${configPath}`);
-	logger.info(`  - Snapshots: ${join(configDir, "snapshots/")}`);
-	logger.info(`  - Operations log: ${join(configDir, "ops-log.jsonl")}`);
+	// console output, not the logger: a logger transport writes
+	// asynchronously and would print over the next prompt
+	console.log("");
+	console.log(chalk.green("✓ Initialized .backlog-jira/ configuration"));
+	console.log(`  - Config: ${configPath}`);
+	console.log(`  - Snapshots: ${join(configDir, "snapshots/")}`);
+	console.log(`  - Operations log: ${join(configDir, "ops-log.jsonl")}`);
 
 	await offerGuidedSetup(baseDir, options.runWizard);
 }
@@ -132,14 +136,14 @@ async function setupAgentInstructions(projectRoot: string): Promise<void> {
 
 	// Handle user cancellation (Ctrl+C)
 	if (response.shouldSetup === undefined) {
-		logger.info("Setup cancelled.");
+		console.log("Setup cancelled.");
 		return;
 	}
 
 	const shouldSetup = response.shouldSetup;
 
 	if (!shouldSetup) {
-		logger.info(
+		console.log(
 			"Skipping agent instructions setup. You can add them later manually.",
 		);
 		return;
@@ -193,14 +197,14 @@ async function setupAgentInstructions(projectRoot: string): Promise<void> {
 
 	// Handle user cancellation (Ctrl+C)
 	if (filesResponse.selectedFiles === undefined) {
-		logger.info("Setup cancelled.");
+		console.log("Setup cancelled.");
 		return;
 	}
 
 	const selectedFiles = filesResponse.selectedFiles;
 
 	if (selectedFiles.length === 0) {
-		logger.info("No files selected. Skipping agent instructions setup.");
+		console.log("No files selected. Skipping agent instructions setup.");
 		return;
 	}
 
@@ -236,7 +240,7 @@ async function setupAgentInstructions(projectRoot: string): Promise<void> {
 
 	// Handle user cancellation (Ctrl+C)
 	if (modeResponse.mode === undefined) {
-		logger.info("Setup cancelled.");
+		console.log("Setup cancelled.");
 		return;
 	}
 

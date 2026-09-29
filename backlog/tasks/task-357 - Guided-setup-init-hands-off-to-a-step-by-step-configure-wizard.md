@@ -5,7 +5,7 @@ status: Done
 assignee:
   - '@claude'
 created_date: '2026-09-29 14:22'
-updated_date: '2026-09-29 14:44'
+updated_date: '2026-09-29 14:58'
 labels:
   - setup
   - cli
@@ -69,4 +69,10 @@ Guided setup: `init` offers a step-by-step `configure` wizard that takes a new p
 - Docs: README (no .env claim, init/configure/guided steps, TOOLSETS), AUTHENTICATION (.env loading fixed), status-mapping, sprint-sync, AGENTS.md and the embedded agent instructions
 
 Tests: setup helpers, config file, logger, wizard steps/wizard/non-interactive (configure.test.ts), init hand-off, checkConnection/to_status, doctor sprint message. 652 pass; biome and tsc clean. Checked by hand against the Docker MCP server with an unreachable Jira URL: the connection step shows the DNS error.
+
+Follow-up fixes from a real run:
+- init prints its summary with console.log and the wizard silences the logger (unless --verbose): the pino-pretty transport writes from a worker thread, so log lines appeared after, and over, the next prompt. doctor output is flushed before the next steps
+- getAllProjects accepts the plain array MCP Atlassian returns (it read result.projects and failed with "Cannot read properties of undefined"). An empty project list now says so
+- Silent-mode clients pipe the MCP server's stderr (FastMCP banner, TOOLSETS warning) instead of printing it, and add its tail to errors when the server fails to start
+- Manual project keys need at least 2 characters, as the MCP server requires
 <!-- SECTION:NOTES:END -->

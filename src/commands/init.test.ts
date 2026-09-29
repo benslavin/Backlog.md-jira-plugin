@@ -378,6 +378,37 @@ describe("init command", () => {
 			).toBe(true);
 		});
 
+		it("prints the init summary before asking to run the wizard", async () => {
+			const events: string[] = [];
+			const promptsMock = await import("prompts");
+			spyOn(promptsMock, "default").mockImplementation((async (question: {
+				name: string;
+			}) => {
+				events.push(`prompt:${question.name}`);
+				return {};
+			}) as never);
+			const log = spyOn(console, "log").mockImplementation((...args) => {
+				events.push(`log:${String(args[0])}`);
+			});
+			const { logger } = await import("../utils/logger.ts");
+			const info = spyOn(logger, "info");
+
+			try {
+				await initCommand({ baseDir: TEST_DIR, runWizard: async () => {} });
+			} finally {
+				log.mockRestore();
+				info.mockRestore();
+			}
+
+			const summary = events.findIndex((e) =>
+				e.includes("Initialized .backlog-jira/ configuration"),
+			);
+			expect(summary).toBeGreaterThan(-1);
+			expect(summary).toBeLessThan(events.indexOf("prompt:runWizard"));
+			// Logger output is asynchronous and would land after the prompt
+			expect(info).not.toHaveBeenCalled();
+		});
+
 		it("leaves a valid default config and explains how to run it later when declined", async () => {
 			const promptsMock = await import("prompts");
 			spyOn(promptsMock, "default").mockResolvedValue({
