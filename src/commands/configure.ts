@@ -32,9 +32,11 @@ import {
 	setLogLevel,
 } from "../utils/logger.ts";
 import {
+	type IssueTypeStatuses,
 	applyRequiredToolsets,
 	applySprintSettings,
 	buildStatusMappingConfig,
+	checkStatusNames,
 	credentialHelpLines,
 	detectCredentials,
 	discoverProjectStatuses,
@@ -579,9 +581,14 @@ async function statusStep(ctx: WizardContext): Promise<StepOutcome> {
 		: [];
 	const backlogStatuses = ctx.backlogStatuses();
 
-	let perType: Array<{ issueType: string; statuses: string[] }> = [];
+	const known = [...Object.values(previous).flat(), ...previousUnmapped].map(
+		String,
+	);
+	let perType: IssueTypeStatuses[] = [];
+	let check: { statuses: string[]; checked: boolean } | null = null;
+	const unverified: string[] = [];
 	try {
-		perType = await withJira(ctx, async (jira) => {
+		await withJira(ctx, async (jira) => {
 			let types = [issueType];
 			try {
 				types = (await jira.getProjectIssueTypes(projectKey)).map(
@@ -590,7 +597,32 @@ async function statusStep(ctx: WizardContext): Promise<StepOutcome> {
 			} catch (error) {
 				logger.debug({ error }, "Could not list issue types");
 			}
-			return discoverProjectStatuses(jira, projectKey, types);
+			perType = await discoverProjectStatuses(jira, projectKey, types);
+			if (perType.length === 0) return;
+
+			// Statuses no issue is in yet: transition names, Backlog statuses
+			// and the current mapping, if Jira knows them as statuses
+			const onIssues = new Set(
+				perType.flatMap((t) => t.statuses).map((s) => s.toLowerCase()),
+			);
+			const candidates: string[] = [];
+			for (const name of [
+				...perType.flatMap((t) => t.candidates),
+				...backlogStatuses,
+				...known,
+			]) {
+				if (
+					!onIssues.has(name.toLowerCase()) &&
+					!candidates.some((c) => c.toLowerCase() === name.toLowerCase())
+				) {
+					candidates.push(name);
+				}
+			}
+			if (candidates.length === 0) return;
+			check = await checkStatusNames(jira, projectKey, candidates);
+			if (!check.checked) {
+				unverified.push(...perType.flatMap((t) => t.candidates));
+			}
 		});
 	} catch (error) {
 		console.log(
@@ -607,48 +639,59 @@ async function statusStep(ctx: WizardContext): Promise<StepOutcome> {
 			jiraStatuses.push(status);
 		}
 	};
+	let suggested: string[];
+	let message: string;
 	if (perType.length > 0) {
-		console.log(`  Jira statuses of ${projectKey} by issue type:`);
+		console.log(`  Jira statuses of ${projectKey} issues, by issue type:`);
 		for (const entry of perType) {
 			console.log(
 				`    ${entry.issueType.padEnd(12)} ${chalk.yellow(entry.statuses.join(", "))}`,
 			);
 			for (const status of entry.statuses) addStatus(status);
 		}
-		console.log(
-			chalk.gray(
-				"  (Found from the project's issues and their transitions; add statuses no issue has used yet below.)",
-			),
-		);
-		for (const status of splitList(
-			await ask<string>({
-				type: "text",
-				name: "extraStatuses",
-				message: "Other Jira statuses to map (comma-separated, optional):",
-				initial: "",
-			}),
-		)) {
-			addStatus(status);
+		const checked = check as { statuses: string[]; checked: boolean } | null;
+		if (checked?.checked) {
+			suggested = checked.statuses;
+			if (suggested.length > 0) {
+				console.log(
+					`  Jira statuses no ${projectKey} issue is in yet: ${chalk.yellow(suggested.join(", "))}`,
+				);
+				console.log(
+					chalk.gray(
+						"  (From transition names, Backlog statuses and the current mapping, checked with Jira. Jira checks names across the whole site, so remove any that are not in this project's workflow.)",
+					),
+				);
+			}
+		} else {
+			suggested = unverified;
+			if (suggested.length > 0) {
+				console.log(
+					`  Transition names (possibly statuses, not checked): ${chalk.yellow(suggested.join(", "))}`,
+				);
+			}
 		}
+		message =
+			suggested.length > 0
+				? "Other Jira statuses to map (edit the list; comma-separated):"
+				: "Other Jira statuses to map (comma-separated, optional):";
 	} else {
 		console.log(
 			chalk.yellow(
 				`  No Jira statuses found for ${projectKey}. Enter them manually.`,
 			),
 		);
-		const known = [...Object.values(previous).flat(), ...previousUnmapped].map(
-			String,
-		);
-		for (const status of splitList(
-			await ask<string>({
-				type: "text",
-				name: "extraStatuses",
-				message: "Jira statuses (comma-separated):",
-				initial: known.join(", "),
-			}),
-		)) {
-			addStatus(status);
-		}
+		suggested = known;
+		message = "Jira statuses (comma-separated):";
+	}
+	for (const status of splitList(
+		await ask<string>({
+			type: "text",
+			name: "extraStatuses",
+			message,
+			initial: suggested.join(", "),
+		}),
+	)) {
+		addStatus(status);
 	}
 	if (jiraStatuses.length === 0) {
 		console.log(

@@ -74,6 +74,16 @@ async function answer(answers: Record<string, Answer | Answer[]>) {
 	return asked;
 }
 
+/** Statuses the fake Jira site knows (lower-cased) */
+const JIRA_STATUSES = [
+	"open",
+	"in review",
+	"closed",
+	"done",
+	"to do",
+	"blocked",
+];
+
 function fakeJira(overrides: Partial<Record<keyof WizardJira, unknown>> = {}) {
 	const jira = {
 		checkConnection: mock(async () => ({ ok: true })),
@@ -85,19 +95,40 @@ function fakeJira(overrides: Partial<Record<keyof WizardJira, unknown>> = {}) {
 			{ id: "1", name: "Task" },
 			{ id: "2", name: "Story" },
 		]),
-		searchIssues: mock(async (jql: string) => ({
-			issues: jql.includes('"Task"')
-				? [
-						{ key: "API-1", status: "Open" },
-						{ key: "API-2", status: "In Review" },
-					]
-				: [],
-			total: 120,
-			startAt: 0,
-			maxResults: 1,
-		})),
+		searchIssues: mock(async (jql: string) => {
+			// Jira rejects status names that are not statuses
+			const inClause = jql.match(/status in \((.*)\)/);
+			if (inClause) {
+				const rejected = [...inClause[1].matchAll(/"([^"]+)"/g)]
+					.map((m) => m[1])
+					.filter((name) => !JIRA_STATUSES.includes(name.toLowerCase()));
+				if (rejected.length > 0) {
+					throw new Error(
+						rejected
+							.map(
+								(name) =>
+									`The value '${name}' does not exist for the field 'status'.`,
+							)
+							.join(" "),
+					);
+				}
+			}
+			return {
+				issues: jql.includes('"Task"')
+					? [
+							{ key: "API-1", status: "Open" },
+							{ key: "API-2", status: "In Review" },
+						]
+					: [],
+				total: 120,
+				startAt: 0,
+				maxResults: 1,
+			};
+		}),
+		// MCP Atlassian returns transitions without their target status
 		getTransitions: mock(async () => [
-			{ id: "1", name: "Close", to: { id: "", name: "Closed" } },
+			{ id: "1", name: "Closed", to: { id: "", name: "" } },
+			{ id: "2", name: "Start Progress", to: { id: "", name: "" } },
 		]),
 		listBoards: mock(async () => [
 			{ id: "7", name: "API kanban", type: "kanban", supportsSprints: false },
@@ -370,8 +401,9 @@ describe("configure --step", () => {
 
 	it("status: lists Jira statuses per issue type and covers each one", async () => {
 		writeExistingConfig();
-		await answer({
-			extraStatuses: "Blocked",
+		const asked = await answer({
+			// Keep the suggested statuses and add one
+			extraStatuses: (q: PromptObject) => `${q.initial}, Blocked`,
 			// Leave Blocked unmapped, accept the suggestion for the others
 			backlogStatus: (q: PromptObject) =>
 				String(q.message).includes("Blocked")
@@ -383,12 +415,20 @@ describe("configure --step", () => {
 
 		expect(result.completed).toEqual(["status"]);
 		expect(printed()).toContain("Backlog statuses: To Do, In Progress, Done");
-		expect(printed()).toMatch(/Task\s+Open, In Review, Closed/);
+		expect(printed()).toMatch(/Task\s+Open, In Review/);
+		// Transition names, Backlog statuses and the mapping, checked with Jira:
+		// "Start Progress" and "In Progress" are not statuses on this site
+		expect(printed()).toContain(
+			"Jira statuses no API issue is in yet: Closed, To Do, Done",
+		);
+		expect(asked.find((q) => q.name === "extraStatuses")?.initial).toBe(
+			"Closed, To Do, Done",
+		);
 		const backlog = readConfig().backlog as RawConfig;
 		expect(backlog.statusMapping).toEqual({
-			"To Do": ["Open"],
-			Done: ["Done", "Closed"],
+			"To Do": ["Open", "To Do"],
 			"In Progress": ["In Review"],
+			Done: ["Closed", "Done"],
 		});
 		expect(backlog.unmappedJiraStatuses).toEqual(["Blocked"]);
 		expect(backlog.assigneeMapping).toEqual({ "@dev": "dev@acme.test" });

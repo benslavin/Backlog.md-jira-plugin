@@ -5,7 +5,7 @@ status: Done
 assignee:
   - '@claude'
 created_date: '2026-09-29 14:22'
-updated_date: '2026-09-29 14:58'
+updated_date: '2026-09-29 15:05'
 labels:
   - setup
   - cli
@@ -38,6 +38,7 @@ One guided path should take a user from an empty Backlog.md project to a verifie
 - [x] #12 --non-interactive configure keeps working for CI
 - [x] #13 Errors logged under an error key show their message instead of {} (connect, doctor and other commands)
 - [x] #14 README no longer claims .env files are read and documents configure, init and the guided steps; doctor no longer reports 'No field mappings configured' when a sprint mapping exists
+- [x] #15 The status step also offers Jira statuses no issue is in yet: transition names, Backlog statuses and current mappings are checked against Jira via JQL, shown with their source, and pre-filled for confirmation
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -51,6 +52,8 @@ One guided path should take a user from an empty Backlog.md project to a verifie
 6. init offers the wizard after creating .backlog-jira/
 7. doctor: no "No field mappings configured" when a sprint mapping exists
 8. README/AGENTS/docs updates, tests for helpers, steps, init and connect
+
+Follow-up (AC #15): MCP Atlassian never returns transition targets, so collect transition names as candidates, check candidates (transition names, Backlog statuses, current mapping) with a status-in JQL query that drops names Jira rejects, show statuses by source and pre-fill the extra-statuses prompt
 <!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
@@ -75,4 +78,10 @@ Follow-up fixes from a real run:
 - getAllProjects accepts the plain array MCP Atlassian returns (it read result.projects and failed with "Cannot read properties of undefined"). An empty project list now says so
 - Silent-mode clients pipe the MCP server's stderr (FastMCP banner, TOOLSETS warning) instead of printing it, and add its tail to errors when the server fails to start
 - Manual project keys need at least 2 characters, as the MCP server requires
+
+Status discovery for statuses no issue is in yet (AC #15):
+- MCP Atlassian never returns transition targets: the underlying library gives `to` as a string and MCP Atlassian only reads it as an object, so `to_status` is never set. A new project whose issues are all in To Do showed only "To Do"
+- Transition names, Backlog statuses and the Jira statuses of the current mapping are now candidates. `checkStatusNames` runs `project = KEY AND status in (...)`, drops the names Jira rejects ("The value 'X' does not exist for the field 'status'") and retries. If the error text is not recognised it asks about each name, and it reports unchecked when Jira cannot be searched
+- The status step shows statuses on issues by issue type, then the checked statuses no issue is in yet (noting that Jira checks names across the whole site), and pre-fills them in the "other statuses" prompt for editing
+- Tests: discovery candidates, rejected-name parsing, retry, per-name fallback, unchecked and escaping; the wizard's status test uses a fake Jira that rejects unknown statuses. 662 pass
 <!-- SECTION:NOTES:END -->

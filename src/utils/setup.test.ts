@@ -5,11 +5,13 @@ import {
 	applyRequiredToolsets,
 	applySprintSettings,
 	buildStatusMappingConfig,
+	checkStatusNames,
 	credentialHelpLines,
 	detectCredentials,
 	discoverProjectStatuses,
 	mergeEnvFile,
 	mergeToolsets,
+	rejectedStatusNames,
 	suggestBacklogStatus,
 	uncoveredJiraStatuses,
 } from "./setup.ts";
@@ -262,7 +264,7 @@ describe("discoverProjectStatuses", () => {
 	const issue = (key: string, status: string) =>
 		({ key, status }) as unknown as JiraIssue;
 
-	it("collects statuses per issue type from issues and transitions", async () => {
+	it("collects statuses per issue type from issues, with transition names and targets as candidates", async () => {
 		const jira = {
 			searchIssues: mock(async (jql: string) => ({
 				issues: jql.includes('"Bug"')
@@ -276,8 +278,10 @@ describe("discoverProjectStatuses", () => {
 			getTransitions: mock(async (key: string) =>
 				key === "P-1"
 					? [
-							{ id: "1", name: "Start", to: { id: "", name: "In Progress" } },
-							{ id: "2", name: "Finish", to: { id: "", name: "Done" } },
+							// MCP Atlassian leaves the target empty
+							{ id: "1", name: "In Progress", to: { id: "", name: "" } },
+							{ id: "2", name: "Start Review", to: { id: "", name: "" } },
+							{ id: "3", name: "Finish", to: { id: "", name: "Done" } },
 						]
 					: [],
 			),
@@ -286,7 +290,11 @@ describe("discoverProjectStatuses", () => {
 		const result = await discoverProjectStatuses(jira, "PROJ", ["Task", "Bug"]);
 
 		expect(result).toEqual([
-			{ issueType: "Task", statuses: ["To Do", "In Progress", "Done"] },
+			{
+				issueType: "Task",
+				statuses: ["To Do", "In Progress"],
+				candidates: ["Start Review", "Done", "Finish"],
+			},
 		]);
 		expect(jira.searchIssues.mock.calls[0][0]).toBe(
 			'project = "PROJ" AND issuetype = "Task" ORDER BY updated DESC',
@@ -303,7 +311,84 @@ describe("discoverProjectStatuses", () => {
 			},
 		};
 		expect(await discoverProjectStatuses(jira, "PROJ", ["Task"])).toEqual([
-			{ issueType: "Task", statuses: ["Open"] },
+			{ issueType: "Task", statuses: ["Open"], candidates: [] },
 		]);
+	});
+});
+
+describe("rejectedStatusNames", () => {
+	it("reads the names Jira rejects from its error text", () => {
+		expect(
+			rejectedStatusNames(
+				"MCP tool jira_search failed: Error searching issues: 400 The value 'Start Review' does not exist for the field 'status'.; The value 'Finish' does not exist for the field 'status'.",
+			),
+		).toEqual(["Start Review", "Finish"]);
+		expect(rejectedStatusNames("401 Unauthorized")).toEqual([]);
+	});
+});
+
+describe("checkStatusNames", () => {
+	const REAL = ["to do", "in progress", "blocked", "done"];
+	/** Jira rejecting status names it does not know, like the real API */
+	function jiraWithStatuses(
+		errorText = (name: string) =>
+			`The value '${name}' does not exist for the field 'status'.`,
+	) {
+		return {
+			searchIssues: mock(async (jql: string) => {
+				const names = [...jql.matchAll(/"([^"]+)"/g)].map((m) => m[1]).slice(1);
+				const unknown = names.filter((n) => !REAL.includes(n.toLowerCase()));
+				if (unknown.length > 0)
+					throw new Error(unknown.map(errorText).join(" "));
+				return { issues: [] };
+			}),
+		};
+	}
+
+	it("keeps the names Jira accepts in one retry", async () => {
+		const jira = jiraWithStatuses();
+		const result = await checkStatusNames(jira, "CR2", [
+			"In Progress",
+			"Start Review",
+			"Blocked",
+			"Client Review",
+			"Done",
+		]);
+		expect(result).toEqual({
+			statuses: ["In Progress", "Blocked", "Done"],
+			checked: true,
+		});
+		expect(jira.searchIssues).toHaveBeenCalledTimes(2);
+		expect(jira.searchIssues.mock.calls[0][0]).toBe(
+			'project = "CR2" AND status in ("In Progress", "Start Review", "Blocked", "Client Review", "Done")',
+		);
+	});
+
+	it("asks name by name when the error text is not recognised", async () => {
+		const jira = jiraWithStatuses(() => "400 Bad Request");
+		const result = await checkStatusNames(jira, "CR2", ["Done", "Finish"]);
+		expect(result).toEqual({ statuses: ["Done"], checked: true });
+	});
+
+	it("reports unchecked when Jira cannot be searched", async () => {
+		const jira = {
+			searchIssues: async () => {
+				throw new Error("Connection closed");
+			},
+		};
+		expect(await checkStatusNames(jira, "CR2", ["Done"])).toEqual({
+			statuses: [],
+			checked: false,
+		});
+	});
+
+	it("escapes quotes in names", async () => {
+		const jira = {
+			searchIssues: mock(async (_jql: string) => ({ issues: [] })),
+		};
+		await checkStatusNames(jira, "CR2", ['Won"t do']);
+		expect(jira.searchIssues.mock.calls[0][0]).toBe(
+			'project = "CR2" AND status in ("Won\\"t do")',
+		);
 	});
 });

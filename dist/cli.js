@@ -27509,32 +27509,94 @@ function readBacklogStatuses(cwd = process.cwd()) {
   const statuses = result.status === 0 ? String(result.stdout).trim().replace(/^\[|\]$/g, "").split(",").map((s) => s.trim().replace(/^["']|["']$/g, "")).filter(Boolean) : [];
   return statuses.length > 0 ? statuses : ["To Do", "In Progress", "Done"];
 }
+function jqlString(value) {
+  return `"${value.replace(/\\/g, "\\\\").replace(/"/g, "\\\"")}"`;
+}
+function addUnique(list, value) {
+  const trimmed = value.trim();
+  if (trimmed && !list.some((v) => v.toLowerCase() === trimmed.toLowerCase())) {
+    list.push(trimmed);
+  }
+}
 async function discoverProjectStatuses(jira, projectKey, issueTypes, options = {}) {
   const results = [];
   for (const issueType of issueTypes) {
-    const { issues } = await jira.searchIssues(`project = "${projectKey}" AND issuetype = "${issueType.replace(/"/g, "\\\"")}" ORDER BY updated DESC`, { maxResults: options.issuesPerType ?? 50, fields: "status,issuetype" });
-    const statuses = new Set;
+    const { issues } = await jira.searchIssues(`project = ${jqlString(projectKey)} AND issuetype = ${jqlString(issueType)} ORDER BY updated DESC`, { maxResults: options.issuesPerType ?? 50, fields: "status,issuetype" });
+    const statuses = [];
     const samples = new Map;
     for (const issue of issues) {
       if (!issue.status || issue.status === "Unknown")
         continue;
-      statuses.add(issue.status);
+      addUnique(statuses, issue.status);
       if (!samples.has(issue.status))
         samples.set(issue.status, issue.key);
     }
+    const candidates = [];
     for (const key of samples.values()) {
       try {
         for (const transition of await jira.getTransitions(key)) {
           if (transition.to?.name)
-            statuses.add(transition.to.name);
+            addUnique(candidates, transition.to.name);
+          if (transition.name)
+            addUnique(candidates, transition.name);
         }
       } catch {}
     }
-    if (statuses.size > 0) {
-      results.push({ issueType, statuses: [...statuses] });
+    const known = new Set(statuses.map((s) => s.toLowerCase()));
+    if (statuses.length > 0) {
+      results.push({
+        issueType,
+        statuses,
+        candidates: candidates.filter((c) => !known.has(c.toLowerCase()))
+      });
     }
   }
   return results;
+}
+function rejectedStatusNames(message) {
+  const names = [];
+  for (const match of message.matchAll(/value '([^']+)' does not exist for the field 'status'/gi)) {
+    addUnique(names, match[1]);
+  }
+  return names;
+}
+async function checkStatusNames(jira, projectKey, candidates) {
+  let remaining = [];
+  for (const c of candidates)
+    addUnique(remaining, c);
+  const query = (names) => jira.searchIssues(`project = ${jqlString(projectKey)} AND status in (${names.map(jqlString).join(", ")})`, { maxResults: 1, fields: "status" });
+  for (let attempt = 0;remaining.length > 0 && attempt < 5; attempt++) {
+    try {
+      await query(remaining);
+      return { statuses: remaining, checked: true };
+    } catch (error) {
+      const rejected = new Set(rejectedStatusNames(error instanceof Error ? error.message : String(error)).map((n) => n.toLowerCase()));
+      if (rejected.size === 0)
+        break;
+      const before = remaining.length;
+      remaining = remaining.filter((n) => !rejected.has(n.toLowerCase()));
+      if (remaining.length === before)
+        break;
+    }
+  }
+  if (remaining.length === 0)
+    return { statuses: [], checked: true };
+  try {
+    await jira.searchIssues(`project = ${jqlString(projectKey)}`, {
+      maxResults: 1,
+      fields: "status"
+    });
+  } catch {
+    return { statuses: [], checked: false };
+  }
+  const statuses = [];
+  for (const name of remaining) {
+    try {
+      await query([name]);
+      statuses.push(name);
+    } catch {}
+  }
+  return { statuses, checked: true };
 }
 function suggestBacklogStatus(jiraStatus, backlogStatuses, currentMapping = {}) {
   const lower = jiraStatus.trim().toLowerCase();
@@ -28892,16 +28954,38 @@ async function statusStep(ctx) {
   const previous = backlog.statusMapping && typeof backlog.statusMapping === "object" ? backlog.statusMapping : {};
   const previousUnmapped = Array.isArray(backlog.unmappedJiraStatuses) ? backlog.unmappedJiraStatuses.map(String) : [];
   const backlogStatuses = ctx.backlogStatuses();
+  const known = [...Object.values(previous).flat(), ...previousUnmapped].map(String);
   let perType = [];
+  let check = null;
+  const unverified = [];
   try {
-    perType = await withJira(ctx, async (jira) => {
+    await withJira(ctx, async (jira) => {
       let types = [issueType];
       try {
         types = (await jira.getProjectIssueTypes(projectKey)).map((t) => t.name);
       } catch (error) {
         logger.debug({ error }, "Could not list issue types");
       }
-      return discoverProjectStatuses(jira, projectKey, types);
+      perType = await discoverProjectStatuses(jira, projectKey, types);
+      if (perType.length === 0)
+        return;
+      const onIssues = new Set(perType.flatMap((t) => t.statuses).map((s) => s.toLowerCase()));
+      const candidates = [];
+      for (const name of [
+        ...perType.flatMap((t) => t.candidates),
+        ...backlogStatuses,
+        ...known
+      ]) {
+        if (!onIssues.has(name.toLowerCase()) && !candidates.some((c) => c.toLowerCase() === name.toLowerCase())) {
+          candidates.push(name);
+        }
+      }
+      if (candidates.length === 0)
+        return;
+      check = await checkStatusNames(jira, projectKey, candidates);
+      if (!check.checked) {
+        unverified.push(...perType.flatMap((t) => t.candidates));
+      }
     });
   } catch (error) {
     console.log(source_default.yellow(`  ⚠ Could not read Jira statuses of ${projectKey}: ${describeError(error)}`));
@@ -28913,33 +28997,41 @@ async function statusStep(ctx) {
       jiraStatuses.push(status);
     }
   };
+  let suggested;
+  let message;
   if (perType.length > 0) {
-    console.log(`  Jira statuses of ${projectKey} by issue type:`);
+    console.log(`  Jira statuses of ${projectKey} issues, by issue type:`);
     for (const entry of perType) {
       console.log(`    ${entry.issueType.padEnd(12)} ${source_default.yellow(entry.statuses.join(", "))}`);
       for (const status of entry.statuses)
         addStatus(status);
     }
-    console.log(source_default.gray("  (Found from the project's issues and their transitions; add statuses no issue has used yet below.)"));
-    for (const status of splitList(await ask({
-      type: "text",
-      name: "extraStatuses",
-      message: "Other Jira statuses to map (comma-separated, optional):",
-      initial: ""
-    }))) {
-      addStatus(status);
+    const checked = check;
+    if (checked?.checked) {
+      suggested = checked.statuses;
+      if (suggested.length > 0) {
+        console.log(`  Jira statuses no ${projectKey} issue is in yet: ${source_default.yellow(suggested.join(", "))}`);
+        console.log(source_default.gray("  (From transition names, Backlog statuses and the current mapping, checked with Jira. Jira checks names across the whole site, so remove any that are not in this project's workflow.)"));
+      }
+    } else {
+      suggested = unverified;
+      if (suggested.length > 0) {
+        console.log(`  Transition names (possibly statuses, not checked): ${source_default.yellow(suggested.join(", "))}`);
+      }
     }
+    message = suggested.length > 0 ? "Other Jira statuses to map (edit the list; comma-separated):" : "Other Jira statuses to map (comma-separated, optional):";
   } else {
     console.log(source_default.yellow(`  No Jira statuses found for ${projectKey}. Enter them manually.`));
-    const known = [...Object.values(previous).flat(), ...previousUnmapped].map(String);
-    for (const status of splitList(await ask({
-      type: "text",
-      name: "extraStatuses",
-      message: "Jira statuses (comma-separated):",
-      initial: known.join(", ")
-    }))) {
-      addStatus(status);
-    }
+    suggested = known;
+    message = "Jira statuses (comma-separated):";
+  }
+  for (const status of splitList(await ask({
+    type: "text",
+    name: "extraStatuses",
+    message,
+    initial: suggested.join(", ")
+  }))) {
+    addStatus(status);
   }
   if (jiraStatuses.length === 0) {
     console.log(source_default.yellow("  No statuses to map; keeping the current mapping."));

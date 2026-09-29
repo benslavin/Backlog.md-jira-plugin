@@ -233,7 +233,7 @@ This creates `.backlog-jira/` directory with:
 | `credentials` | Checks that `JIRA_URL` and `JIRA_EMAIL` + `JIRA_API_TOKEN` (or `JIRA_PERSONAL_TOKEN`) are exported, and explains the export, `.env` and direnv options when they are not. You can enter them for the current session (optionally writing a git-ignored `.env`); tokens are never written to `config.json`. |
 | `connection` | Starts the MCP Atlassian server and calls Jira, showing the underlying error (Docker, DNS, HTTP status, proxy) when it fails. |
 | `project` | Picks the project and the issue type from lists fetched from Jira. |
-| `status` | Lists the project's Jira statuses per issue type next to your Backlog statuses (from `backlog config`) and maps each Jira status, or leaves it explicitly unmapped. |
+| `status` | Lists the project's Jira statuses per issue type next to your Backlog statuses (from `backlog config`), suggests statuses no issue is in yet (checked with Jira), and maps each Jira status, or leaves it explicitly unmapped. |
 | `sprints` | Lists the project's boards, and for a board with sprints writes the sprint mapping (direction, `createSprints`, `archiveClosedSprints`, `pullScope`) and sets `mcp.envVars.TOOLSETS` so the `jira_agile` tools stay enabled. |
 | `fields` | Shows the discovered Jira fields with suggested types and adds field mappings with the same validation as `map-fields add`. |
 | `conflict` | Chooses the conflict strategy. |

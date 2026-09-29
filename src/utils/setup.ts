@@ -128,20 +128,42 @@ export function readBacklogStatuses(cwd = process.cwd()): string[] {
 
 export interface IssueTypeStatuses {
 	issueType: string;
+	/** Statuses issues of this type are in */
 	statuses: string[];
+	/**
+	 * Transition names and targets from those statuses that no issue is in.
+	 * MCP Atlassian does not return transition targets, and transitions are
+	 * often, but not always, named after their target status, so these are
+	 * only candidates until checked with checkStatusNames.
+	 */
+	candidates: string[];
+}
+
+type StatusSearch = {
+	searchIssues(
+		jql: string,
+		options?: { maxResults?: number; fields?: string },
+	): Promise<{ issues: JiraIssue[] }>;
+};
+
+function jqlString(value: string): string {
+	return `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+}
+
+function addUnique(list: string[], value: string): void {
+	const trimmed = value.trim();
+	if (trimmed && !list.some((v) => v.toLowerCase() === trimmed.toLowerCase())) {
+		list.push(trimmed);
+	}
 }
 
 /**
  * Jira statuses used by each issue type of a project. MCP Atlassian has no
- * workflow API, so statuses are collected from the project's issues and the
- * transitions available on a sample issue of each status.
+ * workflow API, so statuses are collected from the project's issues, and the
+ * transitions available on a sample issue of each status add candidates.
  */
 export async function discoverProjectStatuses(
-	jira: {
-		searchIssues(
-			jql: string,
-			options?: { maxResults?: number; fields?: string },
-		): Promise<{ issues: JiraIssue[] }>;
+	jira: StatusSearch & {
 		getTransitions(issueKey: string): Promise<JiraTransition[]>;
 	},
 	projectKey: string,
@@ -151,31 +173,107 @@ export async function discoverProjectStatuses(
 	const results: IssueTypeStatuses[] = [];
 	for (const issueType of issueTypes) {
 		const { issues } = await jira.searchIssues(
-			`project = "${projectKey}" AND issuetype = "${issueType.replace(/"/g, '\\"')}" ORDER BY updated DESC`,
+			`project = ${jqlString(projectKey)} AND issuetype = ${jqlString(issueType)} ORDER BY updated DESC`,
 			{ maxResults: options.issuesPerType ?? 50, fields: "status,issuetype" },
 		);
-		const statuses = new Set<string>();
+		const statuses: string[] = [];
 		const samples = new Map<string, string>();
 		for (const issue of issues) {
 			if (!issue.status || issue.status === "Unknown") continue;
-			statuses.add(issue.status);
+			addUnique(statuses, issue.status);
 			if (!samples.has(issue.status)) samples.set(issue.status, issue.key);
 		}
-		// Transitions reveal statuses no issue is in yet
+		const candidates: string[] = [];
 		for (const key of samples.values()) {
 			try {
 				for (const transition of await jira.getTransitions(key)) {
-					if (transition.to?.name) statuses.add(transition.to.name);
+					if (transition.to?.name) addUnique(candidates, transition.to.name);
+					if (transition.name) addUnique(candidates, transition.name);
 				}
 			} catch {
 				// Statuses seen on issues are still useful
 			}
 		}
-		if (statuses.size > 0) {
-			results.push({ issueType, statuses: [...statuses] });
+		const known = new Set(statuses.map((s) => s.toLowerCase()));
+		if (statuses.length > 0) {
+			results.push({
+				issueType,
+				statuses,
+				candidates: candidates.filter((c) => !known.has(c.toLowerCase())),
+			});
 		}
 	}
 	return results;
+}
+
+/** Names Jira rejects in a status JQL clause, from its error message */
+export function rejectedStatusNames(message: string): string[] {
+	const names: string[] = [];
+	for (const match of message.matchAll(
+		/value '([^']+)' does not exist for the field 'status'/gi,
+	)) {
+		addUnique(names, match[1]);
+	}
+	return names;
+}
+
+/**
+ * Which candidate names are Jira statuses. A `status in (...)` query fails
+ * naming each value that is not a status, so those are dropped and the
+ * query retried. Jira checks names site-wide, so a status of another
+ * project's workflow also passes. checked is false when Jira could not be
+ * asked.
+ */
+export async function checkStatusNames(
+	jira: StatusSearch,
+	projectKey: string,
+	candidates: string[],
+): Promise<{ statuses: string[]; checked: boolean }> {
+	let remaining: string[] = [];
+	for (const c of candidates) addUnique(remaining, c);
+	const query = (names: string[]) =>
+		jira.searchIssues(
+			`project = ${jqlString(projectKey)} AND status in (${names.map(jqlString).join(", ")})`,
+			{ maxResults: 1, fields: "status" },
+		);
+
+	for (let attempt = 0; remaining.length > 0 && attempt < 5; attempt++) {
+		try {
+			await query(remaining);
+			return { statuses: remaining, checked: true };
+		} catch (error) {
+			const rejected = new Set(
+				rejectedStatusNames(
+					error instanceof Error ? error.message : String(error),
+				).map((n) => n.toLowerCase()),
+			);
+			if (rejected.size === 0) break;
+			const before = remaining.length;
+			remaining = remaining.filter((n) => !rejected.has(n.toLowerCase()));
+			if (remaining.length === before) break;
+		}
+	}
+	if (remaining.length === 0) return { statuses: [], checked: true };
+
+	// Unrecognised error text: ask about each name, if Jira answers at all
+	try {
+		await jira.searchIssues(`project = ${jqlString(projectKey)}`, {
+			maxResults: 1,
+			fields: "status",
+		});
+	} catch {
+		return { statuses: [], checked: false };
+	}
+	const statuses: string[] = [];
+	for (const name of remaining) {
+		try {
+			await query([name]);
+			statuses.push(name);
+		} catch {
+			// Not a status
+		}
+	}
+	return { statuses, checked: true };
 }
 
 const DONE_WORDS =
