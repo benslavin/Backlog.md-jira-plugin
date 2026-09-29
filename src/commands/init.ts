@@ -1,14 +1,17 @@
-import { existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 import chalk from "chalk";
 import prompts from "prompts";
-import { FrontmatterStore } from "../state/store.ts";
 import {
 	type InstructionMode,
 	addAgentInstructions,
 } from "../utils/agent-instructions.ts";
+import {
+	bootstrapConfigDir,
+	getConfigDir,
+	getConfigPath,
+} from "../utils/config-file.ts";
 import { logger } from "../utils/logger.ts";
-import { CONFIG_DIR_GITIGNORE } from "../utils/task-links.ts";
 
 export interface JiraConfig {
 	jira: {
@@ -35,57 +38,27 @@ export interface JiraConfig {
 
 export interface InitCommandOptions {
 	baseDir?: string;
+	/** Runs the guided setup when accepted (defaults to the configure wizard) */
+	runWizard?: (cwd: string) => Promise<unknown>;
 }
 
 export async function initCommand(
 	options: InitCommandOptions = {},
 ): Promise<void> {
 	const baseDir = options.baseDir || process.cwd();
-	const configDir = join(baseDir, ".backlog-jira");
+	const configDir = getConfigDir(baseDir);
 
 	// Check if already initialized
 	if (existsSync(configDir)) {
 		logger.warn(
-			".backlog-jira/ already exists. Use 'backlog-jira config' to modify settings.",
+			".backlog-jira/ already exists. Use 'backlog-jira configure' to modify settings.",
 		);
 		return;
 	}
 
-	// Bootstrap directory structure
-	mkdirSync(join(configDir, "logs"), { recursive: true });
-
-	// Create default configuration
-	const config: JiraConfig = {
-		jira: {
-			baseUrl: "",
-			projectKey: "",
-			issueType: "Task",
-			jqlFilter: "",
-		},
-		backlog: {
-			statusMapping: {
-				"To Do": ["To Do", "Open", "Backlog"],
-				"In Progress": ["In Progress"],
-				Done: ["Done", "Closed", "Resolved"],
-			},
-		},
-		sync: {
-			conflictStrategy: "prompt",
-			enableAnnotations: false,
-			watchInterval: 60,
-		},
-	};
-
-	const configPath = join(configDir, "config.json");
-	writeFileSync(configPath, JSON.stringify(config, null, 2));
-
-	// Initialize FrontmatterStore (creates snapshots directory)
-	const store = new FrontmatterStore(configDir);
-	store.close();
-
-	// Create .gitignore
-	const gitignorePath = join(configDir, ".gitignore");
-	writeFileSync(gitignorePath, CONFIG_DIR_GITIGNORE);
+	// Default config, snapshots and logs directories and .gitignore
+	bootstrapConfigDir(baseDir);
+	const configPath = getConfigPath(baseDir);
 
 	// Agent instructions setup
 	await setupAgentInstructions(baseDir);
@@ -95,13 +68,48 @@ export async function initCommand(
 	logger.info(`  - Config: ${configPath}`);
 	logger.info(`  - Snapshots: ${join(configDir, "snapshots/")}`);
 	logger.info(`  - Operations log: ${join(configDir, "ops-log.jsonl")}`);
-	logger.info("");
-	logger.info("Next steps:");
-	logger.info(
-		"  1. Edit .backlog-jira/config.json with your Jira project settings",
+
+	await offerGuidedSetup(baseDir, options.runWizard);
+}
+
+/**
+ * Offer the configure wizard; declining keeps the default config
+ */
+async function offerGuidedSetup(
+	baseDir: string,
+	runWizard?: (cwd: string) => Promise<unknown>,
+): Promise<void> {
+	console.log(chalk.bold.cyan("\n🔧 Guided Setup\n"));
+	console.log(
+		chalk.gray(
+			"The setup wizard checks your Jira credentials and connection, then walks through project, status mapping, sprints, field mappings, conflict strategy and import filter.\n",
+		),
 	);
-	logger.info("  2. Run 'backlog-jira connect' to verify connections");
-	logger.info("  3. Run 'backlog-jira doctor' to check environment setup");
+	const response = await prompts({
+		type: "confirm",
+		name: "runWizard",
+		message: "Run the guided setup now?",
+		initial: true,
+	});
+
+	if (response.runWizard === true) {
+		const wizard =
+			runWizard ??
+			(async (cwd: string) => {
+				const { runConfigure } = await import("./configure.ts");
+				const result = await runConfigure({ cwd });
+				if (result.failed) process.exitCode = 1;
+			});
+		await wizard(baseDir);
+		return;
+	}
+
+	console.log("");
+	console.log("A default configuration was written. Next steps:");
+	console.log(
+		"  1. Run 'backlog-jira configure' for the guided setup (or one step with 'backlog-jira configure --step <name>')",
+	);
+	console.log("  2. Run 'backlog-jira doctor' to check the setup");
 }
 
 /**

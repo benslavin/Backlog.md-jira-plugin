@@ -42,7 +42,13 @@ Sprint sync is a `fieldMappings` entry of type `sprint` in `.backlog-jira/config
 | `archiveClosedSprints` | no | Default `true`. Closed sprints archive their milestone; tasks keep pointing at it. |
 | `pullScope` | no | `all` (default) or `open`. With `open`, `pull --import` only imports issues in open sprints: the JQL becomes `(<jqlFilter>) AND sprint in openSprints()`. |
 
-Set it up with the CLI:
+Set it up with the guided setup, which lists the project's boards, writes the mapping and sets `mcp.envVars.TOOLSETS` (e.g. `default,jira_projects,jira_agile`) so the `jira_agile` tools stay enabled:
+
+```bash
+backlog-jira configure --step sprints
+```
+
+Or with the CLI:
 
 ```bash
 # Find the board id (scrum boards have sprints)

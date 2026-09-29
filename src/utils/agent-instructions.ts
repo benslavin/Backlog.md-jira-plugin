@@ -89,7 +89,8 @@ It allows you to work locally with Backlog.md's task management while staying sy
 
 ### Initialization
 \`\`\`bash
-backlog-jira init           # Initialize plugin configuration
+backlog-jira init           # Initialize plugin configuration, then offer the guided setup
+backlog-jira configure      # Guided setup wizard (credentials to import filter)
 backlog-jira connect        # Verify Jira connection
 backlog-jira doctor         # Check environment setup
 \`\`\`
@@ -105,8 +106,7 @@ backlog-jira watch          # Continuous sync mode
 ### Status & Configuration
 \`\`\`bash
 backlog-jira status         # View sync status
-backlog-jira map            # Configure status mappings
-backlog-jira configure      # Update configuration
+backlog-jira configure --step <step> # Revisit one setup step (credentials, connection, project, status, sprints, fields, conflict, filter)
 backlog-jira view <task-id> # View task sync details
 \`\`\`
 
@@ -148,6 +148,8 @@ export JIRA_API_TOKEN="your-api-token"
 \`\`\`
 
 Generate an API token at: https://id.atlassian.com/manage-profile/security/api-tokens
+
+For Jira Server/Data Center, export \`JIRA_URL\` and \`JIRA_PERSONAL_TOKEN\` instead. The variables must be exported to the process: the plugin does not read \`.env\` files (load one with direnv or \`set -a; . ./.env; set +a\`). \`backlog-jira configure --step credentials\` checks them. Tokens are never stored in \`.backlog-jira/config.json\`.
 
 ## Workflow Integration
 
@@ -200,15 +202,16 @@ When conflicts occur (both sides modified), the plugin will:
 
 Configure via:
 \`\`\`bash
-backlog-jira configure --conflict-strategy <strategy>
+backlog-jira configure --step conflict                                  # interactive
+backlog-jira configure --non-interactive --conflict-strategy <strategy>  # scripts and CI
 \`\`\`
 
 ## Status Mapping
 
-The plugin maps Backlog.md task statuses to Jira issue statuses. Configure mappings with:
+The plugin maps Backlog.md task statuses to Jira issue statuses. Configure mappings with (lists the project's Jira statuses per issue type):
 
 \`\`\`bash
-backlog-jira map
+backlog-jira configure --step status
 \`\`\`
 
 ## Acceptance Criteria Sync
@@ -217,7 +220,7 @@ The plugin can sync acceptance criteria between Backlog.md and Jira:
 
 - Backlog.md uses \`- [ ] #N criterion\` format
 - Jira uses subtasks or checklist custom field (if available)
-- Enable with: \`backlog-jira configure --enable-annotations\`
+- Enable with: \`backlog-jira configure --non-interactive --enable-annotations\`
 
 ## Best Practices
 
@@ -277,6 +280,7 @@ This project uses the \`backlog-jira\` MCP server for bidirectional synchronizat
 
 ### Core Commands
 - \`backlog-jira init\` - Initialize configuration
+- \`backlog-jira configure\` - Guided setup (\`--step <step>\` to revisit one step)
 - \`backlog-jira pull\` - Pull from Jira
 - \`backlog-jira push\` - Push to Jira
 - \`backlog-jira sync\` - Bidirectional sync

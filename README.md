@@ -216,27 +216,66 @@ backlog-jira init
 ```
 
 This creates `.backlog-jira/` directory with:
-- `config.json` - Configuration file
+- `config.json` - Configuration file (with default settings)
 - `snapshots/` - Snapshot directory for 3-way merge
 - `links/` - Jira link records per task (version controlled)
 - `ops-log.jsonl` - Operations audit log
-- `.gitignore` - Excludes everything except `links/`
+- `.gitignore` - Excludes everything except `links/` and `sprints.json`
+
+`init` then offers to start the guided setup. If you decline, the default config stays in place and you can run `backlog-jira configure` whenever you are ready.
+
+### Guided Setup (`backlog-jira configure`)
+
+`backlog-jira configure` takes you from an empty Backlog.md project to a verified, ready-to-import configuration. Every step can be skipped, and each completed step is saved immediately:
+
+| Step | What it does |
+|------|--------------|
+| `credentials` | Checks that `JIRA_URL` and `JIRA_EMAIL` + `JIRA_API_TOKEN` (or `JIRA_PERSONAL_TOKEN`) are exported, and explains the export, `.env` and direnv options when they are not. You can enter them for the current session (optionally writing a git-ignored `.env`); tokens are never written to `config.json`. |
+| `connection` | Starts the MCP Atlassian server and calls Jira, showing the underlying error (Docker, DNS, HTTP status, proxy) when it fails. |
+| `project` | Picks the project and the issue type from lists fetched from Jira. |
+| `status` | Lists the project's Jira statuses per issue type next to your Backlog statuses (from `backlog config`) and maps each Jira status, or leaves it explicitly unmapped. |
+| `sprints` | Lists the project's boards, and for a board with sprints writes the sprint mapping (direction, `createSprints`, `archiveClosedSprints`, `pullScope`) and sets `mcp.envVars.TOOLSETS` so the `jira_agile` tools stay enabled. |
+| `fields` | Shows the discovered Jira fields with suggested types and adds field mappings with the same validation as `map-fields add`. |
+| `conflict` | Chooses the conflict strategy. |
+| `filter` | Sets the import JQL (default `project = KEY ORDER BY created DESC`) and shows how many issues match. |
+
+The wizard ends by running `backlog-jira doctor` and printing the next steps: preview the import with `backlog-jira pull --import --dry-run`, import (one `pull --import` run handles at most 50 issues, so import larger projects in batches with `--jql`), and commit `.backlog-jira/`.
+
+Revisit any single step later:
+
+```bash
+backlog-jira configure --step status
+backlog-jira configure --step sprints
+```
+
+Re-running the wizard or a step only changes the settings that step manages; other settings (existing field mappings, `mcp` settings, keys it does not know) are kept.
+
+For CI and scripts, `--non-interactive` writes the given values (and `jira.baseUrl` from `JIRA_URL`) without prompting:
+
+```bash
+backlog-jira configure --non-interactive --project-key PROJ --issue-type Task \
+  --conflict-strategy prefer-jira --jql-filter "project = PROJ ORDER BY created DESC"
+```
 
 ### 2. Configure MCP Atlassian Server
 
 The plugin doesn't call Jira directly. Each command starts a local [mcp-atlassian](https://github.com/sooperset/mcp-atlassian) server (by default via Docker, using the `ghcr.io/sooperset/mcp-atlassian:latest` image) and passes it your Jira credentials from environment variables.
 
-**Environment Variables** (`.env` or shell):
+**Environment Variables** (exported in the shell that runs `backlog-jira`):
 
 ```bash
 # Jira Cloud
-JIRA_URL=https://your-domain.atlassian.net
-JIRA_EMAIL=your-email@example.com        # JIRA_USERNAME also works
-JIRA_API_TOKEN=your-jira-api-token
+export JIRA_URL=https://your-domain.atlassian.net
+export JIRA_EMAIL=your-email@example.com        # JIRA_USERNAME also works
+export JIRA_API_TOKEN=your-jira-api-token
 
 # Jira Server/Data Center (instead of JIRA_EMAIL + JIRA_API_TOKEN)
-# JIRA_PERSONAL_TOKEN=your-personal-access-token
+# export JIRA_PERSONAL_TOKEN=your-personal-access-token
 ```
+
+The plugin does not read `.env` files, and plain shell assignments without `export` are not passed on. To keep credentials in a git-ignored `.env` file, load it before running the plugin (`set -a; . ./.env; set +a`) or let [direnv](https://direnv.net) export it (`echo dotenv > .envrc && direnv allow`). `backlog-jira configure --step credentials` shows which variables are exported.
+
+**MCP toolsets**: the plugin uses tools from the MCP Atlassian `jira_projects` and (for sprint sync) `jira_agile` toolsets. If you restrict `TOOLSETS` in `mcp.envVars`, include them, e.g. `"TOOLSETS": "default,jira_projects,jira_agile"` (the `sprints` step sets this for you).
 
 **Running without Docker**: install `mcp-atlassian` yourself and point the plugin at it in `.backlog-jira/config.json`:
 
@@ -256,9 +295,9 @@ JIRA_API_TOKEN=your-jira-api-token
 2. Click "Create API token"
 3. Copy the token and save it securely
 
-### 3. Edit Configuration File
+### 3. Edit Configuration File (optional)
 
-Edit `.backlog-jira/config.json`:
+The guided setup writes these settings; you can also edit `.backlog-jira/config.json` directly:
 
 ```json
 {
@@ -292,13 +331,14 @@ Edit `.backlog-jira/config.json`:
 | `baseUrl` | Your Jira instance URL | `https://company.atlassian.net` |
 | `projectKey` | Default Jira project key | `PROJ`, `DEV`, `SUPPORT` |
 | `issueType` | Default issue type for new issues | `Task`, `Story`, `Bug` |
-| `jqlFilter` | Optional JQL filter for queries | `labels = backend` |
+| `jqlFilter` | JQL of the issues `pull --import` imports (defaults to `project = <projectKey>`) | `project = PROJ AND labels = backend` |
 
 #### Backlog Section
 
 | Option | Description | Details |
 |--------|-------------|---------|  
 | `statusMapping` | Maps Backlog statuses to Jira; also used to decide whether a Jira status matches the Backlog status during change detection | See [Status Mapping Guide](docs/status-mapping.md) |
+| `unmappedJiraStatuses` | Jira statuses deliberately left unmapped by `configure --step status` (kept as-is on pull) | `["Blocked"]` |
 | `projectOverrides` | Project-specific status mappings | Override per Jira project |
 
 #### Sync Section
@@ -547,7 +587,7 @@ backlog-jira sync task-123 --dry-run
 
 ### `backlog-jira init`
 
-Initialize plugin configuration and database.
+Initialize plugin configuration and database, then offer the guided setup.
 
 ```bash
 backlog-jira init
@@ -559,6 +599,18 @@ Creates:
 - `.backlog-jira/links/` (created on first link)
 - `.backlog-jira/ops-log.jsonl`
 - `.backlog-jira/.gitignore`
+
+### `backlog-jira configure`
+
+Guided setup wizard; see [Guided Setup](#guided-setup-backlog-jira-configure).
+
+```bash
+backlog-jira configure                      # all steps
+backlog-jira configure --step <step>        # credentials, connection, project, status, sprints, fields, conflict or filter
+backlog-jira configure --non-interactive \
+  [--project-key KEY] [--issue-type TYPE] [--conflict-strategy STRATEGY] \
+  [--jql-filter JQL] [--enable-annotations]  # CI: no prompts
+```
 
 ### `backlog-jira doctor`
 
@@ -573,7 +625,7 @@ Checks:
 - Backlog CLI installation
 - Configuration validity
 - Database connectivity
-- Field mappings: each mapped Jira field exists, and `push`/`both` fields are editable for the configured project and issue type
+- Field mappings: each mapped Jira field exists, and `push`/`both` fields are editable for the configured project and issue type (the sprint mapping is checked separately)
 - Sprint sync: the Sprint field exists and the board is reachable and has sprints; warns about linked tasks whose milestone matches no sprint (with `createSprints` off) and milestones the plugin could not update
 - Project structure
 - Git status
@@ -590,7 +642,8 @@ Tests:
 - Backlog CLI execution
 - MCP Atlassian server connection
 - Jira API authentication
-- Project access permissions
+
+Failures show the underlying error (missing credentials, Docker or server start failure, DNS, HTTP status).
 
 ### `backlog-jira map`
 
@@ -944,6 +997,10 @@ backlog --version
 
 **Solution:**
 ```bash
+# Show the underlying error and which credentials are exported
+backlog-jira configure --step credentials
+backlog-jira configure --step connection
+
 # Check MCP server is configured
 echo $JIRA_URL
 echo $JIRA_EMAIL

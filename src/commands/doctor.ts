@@ -203,7 +203,12 @@ export async function checkFieldMappings(
 	// Throws FieldMappingConfigError for invalid entries
 	const mappings = loadFieldMappings(cwd);
 	if (mappings.length === 0) {
-		logger.info("  ✓ No field mappings configured");
+		// The sprint mapping is checked by checkSprintSync
+		logger.info(
+			loadSprintMapping(cwd)
+				? "  ✓ No field mappings besides the sprint mapping"
+				: "  ✓ No field mappings configured",
+		);
 		return [];
 	}
 
@@ -429,7 +434,16 @@ async function checkFieldMappingsWithJira(): Promise<void> {
 	}
 }
 
-export async function doctorCommand(): Promise<void> {
+export interface DoctorResult {
+	/** Whether all critical checks passed */
+	ok: boolean;
+	warnings: number;
+}
+
+/**
+ * Run the environment checks without exiting the process
+ */
+export async function runDoctor(): Promise<DoctorResult> {
 	logger.info("Running environment checks...\n");
 
 	const checks: Array<{
@@ -476,14 +490,17 @@ export async function doctorCommand(): Promise<void> {
 		logger.error(
 			"Critical checks failed. Please fix the issues above before proceeding.",
 		);
-		process.exit(1);
-	}
-
-	if (warningCount > 0) {
+	} else if (warningCount > 0) {
 		logger.info(
 			`✓ All critical checks passed! (${warningCount} warning${warningCount > 1 ? "s" : ""})`,
 		);
 	} else {
 		logger.info("✓ All checks passed! Ready to sync.");
 	}
+	return { ok: !criticalFailed, warnings: warningCount };
+}
+
+export async function doctorCommand(): Promise<void> {
+	const { ok } = await runDoctor();
+	if (!ok) process.exit(1);
 }

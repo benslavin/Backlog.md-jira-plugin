@@ -21,21 +21,18 @@ export async function connectCommand(): Promise<void> {
 			allGood = false;
 		}
 	} catch (error) {
-		logger.error({ error }, "  ✗ Backlog CLI connection failed");
+		logger.error(
+			`  ✗ Backlog CLI connection failed: ${error instanceof Error ? error.message : String(error)}`,
+		);
 		allGood = false;
 	}
 
 	// Test MCP Jira tools
-	try {
-		const jiraOk = await jiraClient.test();
-		if (jiraOk) {
-			logger.info("  ✓ MCP Atlassian connection successful");
-		} else {
-			logger.error("  ✗ MCP Atlassian connection failed");
-			allGood = false;
-		}
-	} catch (error) {
-		logger.error({ error }, "  ✗ MCP Atlassian connection failed");
+	const jira = await jiraClient.checkConnection();
+	if (jira.ok) {
+		logger.info("  ✓ MCP Atlassian connection successful");
+	} else {
+		logger.error(`  ✗ MCP Atlassian connection failed: ${jira.error}`);
 		allGood = false;
 	}
 

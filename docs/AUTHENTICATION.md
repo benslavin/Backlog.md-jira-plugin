@@ -107,12 +107,17 @@ JIRA_EMAIL=your-email@example.com
 JIRA_API_TOKEN=your-token-here
 ```
 
-Load it with:
+backlog-jira does not read `.env` files, and variables must be exported to reach the MCP server. Load it with:
 ```bash
-source .env
-# or
-export $(grep -v '^#' .env | xargs)
+set -a; . ./.env; set +a
 ```
+or let [direnv](https://direnv.net) export it whenever you enter the project:
+```bash
+echo "dotenv" > .envrc
+direnv allow
+```
+
+`backlog-jira configure --step credentials` shows which variables are exported and can write a git-ignored `.env` for you. Tokens are never stored in `.backlog-jira/config.json`.
 
 ---
 

@@ -351,4 +351,60 @@ describe("init command", () => {
 			expect(stats.isDirectory()).toBe(true);
 		});
 	});
+
+	describe("guided setup", () => {
+		it("offers the configure wizard after creating .backlog-jira/", async () => {
+			const promptsMock = await import("prompts");
+			const promptSpy = spyOn(promptsMock, "default").mockImplementation(
+				(async (question: { name: string }) =>
+					question.name === "runWizard"
+						? { runWizard: true }
+						: { shouldSetup: false }) as never,
+			);
+			const runWizard = mock(async (cwd: string) => {
+				// The default config exists before the wizard starts
+				expect(existsSync(join(cwd, ".backlog-jira", "config.json"))).toBe(
+					true,
+				);
+			});
+
+			await initCommand({ baseDir: TEST_DIR, runWizard });
+
+			expect(runWizard).toHaveBeenCalledWith(TEST_DIR);
+			expect(
+				promptSpy.mock.calls.some(
+					(call) => (call[0] as { name: string }).name === "runWizard",
+				),
+			).toBe(true);
+		});
+
+		it("leaves a valid default config and explains how to run it later when declined", async () => {
+			const promptsMock = await import("prompts");
+			spyOn(promptsMock, "default").mockResolvedValue({
+				shouldSetup: false,
+				runWizard: false,
+			});
+			const log = spyOn(console, "log").mockImplementation(() => {});
+			const runWizard = mock(async () => {});
+
+			try {
+				await initCommand({ baseDir: TEST_DIR, runWizard });
+				const lines = log.mock.calls.map((call) => String(call[0]));
+				expect(lines.some((l) => l.includes("backlog-jira configure"))).toBe(
+					true,
+				);
+				expect(lines.some((l) => l.includes("--step <name>"))).toBe(true);
+			} finally {
+				log.mockRestore();
+			}
+
+			expect(runWizard).not.toHaveBeenCalled();
+			const config = JSON.parse(
+				readFileSync(join(TEST_CONFIG_DIR, "config.json"), "utf-8"),
+			);
+			expect(config.jira.issueType).toBe("Task");
+			expect(config.backlog.statusMapping["To Do"]).toContain("To Do");
+			expect(config.sync.conflictStrategy).toBe("prompt");
+		});
+	});
 });

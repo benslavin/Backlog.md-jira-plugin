@@ -33,6 +33,17 @@ var __toESM = (mod, isNodeMode, target) => {
   return to;
 };
 var __commonJS = (cb, mod) => () => (mod || cb((mod = { exports: {} }).exports, mod), mod.exports);
+var __esm = (fn, res, err) => () => {
+  if (fn)
+    try {
+      res = fn(fn = 0);
+    } catch (e) {
+      err = [e];
+    }
+  if (err)
+    throw err[0];
+  return res;
+};
 var __exportCjs = (target, getters, setters) => {
   for (var name in getters)
     __defProp(target, name, {
@@ -1861,6 +1872,495 @@ Expecting one of '${allowedValues.join("', '")}'`);
     });
   }
   exports.Command = Command;
+});
+
+// node_modules/chalk/source/vendor/ansi-styles/index.js
+function assembleStyles() {
+  const codes = new Map;
+  for (const [groupName, group] of Object.entries(styles)) {
+    for (const [styleName, style] of Object.entries(group)) {
+      styles[styleName] = {
+        open: `\x1B[${style[0]}m`,
+        close: `\x1B[${style[1]}m`
+      };
+      group[styleName] = styles[styleName];
+      codes.set(style[0], style[1]);
+    }
+    Object.defineProperty(styles, groupName, {
+      value: group,
+      enumerable: false
+    });
+  }
+  Object.defineProperty(styles, "codes", {
+    value: codes,
+    enumerable: false
+  });
+  styles.color.close = "\x1B[39m";
+  styles.bgColor.close = "\x1B[49m";
+  styles.color.ansi = wrapAnsi16();
+  styles.color.ansi256 = wrapAnsi256();
+  styles.color.ansi16m = wrapAnsi16m();
+  styles.bgColor.ansi = wrapAnsi16(ANSI_BACKGROUND_OFFSET);
+  styles.bgColor.ansi256 = wrapAnsi256(ANSI_BACKGROUND_OFFSET);
+  styles.bgColor.ansi16m = wrapAnsi16m(ANSI_BACKGROUND_OFFSET);
+  Object.defineProperties(styles, {
+    rgbToAnsi256: {
+      value(red, green, blue) {
+        if (red === green && green === blue) {
+          if (red < 8) {
+            return 16;
+          }
+          if (red > 248) {
+            return 231;
+          }
+          return Math.round((red - 8) / 247 * 24) + 232;
+        }
+        return 16 + 36 * Math.round(red / 255 * 5) + 6 * Math.round(green / 255 * 5) + Math.round(blue / 255 * 5);
+      },
+      enumerable: false
+    },
+    hexToRgb: {
+      value(hex) {
+        const matches = /[a-f\d]{6}|[a-f\d]{3}/i.exec(hex.toString(16));
+        if (!matches) {
+          return [0, 0, 0];
+        }
+        let [colorString] = matches;
+        if (colorString.length === 3) {
+          colorString = [...colorString].map((character) => character + character).join("");
+        }
+        const integer = Number.parseInt(colorString, 16);
+        return [
+          integer >> 16 & 255,
+          integer >> 8 & 255,
+          integer & 255
+        ];
+      },
+      enumerable: false
+    },
+    hexToAnsi256: {
+      value: (hex) => styles.rgbToAnsi256(...styles.hexToRgb(hex)),
+      enumerable: false
+    },
+    ansi256ToAnsi: {
+      value(code) {
+        if (code < 8) {
+          return 30 + code;
+        }
+        if (code < 16) {
+          return 90 + (code - 8);
+        }
+        let red;
+        let green;
+        let blue;
+        if (code >= 232) {
+          red = ((code - 232) * 10 + 8) / 255;
+          green = red;
+          blue = red;
+        } else {
+          code -= 16;
+          const remainder = code % 36;
+          red = Math.floor(code / 36) / 5;
+          green = Math.floor(remainder / 6) / 5;
+          blue = remainder % 6 / 5;
+        }
+        const value = Math.max(red, green, blue) * 2;
+        if (value === 0) {
+          return 30;
+        }
+        let result = 30 + (Math.round(blue) << 2 | Math.round(green) << 1 | Math.round(red));
+        if (value === 2) {
+          result += 60;
+        }
+        return result;
+      },
+      enumerable: false
+    },
+    rgbToAnsi: {
+      value: (red, green, blue) => styles.ansi256ToAnsi(styles.rgbToAnsi256(red, green, blue)),
+      enumerable: false
+    },
+    hexToAnsi: {
+      value: (hex) => styles.ansi256ToAnsi(styles.hexToAnsi256(hex)),
+      enumerable: false
+    }
+  });
+  return styles;
+}
+var ANSI_BACKGROUND_OFFSET = 10, wrapAnsi16 = (offset = 0) => (code) => `\x1B[${code + offset}m`, wrapAnsi256 = (offset = 0) => (code) => `\x1B[${38 + offset};5;${code}m`, wrapAnsi16m = (offset = 0) => (red, green, blue) => `\x1B[${38 + offset};2;${red};${green};${blue}m`, styles, modifierNames, foregroundColorNames, backgroundColorNames, colorNames, ansiStyles, ansi_styles_default;
+var init_ansi_styles = __esm(() => {
+  styles = {
+    modifier: {
+      reset: [0, 0],
+      bold: [1, 22],
+      dim: [2, 22],
+      italic: [3, 23],
+      underline: [4, 24],
+      overline: [53, 55],
+      inverse: [7, 27],
+      hidden: [8, 28],
+      strikethrough: [9, 29]
+    },
+    color: {
+      black: [30, 39],
+      red: [31, 39],
+      green: [32, 39],
+      yellow: [33, 39],
+      blue: [34, 39],
+      magenta: [35, 39],
+      cyan: [36, 39],
+      white: [37, 39],
+      blackBright: [90, 39],
+      gray: [90, 39],
+      grey: [90, 39],
+      redBright: [91, 39],
+      greenBright: [92, 39],
+      yellowBright: [93, 39],
+      blueBright: [94, 39],
+      magentaBright: [95, 39],
+      cyanBright: [96, 39],
+      whiteBright: [97, 39]
+    },
+    bgColor: {
+      bgBlack: [40, 49],
+      bgRed: [41, 49],
+      bgGreen: [42, 49],
+      bgYellow: [43, 49],
+      bgBlue: [44, 49],
+      bgMagenta: [45, 49],
+      bgCyan: [46, 49],
+      bgWhite: [47, 49],
+      bgBlackBright: [100, 49],
+      bgGray: [100, 49],
+      bgGrey: [100, 49],
+      bgRedBright: [101, 49],
+      bgGreenBright: [102, 49],
+      bgYellowBright: [103, 49],
+      bgBlueBright: [104, 49],
+      bgMagentaBright: [105, 49],
+      bgCyanBright: [106, 49],
+      bgWhiteBright: [107, 49]
+    }
+  };
+  modifierNames = Object.keys(styles.modifier);
+  foregroundColorNames = Object.keys(styles.color);
+  backgroundColorNames = Object.keys(styles.bgColor);
+  colorNames = [...foregroundColorNames, ...backgroundColorNames];
+  ansiStyles = assembleStyles();
+  ansi_styles_default = ansiStyles;
+});
+
+// node_modules/chalk/source/vendor/supports-color/index.js
+import process2 from "node:process";
+import os from "node:os";
+import tty from "node:tty";
+function hasFlag(flag, argv = globalThis.Deno ? globalThis.Deno.args : process2.argv) {
+  const prefix = flag.startsWith("-") ? "" : flag.length === 1 ? "-" : "--";
+  const position = argv.indexOf(prefix + flag);
+  const terminatorPosition = argv.indexOf("--");
+  return position !== -1 && (terminatorPosition === -1 || position < terminatorPosition);
+}
+function envForceColor() {
+  if ("FORCE_COLOR" in env) {
+    if (env.FORCE_COLOR === "true") {
+      return 1;
+    }
+    if (env.FORCE_COLOR === "false") {
+      return 0;
+    }
+    return env.FORCE_COLOR.length === 0 ? 1 : Math.min(Number.parseInt(env.FORCE_COLOR, 10), 3);
+  }
+}
+function translateLevel(level) {
+  if (level === 0) {
+    return false;
+  }
+  return {
+    level,
+    hasBasic: true,
+    has256: level >= 2,
+    has16m: level >= 3
+  };
+}
+function _supportsColor(haveStream, { streamIsTTY, sniffFlags = true } = {}) {
+  const noFlagForceColor = envForceColor();
+  if (noFlagForceColor !== undefined) {
+    flagForceColor = noFlagForceColor;
+  }
+  const forceColor = sniffFlags ? flagForceColor : noFlagForceColor;
+  if (forceColor === 0) {
+    return 0;
+  }
+  if (sniffFlags) {
+    if (hasFlag("color=16m") || hasFlag("color=full") || hasFlag("color=truecolor")) {
+      return 3;
+    }
+    if (hasFlag("color=256")) {
+      return 2;
+    }
+  }
+  if ("TF_BUILD" in env && "AGENT_NAME" in env) {
+    return 1;
+  }
+  if (haveStream && !streamIsTTY && forceColor === undefined) {
+    return 0;
+  }
+  const min = forceColor || 0;
+  if (env.TERM === "dumb") {
+    return min;
+  }
+  if (process2.platform === "win32") {
+    const osRelease = os.release().split(".");
+    if (Number(osRelease[0]) >= 10 && Number(osRelease[2]) >= 10586) {
+      return Number(osRelease[2]) >= 14931 ? 3 : 2;
+    }
+    return 1;
+  }
+  if ("CI" in env) {
+    if (["GITHUB_ACTIONS", "GITEA_ACTIONS", "CIRCLECI"].some((key) => (key in env))) {
+      return 3;
+    }
+    if (["TRAVIS", "APPVEYOR", "GITLAB_CI", "BUILDKITE", "DRONE"].some((sign) => (sign in env)) || env.CI_NAME === "codeship") {
+      return 1;
+    }
+    return min;
+  }
+  if ("TEAMCITY_VERSION" in env) {
+    return /^(9\.(0*[1-9]\d*)\.|\d{2,}\.)/.test(env.TEAMCITY_VERSION) ? 1 : 0;
+  }
+  if (env.COLORTERM === "truecolor") {
+    return 3;
+  }
+  if (env.TERM === "xterm-kitty") {
+    return 3;
+  }
+  if (env.TERM === "xterm-ghostty") {
+    return 3;
+  }
+  if (env.TERM === "wezterm") {
+    return 3;
+  }
+  if ("TERM_PROGRAM" in env) {
+    const version = Number.parseInt((env.TERM_PROGRAM_VERSION || "").split(".")[0], 10);
+    switch (env.TERM_PROGRAM) {
+      case "iTerm.app": {
+        return version >= 3 ? 3 : 2;
+      }
+      case "Apple_Terminal": {
+        return 2;
+      }
+    }
+  }
+  if (/-256(color)?$/i.test(env.TERM)) {
+    return 2;
+  }
+  if (/^screen|^xterm|^vt100|^vt220|^rxvt|color|ansi|cygwin|linux/i.test(env.TERM)) {
+    return 1;
+  }
+  if ("COLORTERM" in env) {
+    return 1;
+  }
+  return min;
+}
+function createSupportsColor(stream, options = {}) {
+  const level = _supportsColor(stream, {
+    streamIsTTY: stream && stream.isTTY,
+    ...options
+  });
+  return translateLevel(level);
+}
+var env, flagForceColor, supportsColor, supports_color_default;
+var init_supports_color = __esm(() => {
+  ({ env } = process2);
+  if (hasFlag("no-color") || hasFlag("no-colors") || hasFlag("color=false") || hasFlag("color=never")) {
+    flagForceColor = 0;
+  } else if (hasFlag("color") || hasFlag("colors") || hasFlag("color=true") || hasFlag("color=always")) {
+    flagForceColor = 1;
+  }
+  supportsColor = {
+    stdout: createSupportsColor({ isTTY: tty.isatty(1) }),
+    stderr: createSupportsColor({ isTTY: tty.isatty(2) })
+  };
+  supports_color_default = supportsColor;
+});
+
+// node_modules/chalk/source/utilities.js
+function stringReplaceAll(string, substring, replacer) {
+  let index = string.indexOf(substring);
+  if (index === -1) {
+    return string;
+  }
+  const substringLength = substring.length;
+  let endIndex = 0;
+  let returnValue = "";
+  do {
+    returnValue += string.slice(endIndex, index) + substring + replacer;
+    endIndex = index + substringLength;
+    index = string.indexOf(substring, endIndex);
+  } while (index !== -1);
+  returnValue += string.slice(endIndex);
+  return returnValue;
+}
+function stringEncaseCRLFWithFirstIndex(string, prefix, postfix, index) {
+  let endIndex = 0;
+  let returnValue = "";
+  do {
+    const gotCR = string[index - 1] === "\r";
+    returnValue += string.slice(endIndex, gotCR ? index - 1 : index) + prefix + (gotCR ? `\r
+` : `
+`) + postfix;
+    endIndex = index + 1;
+    index = string.indexOf(`
+`, endIndex);
+  } while (index !== -1);
+  returnValue += string.slice(endIndex);
+  return returnValue;
+}
+
+// node_modules/chalk/source/index.js
+function createChalk(options) {
+  return chalkFactory(options);
+}
+var stdoutColor, stderrColor, GENERATOR, STYLER, IS_EMPTY, levelMapping, styles2, applyOptions = (object, options = {}) => {
+  if (options.level && !(Number.isInteger(options.level) && options.level >= 0 && options.level <= 3)) {
+    throw new Error("The `level` option should be an integer from 0 to 3");
+  }
+  const colorLevel = stdoutColor ? stdoutColor.level : 0;
+  object.level = options.level === undefined ? colorLevel : options.level;
+}, chalkFactory = (options) => {
+  const chalk = (...strings) => strings.join(" ");
+  applyOptions(chalk, options);
+  Object.setPrototypeOf(chalk, createChalk.prototype);
+  return chalk;
+}, getModelAnsi = (model, level, type, ...arguments_) => {
+  if (model === "rgb") {
+    if (level === "ansi16m") {
+      return ansi_styles_default[type].ansi16m(...arguments_);
+    }
+    if (level === "ansi256") {
+      return ansi_styles_default[type].ansi256(ansi_styles_default.rgbToAnsi256(...arguments_));
+    }
+    return ansi_styles_default[type].ansi(ansi_styles_default.rgbToAnsi(...arguments_));
+  }
+  if (model === "hex") {
+    return getModelAnsi("rgb", level, type, ...ansi_styles_default.hexToRgb(...arguments_));
+  }
+  return ansi_styles_default[type][model](...arguments_);
+}, usedModels, proto, createStyler = (open, close, parent) => {
+  let openAll;
+  let closeAll;
+  if (parent === undefined) {
+    openAll = open;
+    closeAll = close;
+  } else {
+    openAll = parent.openAll + open;
+    closeAll = close + parent.closeAll;
+  }
+  return {
+    open,
+    close,
+    openAll,
+    closeAll,
+    parent
+  };
+}, createBuilder = (self, _styler, _isEmpty) => {
+  const builder = (...arguments_) => applyStyle(builder, arguments_.length === 1 ? "" + arguments_[0] : arguments_.join(" "));
+  Object.setPrototypeOf(builder, proto);
+  builder[GENERATOR] = self;
+  builder[STYLER] = _styler;
+  builder[IS_EMPTY] = _isEmpty;
+  return builder;
+}, applyStyle = (self, string) => {
+  if (self.level <= 0 || !string) {
+    return self[IS_EMPTY] ? "" : string;
+  }
+  let styler = self[STYLER];
+  if (styler === undefined) {
+    return string;
+  }
+  const { openAll, closeAll } = styler;
+  if (string.includes("\x1B")) {
+    while (styler !== undefined) {
+      string = stringReplaceAll(string, styler.close, styler.open);
+      styler = styler.parent;
+    }
+  }
+  const lfIndex = string.indexOf(`
+`);
+  if (lfIndex !== -1) {
+    string = stringEncaseCRLFWithFirstIndex(string, closeAll, openAll, lfIndex);
+  }
+  return openAll + string + closeAll;
+}, chalk, chalkStderr, source_default;
+var init_source = __esm(() => {
+  init_ansi_styles();
+  init_supports_color();
+  ({ stdout: stdoutColor, stderr: stderrColor } = supports_color_default);
+  GENERATOR = Symbol("GENERATOR");
+  STYLER = Symbol("STYLER");
+  IS_EMPTY = Symbol("IS_EMPTY");
+  levelMapping = [
+    "ansi",
+    "ansi",
+    "ansi256",
+    "ansi16m"
+  ];
+  styles2 = Object.create(null);
+  Object.setPrototypeOf(createChalk.prototype, Function.prototype);
+  for (const [styleName, style] of Object.entries(ansi_styles_default)) {
+    styles2[styleName] = {
+      get() {
+        const builder = createBuilder(this, createStyler(style.open, style.close, this[STYLER]), this[IS_EMPTY]);
+        Object.defineProperty(this, styleName, { value: builder });
+        return builder;
+      }
+    };
+  }
+  styles2.visible = {
+    get() {
+      const builder = createBuilder(this, this[STYLER], true);
+      Object.defineProperty(this, "visible", { value: builder });
+      return builder;
+    }
+  };
+  usedModels = ["rgb", "hex", "ansi256"];
+  for (const model of usedModels) {
+    styles2[model] = {
+      get() {
+        const { level } = this;
+        return function(...arguments_) {
+          const styler = createStyler(getModelAnsi(model, levelMapping[level], "color", ...arguments_), ansi_styles_default.color.close, this[STYLER]);
+          return createBuilder(this, styler, this[IS_EMPTY]);
+        };
+      }
+    };
+    const bgModel = "bg" + model[0].toUpperCase() + model.slice(1);
+    styles2[bgModel] = {
+      get() {
+        const { level } = this;
+        return function(...arguments_) {
+          const styler = createStyler(getModelAnsi(model, levelMapping[level], "bgColor", ...arguments_), ansi_styles_default.bgColor.close, this[STYLER]);
+          return createBuilder(this, styler, this[IS_EMPTY]);
+        };
+      }
+    };
+  }
+  proto = Object.defineProperties(() => {}, {
+    ...styles2,
+    level: {
+      enumerable: true,
+      get() {
+        return this[GENERATOR].level;
+      },
+      set(level) {
+        this[GENERATOR].level = level;
+      }
+    }
+  });
+  Object.defineProperties(createChalk.prototype, styles2);
+  chalk = createChalk();
+  chalkStderr = createChalk({ level: stderrColor ? stderrColor.level : 0 });
+  source_default = chalk;
 });
 
 // node_modules/kleur/index.js
@@ -6778,6 +7278,8182 @@ var require_prompts3 = __commonJS(function(exports, module) {
     return false;
   }
   module.exports = isNodeLT("8.6.0") ? require_dist() : require_lib();
+});
+
+// src/integrations/jira-sprints.ts
+function text(value) {
+  if (value === undefined || value === null)
+    return;
+  const s = String(value).trim();
+  return s && s !== "<null>" ? s : undefined;
+}
+function sprintState(value) {
+  const state = text(value)?.toLowerCase();
+  return SPRINT_STATES.find((s) => s === state);
+}
+function parseLegacySprintString(value) {
+  const match = value.match(/\[(.*)\]\s*$/s);
+  if (!match)
+    return null;
+  const record = {};
+  for (const part of match[1].split(/,(?=[A-Za-z]+=)/)) {
+    const eq = part.indexOf("=");
+    if (eq > 0)
+      record[part.slice(0, eq)] = part.slice(eq + 1);
+  }
+  return record;
+}
+function parseSprint(value) {
+  let raw = null;
+  if (typeof value === "string") {
+    raw = parseLegacySprintString(value);
+  } else if (value && typeof value === "object" && !Array.isArray(value)) {
+    raw = value;
+  }
+  if (!raw)
+    return null;
+  const id = text(raw.id);
+  const name = text(raw.name);
+  const state = sprintState(raw.state);
+  if (!id || id === "-1" || !name || !state)
+    return null;
+  const sprint = { id, name, state };
+  const startDate = text(raw.startDate ?? raw.start_date);
+  const endDate = text(raw.endDate ?? raw.end_date);
+  const completeDate = text(raw.completeDate ?? raw.complete_date);
+  const goal = text(raw.goal);
+  const boardId = text(raw.boardId ?? raw.originBoardId ?? raw.origin_board_id ?? raw.board_id ?? raw.rapidViewId);
+  if (startDate)
+    sprint.startDate = startDate;
+  if (endDate)
+    sprint.endDate = endDate;
+  if (completeDate)
+    sprint.completeDate = completeDate;
+  if (goal)
+    sprint.goal = goal;
+  if (boardId && boardId !== "-1")
+    sprint.boardId = boardId;
+  return sprint;
+}
+function parseSprintFieldValue(value) {
+  if (value === undefined || value === null)
+    return [];
+  if (!Array.isArray(value) && typeof value === "object" && "value" in value && !("id" in value)) {
+    return parseSprintFieldValue(value.value);
+  }
+  const items = Array.isArray(value) ? value : [value];
+  return items.map((item) => parseSprint(item)).filter((sprint) => sprint !== null);
+}
+function findSprintFieldId(fields) {
+  const field = fields.find((f) => f.schema?.custom === SPRINT_FIELD_SCHEMA);
+  return field?.id ?? null;
+}
+function parseBoard(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value))
+    return null;
+  const raw = value;
+  const id = text(raw.id);
+  if (!id || id === "-1")
+    return null;
+  const type = text(raw.type)?.toLowerCase() ?? "unknown";
+  return {
+    id,
+    name: text(raw.name) ?? "",
+    type,
+    supportsSprints: type !== "kanban"
+  };
+}
+var SPRINT_FIELD_SCHEMA = "com.pyxis.greenhopper.jira:gh-sprint", SPRINT_STATES;
+var init_jira_sprints = __esm(() => {
+  SPRINT_STATES = [
+    "future",
+    "active",
+    "closed"
+  ];
+});
+
+// node_modules/zod/v4/core/util.js
+function getEnumValues(entries) {
+  const numericValues = Object.values(entries).filter((v) => typeof v === "number");
+  const values = Object.entries(entries).filter(([k, _]) => numericValues.indexOf(+k) === -1).map(([_, v]) => v);
+  return values;
+}
+function joinValues(array, separator = "|") {
+  return array.map((val) => stringifyPrimitive(val)).join(separator);
+}
+function jsonStringifyReplacer(_, value) {
+  if (typeof value === "bigint")
+    return value.toString();
+  return value;
+}
+
+class Cached {
+  constructor(getter) {
+    this._getter = getter;
+    this._value = undefined;
+  }
+  get value() {
+    const getter = this._getter;
+    if (getter !== undefined) {
+      this._value = getter();
+      this._getter = undefined;
+    }
+    return this._value;
+  }
+}
+function cached(getter) {
+  return new Cached(getter);
+}
+function nullish(input) {
+  return input === null || input === undefined;
+}
+function cleanRegex(source) {
+  const start = source.startsWith("^") ? 1 : 0;
+  const end = source.endsWith("$") ? source.length - 1 : source.length;
+  return source.slice(start, end);
+}
+function floatSafeRemainder(val, step) {
+  const ratio = val / step;
+  const roundedRatio = Math.round(ratio);
+  const tolerance = 4 * Number.EPSILON * Math.max(Math.abs(ratio), 1);
+  if (Math.abs(ratio - roundedRatio) < tolerance)
+    return 0;
+  return ratio - roundedRatio;
+}
+function assignProp(target, prop, value) {
+  Object.defineProperty(target, prop, {
+    value,
+    writable: true,
+    enumerable: true,
+    configurable: true
+  });
+}
+function rawShape(def) {
+  const desc = Object.getOwnPropertyDescriptor(def, "shape");
+  return desc?.get ? desc.get.raw : desc?.value;
+}
+function sourceShape(schema) {
+  return rawShape(schema._zod.def) ?? schema._zod.def.shape;
+}
+function deferProp(target, key, getter) {
+  Object.defineProperty(target, key, {
+    get() {
+      const value = getter();
+      assignProp(this, key, value);
+      return value;
+    },
+    enumerable: true,
+    configurable: true
+  });
+}
+function putProp(target, key, value) {
+  if (key in target)
+    assignProp(target, key, value);
+  else
+    target[key] = value;
+}
+function mirrorShape(target, source, keys, wrap) {
+  const raw = sourceShape(source);
+  for (const key of keys) {
+    const desc = Object.getOwnPropertyDescriptor(raw, key);
+    if (!desc.enumerable)
+      continue;
+    if (desc.get) {
+      deferProp(target, key, () => {
+        const value = source._zod.def.shape[key];
+        return wrap ? wrap(value, key) : value;
+      });
+    } else
+      putProp(target, key, wrap ? wrap(desc.value, key) : desc.value);
+  }
+}
+function mirrorProps(target, source) {
+  for (const key of Reflect.ownKeys(source)) {
+    const desc = Object.getOwnPropertyDescriptor(source, key);
+    if (!desc.enumerable)
+      continue;
+    if (desc.get)
+      deferProp(target, key, () => source[key]);
+    else
+      putProp(target, key, desc.value);
+  }
+}
+function mergeDefs(...defs) {
+  const mergedDescriptors = {};
+  for (const def of defs) {
+    const descriptors = Object.getOwnPropertyDescriptors(def);
+    Object.assign(mergedDescriptors, descriptors);
+  }
+  return Object.defineProperties({}, mergedDescriptors);
+}
+function esc(str) {
+  return JSON.stringify(str);
+}
+function slugify(input) {
+  return input.toLowerCase().trim().replace(/[^\w\s-]/g, "").replace(/[\s_-]+/g, "-").replace(/^-+|-+$/g, "");
+}
+function isObject(data) {
+  return typeof data === "object" && data !== null && !Array.isArray(data);
+}
+function isPlainObject(o) {
+  if (isObject(o) === false)
+    return false;
+  const ctor = o.constructor;
+  if (ctor === undefined)
+    return true;
+  if (typeof ctor !== "function")
+    return true;
+  const prot = ctor.prototype;
+  if (isObject(prot) === false)
+    return false;
+  if (Object.prototype.hasOwnProperty.call(prot, "isPrototypeOf") === false) {
+    return false;
+  }
+  return true;
+}
+function shallowClone(o) {
+  if (isPlainObject(o))
+    return { ...o };
+  if (Array.isArray(o))
+    return [...o];
+  if (o instanceof Map)
+    return new Map(o);
+  if (o instanceof Set)
+    return new Set(o);
+  return o;
+}
+function escapeRegex(str) {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+function clone(inst, def, params) {
+  const cl = new inst._zod.constr(def ?? inst._zod.def);
+  if (!def || params?.parent)
+    cl._zod.parent = inst;
+  return cl;
+}
+function normalizeParams(_params) {
+  const params = _params;
+  if (!params)
+    return {};
+  if (typeof params === "string")
+    return { error: () => params };
+  if (params?.message !== undefined) {
+    if (params?.error !== undefined)
+      throw new Error("Cannot specify both `message` and `error` params");
+    params.error = params.message;
+  }
+  delete params.message;
+  if (typeof params.error === "string")
+    return { ...params, error: () => params.error };
+  return params;
+}
+function stringifyPrimitive(value) {
+  if (typeof value === "bigint")
+    return value.toString() + "n";
+  if (typeof value === "string")
+    return `"${value}"`;
+  return `${value}`;
+}
+function optionalKeys(shape) {
+  return Object.keys(shape).filter((k) => {
+    return shape[k]._zod.optin !== undefined && shape[k]._zod.optout === "optional";
+  });
+}
+function pick(schema, mask) {
+  const currDef = schema._zod.def;
+  const checks = currDef.checks;
+  const hasChecks = checks && checks.length > 0;
+  if (hasChecks) {
+    throw new Error(".pick() cannot be used on object schemas containing refinements");
+  }
+  const newShape = {};
+  mirrorShape(newShape, schema, maskedKeys(schema, mask));
+  return clone(schema, mergeDefs(currDef, { shape: newShape, checks: [] }));
+}
+function maskedKeys(schema, mask) {
+  const raw = sourceShape(schema);
+  const keys = [];
+  for (const key of Reflect.ownKeys(mask)) {
+    if (!Object.getOwnPropertyDescriptor(raw, key)?.enumerable) {
+      throw new Error(`Unrecognized key: "${String(key)}"`);
+    }
+    if (mask[key])
+      keys.push(key);
+  }
+  return keys;
+}
+function omit(schema, mask) {
+  const currDef = schema._zod.def;
+  const checks = currDef.checks;
+  const hasChecks = checks && checks.length > 0;
+  if (hasChecks) {
+    throw new Error(".omit() cannot be used on object schemas containing refinements");
+  }
+  const omitted = new Set(maskedKeys(schema, mask));
+  const newShape = {};
+  mirrorShape(newShape, schema, Reflect.ownKeys(sourceShape(schema)).filter((key) => !omitted.has(key)));
+  return clone(schema, mergeDefs(currDef, { shape: newShape, checks: [] }));
+}
+function extend(schema, shape) {
+  if (!isPlainObject(shape)) {
+    throw new Error("Invalid input to extend: expected a plain object");
+  }
+  const checks = schema._zod.def.checks;
+  const hasChecks = checks && checks.length > 0;
+  if (hasChecks) {
+    const existingShape = sourceShape(schema);
+    for (const key of Reflect.ownKeys(shape)) {
+      if (Object.getOwnPropertyDescriptor(existingShape, key) !== undefined) {
+        throw new Error("Cannot overwrite keys on object schemas containing refinements. Use `.safeExtend()` instead.");
+      }
+    }
+  }
+  return clone(schema, mergeDefs(schema._zod.def, { shape: extended(schema, shape) }));
+}
+function extended(schema, shape) {
+  const newShape = {};
+  mirrorShape(newShape, schema, Reflect.ownKeys(sourceShape(schema)));
+  mirrorProps(newShape, shape);
+  return newShape;
+}
+function safeExtend(schema, shape) {
+  if (!isPlainObject(shape)) {
+    throw new Error("Invalid input to safeExtend: expected a plain object");
+  }
+  return clone(schema, mergeDefs(schema._zod.def, { shape: extended(schema, shape) }));
+}
+function merge(a, b) {
+  if (!b?._zod?.def) {
+    throw new Error("Invalid input to merge: expected an object schema. To merge a plain shape, use `.extend()`.");
+  }
+  if (a._zod.def.checks?.length) {
+    throw new Error(".merge() cannot be used on object schemas containing refinements. Use .safeExtend() instead.");
+  }
+  const newShape = {};
+  mirrorShape(newShape, a, Reflect.ownKeys(sourceShape(a)));
+  mirrorShape(newShape, b, Reflect.ownKeys(sourceShape(b)));
+  const def = mergeDefs(a._zod.def, {
+    shape: newShape,
+    get catchall() {
+      return b._zod.def.catchall;
+    },
+    checks: b._zod.def.checks ?? []
+  });
+  return clone(a, def);
+}
+function partial(Class, schema, mask, name = "partial") {
+  const currDef = schema._zod.def;
+  const checks = currDef.checks;
+  const hasChecks = checks && checks.length > 0;
+  if (hasChecks) {
+    throw new Error(`.${name}() cannot be used on object schemas containing refinements`);
+  }
+  const selected = mask ? new Set(maskedKeys(schema, mask)) : undefined;
+  const newShape = {};
+  mirrorShape(newShape, schema, Reflect.ownKeys(sourceShape(schema)), Class && ((value, key) => selected && !selected.has(key) ? value : new Class({ type: "optional", innerType: value })));
+  return clone(schema, mergeDefs(schema._zod.def, { shape: newShape, checks: [] }));
+}
+function required(Class, schema, mask) {
+  const selected = mask ? new Set(maskedKeys(schema, mask)) : undefined;
+  const newShape = {};
+  mirrorShape(newShape, schema, Reflect.ownKeys(sourceShape(schema)), (value, key) => selected && !selected.has(key) ? value : new Class({ type: "nonoptional", innerType: value }));
+  return clone(schema, mergeDefs(schema._zod.def, { shape: newShape }));
+}
+function aborted(x, startIndex = 0) {
+  if (x.aborted === true)
+    return true;
+  for (let i = startIndex;i < x.issues.length; i++) {
+    if (x.issues[i]?.continue !== true) {
+      return true;
+    }
+  }
+  return false;
+}
+function explicitlyAborted(x, startIndex = 0) {
+  if (x.aborted === true)
+    return true;
+  for (let i = startIndex;i < x.issues.length; i++) {
+    if (x.issues[i]?.continue === false) {
+      return true;
+    }
+  }
+  return false;
+}
+function prefixIssues(path, issues) {
+  return issues.map((iss) => {
+    var _a;
+    (_a = iss).path ?? (_a.path = []);
+    iss.path.unshift(path);
+    return iss;
+  });
+}
+function unwrapMessage(message) {
+  return typeof message === "string" ? message : message?.message;
+}
+function attachSchema(issues, start, inst) {
+  var _a;
+  for (let i = start;i < issues.length; i++) {
+    (_a = issues[i]).schema ?? (_a.schema = inst);
+  }
+}
+function finalizeIssue(iss, ctx, config) {
+  var _a;
+  const traits = iss.inst?._zod?.traits;
+  if (traits?.has("$ZodType")) {
+    if (traits.has("$ZodCheck"))
+      (_a = iss).schema ?? (_a.schema = iss.inst);
+    else
+      iss.schema = iss.inst;
+  }
+  const schemaError = iss.schema !== iss.inst ? iss.schema?._zod.def?.error : undefined;
+  const message = iss.message ? iss.message : unwrapMessage(iss.inst?._zod.def?.error?.(iss)) ?? unwrapMessage(schemaError?.(iss)) ?? unwrapMessage(ctx?.error?.(iss)) ?? unwrapMessage(config.customError?.(iss)) ?? unwrapMessage(config.localeError?.(iss)) ?? "Invalid input";
+  const full = {};
+  for (const k of Object.keys(iss)) {
+    if (k === "inst" || k === "schema" || k === "continue" || k === "input" || k === "__proto__")
+      continue;
+    full[k] = iss[k];
+  }
+  full.path ?? (full.path = []);
+  full.message = message;
+  if (ctx?.reportInput) {
+    full.input = iss.input;
+  }
+  return full;
+}
+function codePointLength(str) {
+  const units = str.length;
+  if (!highSurrogate.test(str))
+    return units;
+  let count = units;
+  for (let i = 0;i < units - 1; i++) {
+    if ((str.charCodeAt(i) & 64512) === 55296 && (str.charCodeAt(i + 1) & 64512) === 56320) {
+      count--;
+      i++;
+    }
+  }
+  return count;
+}
+function getLengthableOrigin(input) {
+  if (Array.isArray(input))
+    return "array";
+  if (typeof input === "string")
+    return "string";
+  return "unknown";
+}
+function parsedType(data) {
+  const t = typeof data;
+  switch (t) {
+    case "number": {
+      return Number.isNaN(data) ? "nan" : "number";
+    }
+    case "object": {
+      if (data === null) {
+        return "null";
+      }
+      if (Array.isArray(data)) {
+        return "array";
+      }
+      const obj = data;
+      if (obj && Object.getPrototypeOf(obj) !== Object.prototype && "constructor" in obj && obj.constructor) {
+        return obj.constructor.name;
+      }
+    }
+  }
+  return t;
+}
+function issue(...args) {
+  const [iss, input, inst] = args;
+  if (typeof iss === "string") {
+    return {
+      message: iss,
+      code: "custom",
+      input,
+      inst
+    };
+  }
+  return { ...iss };
+}
+function members(proto, table) {
+  for (const key in table) {
+    const desc = Object.getOwnPropertyDescriptor(table, key);
+    if (desc.get)
+      Object.defineProperty(proto, key, { ...desc, enumerable: false });
+    else
+      defineBound(proto, key, desc.value);
+  }
+}
+function own(inst, key, value, enumerable = true) {
+  Object.defineProperty(inst, key, { configurable: true, writable: true, enumerable, value });
+  return value;
+}
+function hide(inst, key, value) {
+  return own(inst, key, value, false);
+}
+function derived(computes, table) {
+  for (const key in computes) {
+    const compute = computes[key];
+    Object.defineProperty(table, key, {
+      configurable: true,
+      enumerable: true,
+      get() {
+        return own(this, key, compute(this));
+      },
+      set(value) {
+        own(this, key, value);
+      }
+    });
+  }
+  return table;
+}
+function defineBound(proto, key, fn) {
+  Object.defineProperty(proto, key, {
+    configurable: true,
+    get() {
+      return this == null ? fn : own(this, key, fn.bind(this));
+    },
+    set(value) {
+      own(this, key, value);
+    }
+  });
+}
+function claim(inst, sentinel) {
+  const proto = Object.getPrototypeOf(inst);
+  return sentinel in proto ? undefined : proto;
+}
+function defineLazyInternal(inst, key, compute) {
+  const proto = Object.getPrototypeOf(inst._zod);
+  if (key in proto && installing !== inst._zod) {
+    installing = undefined;
+    return;
+  }
+  installing = inst._zod;
+  Object.defineProperty(proto, key, {
+    configurable: true,
+    get() {
+      Object.defineProperty(this, key, breaker);
+      const outer = broke;
+      broke = false;
+      try {
+        const value = compute(this);
+        if (broke)
+          delete this[key];
+        else
+          Object.defineProperty(this, key, { configurable: true, writable: true, value });
+        broke = broke || outer;
+        return value;
+      } catch (err) {
+        delete this[key];
+        broke = broke || outer;
+        throw err;
+      }
+    },
+    set(value) {
+      Object.defineProperty(this, key, { configurable: true, writable: true, value });
+    }
+  });
+}
+function installLazyProp(inst, key, make, enumerable) {
+  const proto = claim(inst, key);
+  if (!proto)
+    return;
+  Object.defineProperty(proto, key, {
+    configurable: true,
+    get() {
+      const desc = { configurable: true, writable: true, enumerable, value: undefined };
+      Object.defineProperty(this, key, desc);
+      desc.value = make(this);
+      Object.defineProperty(this, key, desc);
+      return desc.value;
+    },
+    set(value) {
+      Object.defineProperty(this, key, { configurable: true, writable: true, enumerable, value });
+    }
+  });
+}
+function constantCatch(value) {
+  const fn = () => value;
+  fn[CONSTANT_CATCH] = true;
+  return fn;
+}
+var captureStackTrace, allowsEval, propertyKeyTypes, NUMBER_FORMAT_RANGES, BIGINT_FORMAT_RANGES, highSurrogate, installing, broke = false, breaker, CONSTANT_CATCH = "~constantCatch";
+var init_util = __esm(() => {
+  init_core();
+  captureStackTrace = "captureStackTrace" in Error ? Error.captureStackTrace : (..._args) => {};
+  allowsEval = /* @__PURE__ */ cached(() => {
+    if (globalConfig.jitless) {
+      return false;
+    }
+    if (typeof navigator !== "undefined" && navigator?.userAgent?.includes("Cloudflare")) {
+      return false;
+    }
+    try {
+      const F = Function;
+      new F("");
+      return true;
+    } catch (_) {
+      return false;
+    }
+  });
+  propertyKeyTypes = /* @__PURE__ */ new Set(["string", "number", "symbol"]);
+  NUMBER_FORMAT_RANGES = /* @__PURE__ */ (() => ({
+    safeint: [Number.MIN_SAFE_INTEGER, Number.MAX_SAFE_INTEGER],
+    int32: [-2147483648, 2147483647],
+    uint32: [0, 4294967295],
+    float32: [-340282346638528860000000000000000000000, 340282346638528860000000000000000000000],
+    float64: [-Number.MAX_VALUE, Number.MAX_VALUE]
+  }))();
+  BIGINT_FORMAT_RANGES = {
+    int64: [/* @__PURE__ */ BigInt("-9223372036854775808"), /* @__PURE__ */ BigInt("9223372036854775807")],
+    uint64: [/* @__PURE__ */ BigInt(0), /* @__PURE__ */ BigInt("18446744073709551615")]
+  };
+  highSurrogate = /[\uD800-\uDBFF]/;
+  breaker = {
+    configurable: true,
+    get() {
+      broke = true;
+      return;
+    }
+  };
+});
+
+// node_modules/zod/v4/core/core.js
+function newError(Definition) {
+  const E = _E;
+  if (E) {
+    const saved = E.stackTraceLimit;
+    if (typeof saved === "number") {
+      try {
+        E.stackTraceLimit = 0;
+      } catch {
+        _E = null;
+        return new Definition;
+      }
+      try {
+        return new Definition;
+      } finally {
+        E.stackTraceLimit = saved;
+      }
+    }
+  }
+  return new Definition;
+}
+function $constructor(name, initializer, proto, params) {
+  const zodProto = {};
+  function Internals(def) {
+    this.def = def;
+    this.constr = _;
+    this.traits = new Set;
+  }
+  Internals.prototype = zodProto;
+  const protoMembers = proto;
+  const initialized = protoMembers && new WeakSet;
+  function init(inst, def) {
+    if (!inst._zod) {
+      _zodDesc.value = new Internals(def);
+      try {
+        Object.defineProperty(inst, "_zod", _zodDesc);
+      } finally {
+        _zodDesc.value = undefined;
+      }
+    } else if (inst._zod.traits.has(name)) {
+      return;
+    }
+    inst._zod.traits.add(name);
+    initializer(inst, def);
+    if (initialized) {
+      const own = Object.getPrototypeOf(inst);
+      const ctorProto = inst._zod.constr.prototype;
+      let up = own;
+      while (up && up !== ctorProto)
+        up = Object.getPrototypeOf(up);
+      const target = up ?? own;
+      if (!initialized.has(target)) {
+        initialized.add(target);
+        members(target, protoMembers);
+      }
+    }
+    const proto = _.prototype;
+    for (const k in proto) {
+      if (!Object.prototype.hasOwnProperty.call(proto, k))
+        continue;
+      if (!(k in inst)) {
+        inst[k] = proto[k].bind(inst);
+      }
+    }
+  }
+  const Parent = params?.Parent ?? Object;
+
+  class Definition extends Parent {
+  }
+  Object.defineProperty(Definition, "name", { value: name });
+  function _(def) {
+    const inst = params?.Parent ? newError(Definition) : this;
+    init(inst, def);
+    const deferred = inst._zod.deferred;
+    if (deferred) {
+      for (const fn of deferred) {
+        fn();
+      }
+      inst._zod.deferred = undefined;
+    }
+    const pp = globalThis.__zod_globalConfig?.postProcessor;
+    if (pp)
+      pp(inst);
+    return inst;
+  }
+  Object.defineProperty(_, "init", { value: init });
+  Object.defineProperty(_, Symbol.hasInstance, {
+    value: (inst) => {
+      if (params?.Parent && inst instanceof params.Parent)
+        return true;
+      return inst?._zod?.traits?.has(name);
+    }
+  });
+  Object.defineProperty(_, "name", { value: name });
+  return _;
+}
+function config(newConfig) {
+  if (newConfig)
+    Object.assign(globalConfig, newConfig);
+  return globalConfig;
+}
+var _a, _zodDesc, _E, $ZodAsyncError, $ZodEncodeError, globalConfig;
+var init_core = __esm(() => {
+  init_util();
+  _zodDesc = { value: undefined, enumerable: false };
+  _E = "captureStackTrace" in Error ? Error : null;
+  $ZodAsyncError = class $ZodAsyncError extends Error {
+    constructor() {
+      super(`Encountered Promise during synchronous parse. Use .parseAsync() instead.`);
+    }
+  };
+  $ZodEncodeError = class $ZodEncodeError extends Error {
+    constructor(name) {
+      super(`Encountered unidirectional transform during encode: ${name}`);
+      this.name = "ZodEncodeError";
+    }
+  };
+  (_a = globalThis).__zod_globalConfig ?? (_a.__zod_globalConfig = {});
+  globalConfig = globalThis.__zod_globalConfig;
+});
+
+// node_modules/zod/v4/core/errors.js
+function _getMessage() {
+  const internals = this._zod;
+  internals.message ?? (internals.message = JSON.stringify(internals.def, jsonStringifyReplacer, 2));
+  return internals.message;
+}
+function _setMessage(value) {
+  this._zod.message = value;
+}
+function node(obj, key, make) {
+  if (!Object.prototype.hasOwnProperty.call(obj, key)) {
+    if (key === "__proto__") {
+      Object.defineProperty(obj, key, { value: make(), writable: true, enumerable: true, configurable: true });
+    } else {
+      obj[key] = make();
+    }
+  }
+  return obj[key];
+}
+function flattenError(error, mapper = (issue) => issue.message) {
+  const fieldErrors = {};
+  const formErrors = [];
+  for (const sub of error.issues) {
+    if (sub.path.length > 0) {
+      node(fieldErrors, sub.path[0], () => []).push(mapper(sub));
+    } else {
+      formErrors.push(mapper(sub));
+    }
+  }
+  return { formErrors, fieldErrors };
+}
+function formatError(error, mapper = (issue) => issue.message) {
+  const fieldErrors = { _errors: [] };
+  const processError = (error, path = []) => {
+    for (const issue of error.issues) {
+      if (issue.code === "invalid_union" && issue.errors.length) {
+        issue.errors.map((issues) => processError({ issues }, [...path, ...issue.path]));
+      } else if (issue.code === "invalid_key") {
+        processError({ issues: issue.issues }, [...path, ...issue.path]);
+      } else if (issue.code === "invalid_element") {
+        processError({ issues: issue.issues }, [...path, ...issue.path]);
+      } else {
+        const fullpath = [...path, ...issue.path];
+        if (fullpath.length === 0) {
+          fieldErrors._errors.push(mapper(issue));
+        } else {
+          let curr = fieldErrors;
+          let i = 0;
+          while (i < fullpath.length) {
+            const el = fullpath[i];
+            const terminal = i === fullpath.length - 1;
+            if (el === "_errors") {
+              if (terminal)
+                curr._errors.push(mapper(issue));
+              i++;
+              continue;
+            }
+            if (!Object.prototype.hasOwnProperty.call(curr, el)) {
+              Object.defineProperty(curr, el, {
+                value: { _errors: [] },
+                enumerable: true,
+                writable: true,
+                configurable: true
+              });
+            }
+            const node = curr[el];
+            if (terminal) {
+              node._errors.push(mapper(issue));
+            }
+            curr = node;
+            i++;
+          }
+        }
+      }
+    }
+  };
+  processError(error);
+  return fieldErrors;
+}
+var _messageDesc, _issuesDesc, _installedToString, initializer = (inst, def) => {
+  inst.name = "$ZodError";
+  _issuesDesc.value = def;
+  Object.defineProperty(inst, "issues", _issuesDesc);
+  _issuesDesc.value = undefined;
+  Object.defineProperty(inst, "message", _messageDesc);
+  const proto = Object.getPrototypeOf(inst);
+  if (!_installedToString.has(proto)) {
+    _installedToString.add(proto);
+    Object.defineProperty(proto, "toString", {
+      configurable: true,
+      enumerable: false,
+      get() {
+        const value = () => this.message;
+        Object.defineProperty(this, "toString", { value, configurable: true, writable: true });
+        return value;
+      },
+      set(value) {
+        Object.defineProperty(this, "toString", { value, configurable: true, writable: true });
+      }
+    });
+  }
+}, $ZodError, $ZodRealError;
+var init_errors = __esm(() => {
+  init_core();
+  init_util();
+  _messageDesc = {
+    get: _getMessage,
+    set: _setMessage,
+    enumerable: true,
+    configurable: true
+  };
+  _issuesDesc = { value: undefined, enumerable: false };
+  _installedToString = /* @__PURE__ */ new WeakSet([Object.prototype, Error.prototype]);
+  $ZodError = $constructor("$ZodError", initializer);
+  $ZodRealError = $constructor("$ZodError", initializer, undefined, {
+    Parent: Error
+  });
+});
+
+// node_modules/zod/v4/core/parse.js
+function finalizeParams(callee, params) {
+  return { callee: params?.callee ?? callee, Err: params?.Err };
+}
+function failure(Err, issues, ctx) {
+  let error;
+  return {
+    success: false,
+    get error() {
+      if (!error) {
+        error = new Err(issues.map((iss) => finalizeIssue(iss, ctx, config())));
+        issues = undefined;
+        ctx = undefined;
+      }
+      return error;
+    },
+    set error(e) {
+      error = e;
+      issues = undefined;
+      ctx = undefined;
+    }
+  };
+}
+function validateFallback(schema, value, _ctx) {
+  const ctx = _ctx ? { ..._ctx, async: false, abortEarly: true } : { async: false, abortEarly: true };
+  const fallbackRun = schema._zod.bag.fallbackRun;
+  let result;
+  if (fallbackRun) {
+    ctx[COMPILE_FALLBACK] = true;
+    result = fallbackRun({ value, issues: [] }, ctx);
+  } else {
+    result = schema._zod.run({ value, issues: [] }, ctx);
+  }
+  if (result instanceof Promise) {
+    throw new $ZodAsyncError;
+  }
+  return result.issues.length === 0;
+}
+var _parse = (_Err) => {
+  const fn = (schema, value, _ctx, _params) => {
+    const ctx = _ctx ? { ..._ctx, async: false } : { async: false };
+    const result = schema._zod.run({ value, issues: [] }, ctx);
+    if (result instanceof Promise) {
+      throw new $ZodAsyncError;
+    }
+    if (result.issues.length) {
+      const e = new (_params?.Err ?? _Err)(result.issues.map((iss) => finalizeIssue(iss, ctx, config())));
+      captureStackTrace(e, _params?.callee ?? fn);
+      throw e;
+    }
+    return result.value;
+  };
+  return fn;
+}, _parseAsync = (_Err) => {
+  const fn = async (schema, value, _ctx, params) => {
+    const ctx = _ctx ? { ..._ctx, async: true } : { async: true };
+    let result = schema._zod.run({ value, issues: [] }, ctx);
+    if (result instanceof Promise)
+      result = await result;
+    if (result.issues.length) {
+      const e = new (params?.Err ?? _Err)(result.issues.map((iss) => finalizeIssue(iss, ctx, config())));
+      captureStackTrace(e, params?.callee ?? fn);
+      throw e;
+    }
+    return result.value;
+  };
+  return fn;
+}, _safeParse = (_Err) => (schema, value, _ctx) => {
+  const ctx = _ctx ? { ..._ctx, async: false } : { async: false };
+  const result = schema._zod.run({ value, issues: [] }, ctx);
+  if (result instanceof Promise) {
+    throw new $ZodAsyncError;
+  }
+  return result.issues.length ? failure(_Err, result.issues, ctx) : { success: true, data: result.value };
+}, safeParse, _safeParseAsync = (_Err) => async (schema, value, _ctx) => {
+  const ctx = _ctx ? { ..._ctx, async: true } : { async: true };
+  let result = schema._zod.run({ value, issues: [] }, ctx);
+  if (result instanceof Promise)
+    result = await result;
+  return result.issues.length ? failure(_Err, result.issues, ctx) : { success: true, data: result.value };
+}, COMPILE_INVALID, COMPILE_FALLBACK, validate = (schema, value, _ctx) => {
+  const validator = schema._zod.bag.validator;
+  if (validator !== undefined) {
+    if (validator(value) !== COMPILE_INVALID)
+      return true;
+    if (validator.definite === true && _ctx === undefined)
+      return false;
+  }
+  return validateFallback(schema, value, _ctx);
+}, validateAsync = async (schema, value, _ctx) => {
+  const ctx = _ctx ? { ..._ctx, async: true, abortEarly: true } : { async: true, abortEarly: true };
+  let result = schema._zod.run({ value, issues: [] }, ctx);
+  if (result instanceof Promise)
+    result = await result;
+  return result.issues.length === 0;
+}, _encode = (_Err) => {
+  const parse = _parse(_Err);
+  const fn = (schema, value, _ctx, _params) => {
+    const ctx = _ctx ? { ..._ctx, direction: "backward" } : { direction: "backward" };
+    return parse(schema, value, ctx, finalizeParams(fn, _params));
+  };
+  return fn;
+}, _decode = (_Err) => {
+  const parse = _parse(_Err);
+  const fn = (schema, value, _ctx, _params) => {
+    return parse(schema, value, _ctx, finalizeParams(fn, _params));
+  };
+  return fn;
+}, _encodeAsync = (_Err) => {
+  const parseAsync = _parseAsync(_Err);
+  const fn = async (schema, value, _ctx, _params) => {
+    const ctx = _ctx ? { ..._ctx, direction: "backward" } : { direction: "backward" };
+    return await parseAsync(schema, value, ctx, finalizeParams(fn, _params));
+  };
+  return fn;
+}, _decodeAsync = (_Err) => {
+  const parseAsync = _parseAsync(_Err);
+  const fn = async (schema, value, _ctx, _params) => {
+    return await parseAsync(schema, value, _ctx, finalizeParams(fn, _params));
+  };
+  return fn;
+}, _safeEncode = (_Err) => (schema, value, _ctx) => {
+  const ctx = _ctx ? { ..._ctx, direction: "backward" } : { direction: "backward" };
+  return _safeParse(_Err)(schema, value, ctx);
+}, _safeDecode = (_Err) => (schema, value, _ctx) => {
+  return _safeParse(_Err)(schema, value, _ctx);
+}, _safeEncodeAsync = (_Err) => async (schema, value, _ctx) => {
+  const ctx = _ctx ? { ..._ctx, direction: "backward" } : { direction: "backward" };
+  return _safeParseAsync(_Err)(schema, value, ctx);
+}, _safeDecodeAsync = (_Err) => async (schema, value, _ctx) => {
+  return _safeParseAsync(_Err)(schema, value, _ctx);
+};
+var init_parse = __esm(() => {
+  init_core();
+  init_errors();
+  init_util();
+  safeParse = /* @__PURE__ */ _safeParse($ZodRealError);
+  COMPILE_INVALID = /* @__PURE__ */ Symbol.for("zod.compile.invalid");
+  COMPILE_FALLBACK = /* @__PURE__ */ Symbol.for("zod.compile.fallback");
+});
+
+// node_modules/zod/v4/core/regexes.js
+function nanoidOfLength(length) {
+  return new RegExp(`^[a-zA-Z0-9_-]{${length}}$`);
+}
+function emoji() {
+  return new RegExp(_emoji, "u");
+}
+function anchor(source) {
+  return new RegExp(`^${source}$`);
+}
+function timeSource(args) {
+  const hhmm = `(?:[01]\\d|2[0-3]):[0-5]\\d`;
+  const regex = typeof args.precision === "number" ? args.precision === -1 ? `${hhmm}` : args.precision === 0 ? `${hhmm}:[0-5]\\d` : `${hhmm}:[0-5]\\d\\.\\d{${args.precision}}` : args.seconds ? `${hhmm}:[0-5]\\d(?:\\.\\d+)?` : `${hhmm}(?::[0-5]\\d(?:\\.\\d+)?)?`;
+  return regex;
+}
+function time(args) {
+  return new RegExp(`^${timeSource(args)}$`);
+}
+function datetime(args) {
+  const opts = ["Z"];
+  if (args.offset)
+    opts.push(`([+-](?:[01]\\d|2[0-3]):[0-5]\\d)`);
+  const qualified = `${timeSource({ precision: args.precision, seconds: true })}(?:${opts.join("|")})`;
+  const timeRegex = args.local ? `${qualified}|${timeSource({ precision: args.precision })}` : qualified;
+  return new RegExp(`^${dateSource}T(?:${timeRegex})$`);
+}
+var cuid, cuid2, ulid, xid, ksuid, nanoid, duration, guid, uuid = (version) => {
+  if (!version)
+    return /^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$/;
+  return new RegExp(`^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-${version}[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$`);
+}, email, _emoji = `^(?=[\\s\\S]*[\\p{Extended_Pictographic}\\p{Regional_Indicator}\\u20E3])[\\p{Extended_Pictographic}\\p{Emoji_Component}]+$`, ipv4, ipv6, cidrv4, cidrv6, base64, base64url, httpProtocol, e164, dateSource = `(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))`, date, anyString, integer, number, boolean, _null, lowercase, uppercase;
+var init_regexes = __esm(() => {
+  cuid = /^[cC][0-9a-z]{6,}$/;
+  cuid2 = /^[0-9a-z]+$/;
+  ulid = /^[0-7][0-9A-HJKMNP-TV-Za-hjkmnp-tv-z]{25}$/;
+  xid = /^[0-9a-vA-V]{20}$/;
+  ksuid = /^[A-Za-z0-9]{27}$/;
+  nanoid = /^[a-zA-Z0-9_-]{21}$/;
+  duration = /^P(?:(\d+W)|(?!.*W)(?=\d|T\d)(\d+Y)?(\d+M)?(\d+D)?(T(?=\d)(\d+H)?(\d+M)?(\d+([.,]\d+)?S)?)?)$/;
+  guid = /^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$/;
+  email = /^(?:[A-Za-z0-9_'+\-]+\.)*[A-Za-z0-9_'+\-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9\-]*\.)+[A-Za-z]{2,}$/;
+  ipv4 = /^(?:(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\.){3}(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])$/;
+  ipv6 = /^(([0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,7}:|([0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,5}(:[0-9a-fA-F]{1,4}){1,2}|([0-9a-fA-F]{1,4}:){1,4}(:[0-9a-fA-F]{1,4}){1,3}|([0-9a-fA-F]{1,4}:){1,3}(:[0-9a-fA-F]{1,4}){1,4}|([0-9a-fA-F]{1,4}:){1,2}(:[0-9a-fA-F]{1,4}){1,5}|[0-9a-fA-F]{1,4}:((:[0-9a-fA-F]{1,4}){1,6})|:((:[0-9a-fA-F]{1,4}){1,7}|:))$/;
+  cidrv4 = /^((25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\.){3}(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\/([0-9]|[1-2][0-9]|3[0-2])$/;
+  cidrv6 = /^(([0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,7}:|([0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,5}(:[0-9a-fA-F]{1,4}){1,2}|([0-9a-fA-F]{1,4}:){1,4}(:[0-9a-fA-F]{1,4}){1,3}|([0-9a-fA-F]{1,4}:){1,3}(:[0-9a-fA-F]{1,4}){1,4}|([0-9a-fA-F]{1,4}:){1,2}(:[0-9a-fA-F]{1,4}){1,5}|[0-9a-fA-F]{1,4}:((:[0-9a-fA-F]{1,4}){1,6})|:((:[0-9a-fA-F]{1,4}){1,7}|:))\/(12[0-8]|1[01][0-9]|[1-9]?[0-9])$/;
+  base64 = /^$|^(?:[0-9a-zA-Z+/]{4})*(?:(?:[0-9a-zA-Z+/]{2}==)|(?:[0-9a-zA-Z+/]{3}=))?$/;
+  base64url = /^(?:[A-Za-z0-9_-]{4})*(?:[A-Za-z0-9_-]{2,3})?$/;
+  httpProtocol = /^https?$/;
+  e164 = /^\+[1-9]\d{6,14}$/;
+  date = /* @__PURE__ */ anchor(dateSource);
+  anyString = /^[\s\S]{0,}$/;
+  integer = /^-?\d+$/;
+  number = /^-?\d+(?:\.\d+)?$/;
+  boolean = /^(?:true|false)$/i;
+  _null = /^null$/i;
+  lowercase = /^[^A-Z]*$/;
+  uppercase = /^[^a-z]*$/;
+});
+
+// node_modules/zod/v4/core/checks.js
+var $ZodCheck, _whenHasLength = (payload) => {
+  const val = payload.value;
+  return !nullish(val) && val.length !== undefined;
+}, numericOriginMap, $ZodCheckLessThan, $ZodCheckGreaterThan, $ZodCheckMultipleOf, $ZodCheckNumberFormat, $ZodCheckMaxLength, $ZodCheckMinLength, $ZodCheckLengthEquals, $ZodCheckStringFormat, $ZodCheckRegex, $ZodCheckLowerCase, $ZodCheckUpperCase, $ZodCheckIncludes, $ZodCheckStartsWith, $ZodCheckEndsWith, $ZodCheckOverwrite;
+var init_checks = __esm(() => {
+  init_core();
+  init_regexes();
+  init_util();
+  $ZodCheck = /* @__PURE__ */ $constructor("$ZodCheck", (inst, def) => {
+    var _a;
+    inst._zod ?? (inst._zod = {});
+    inst._zod.def = def;
+    (_a = inst._zod).onattach ?? (_a.onattach = []);
+  });
+  numericOriginMap = {
+    number: "number",
+    bigint: "bigint",
+    object: "date"
+  };
+  $ZodCheckLessThan = /* @__PURE__ */ $constructor("$ZodCheckLessThan", (inst, def) => {
+    $ZodCheck.init(inst, def);
+    const origin = numericOriginMap[typeof def.value];
+    inst._zod.check = (payload) => {
+      if (def.inclusive ? payload.value <= def.value : payload.value < def.value) {
+        return;
+      }
+      payload.issues.push({
+        origin: numericOriginMap[typeof payload.value] ?? origin,
+        code: "too_big",
+        maximum: typeof def.value === "object" ? def.value.getTime() : def.value,
+        input: payload.value,
+        inclusive: def.inclusive,
+        inst,
+        continue: !def.abort
+      });
+    };
+  });
+  $ZodCheckGreaterThan = /* @__PURE__ */ $constructor("$ZodCheckGreaterThan", (inst, def) => {
+    $ZodCheck.init(inst, def);
+    const origin = numericOriginMap[typeof def.value];
+    inst._zod.check = (payload) => {
+      if (def.inclusive ? payload.value >= def.value : payload.value > def.value) {
+        return;
+      }
+      payload.issues.push({
+        origin: numericOriginMap[typeof payload.value] ?? origin,
+        code: "too_small",
+        minimum: typeof def.value === "object" ? def.value.getTime() : def.value,
+        input: payload.value,
+        inclusive: def.inclusive,
+        inst,
+        continue: !def.abort
+      });
+    };
+  });
+  $ZodCheckMultipleOf = /* @__PURE__ */ $constructor("$ZodCheckMultipleOf", (inst, def) => {
+    $ZodCheck.init(inst, def);
+    inst._zod.check = (payload) => {
+      if (typeof payload.value !== typeof def.value)
+        throw new Error("Cannot mix number and bigint in multiple_of check.");
+      const isMultiple = typeof payload.value === "bigint" ? def.value !== BigInt(0) && payload.value % def.value === BigInt(0) : floatSafeRemainder(payload.value, def.value) === 0;
+      if (isMultiple)
+        return;
+      payload.issues.push({
+        origin: typeof payload.value,
+        code: "not_multiple_of",
+        divisor: def.value,
+        input: payload.value,
+        inst,
+        continue: !def.abort
+      });
+    };
+  });
+  $ZodCheckNumberFormat = /* @__PURE__ */ $constructor("$ZodCheckNumberFormat", (inst, def) => {
+    $ZodCheck.init(inst, def);
+    def.format = def.format || "float64";
+    const isInt = def.format?.includes("int");
+    const origin = isInt ? "int" : "number";
+    const [minimum, maximum] = NUMBER_FORMAT_RANGES[def.format];
+    inst._zod.check = (payload) => {
+      const input = payload.value;
+      if (isInt) {
+        if (!Number.isInteger(input)) {
+          payload.issues.push({
+            expected: origin,
+            format: def.format,
+            code: "invalid_type",
+            continue: false,
+            input,
+            inst
+          });
+          return;
+        }
+        if (!Number.isSafeInteger(input)) {
+          if (input > 0) {
+            payload.issues.push({
+              input,
+              code: "too_big",
+              maximum: Number.MAX_SAFE_INTEGER,
+              note: "Integers must be within the safe integer range.",
+              inst,
+              origin,
+              inclusive: true,
+              continue: !def.abort
+            });
+          } else {
+            payload.issues.push({
+              input,
+              code: "too_small",
+              minimum: Number.MIN_SAFE_INTEGER,
+              note: "Integers must be within the safe integer range.",
+              inst,
+              origin,
+              inclusive: true,
+              continue: !def.abort
+            });
+          }
+          return;
+        }
+      }
+      if (input < minimum) {
+        payload.issues.push({
+          origin: "number",
+          input,
+          code: "too_small",
+          minimum,
+          inclusive: true,
+          inst,
+          continue: !def.abort
+        });
+      }
+      if (input > maximum) {
+        payload.issues.push({
+          origin: "number",
+          input,
+          code: "too_big",
+          maximum,
+          inclusive: true,
+          inst,
+          continue: !def.abort
+        });
+      }
+    };
+  });
+  $ZodCheckMaxLength = /* @__PURE__ */ $constructor("$ZodCheckMaxLength", (inst, def) => {
+    var _a;
+    $ZodCheck.init(inst, def);
+    (_a = inst._zod.def).when ?? (_a.when = _whenHasLength);
+    inst._zod.check = (payload) => {
+      const input = payload.value;
+      const units = input.length;
+      const length = typeof input === "string" && units > def.maximum ? codePointLength(input) : units;
+      if (length <= def.maximum)
+        return;
+      const origin = getLengthableOrigin(input);
+      payload.issues.push({
+        origin,
+        code: "too_big",
+        maximum: def.maximum,
+        inclusive: true,
+        input,
+        inst,
+        continue: !def.abort
+      });
+    };
+  });
+  $ZodCheckMinLength = /* @__PURE__ */ $constructor("$ZodCheckMinLength", (inst, def) => {
+    var _a;
+    $ZodCheck.init(inst, def);
+    (_a = inst._zod.def).when ?? (_a.when = _whenHasLength);
+    inst._zod.check = (payload) => {
+      const input = payload.value;
+      const units = input.length;
+      const length = typeof input === "string" && units >= def.minimum && units < def.minimum * 2 ? codePointLength(input) : units;
+      if (length >= def.minimum)
+        return;
+      const origin = getLengthableOrigin(input);
+      payload.issues.push({
+        origin,
+        code: "too_small",
+        minimum: def.minimum,
+        inclusive: true,
+        input,
+        inst,
+        continue: !def.abort
+      });
+    };
+  });
+  $ZodCheckLengthEquals = /* @__PURE__ */ $constructor("$ZodCheckLengthEquals", (inst, def) => {
+    var _a;
+    $ZodCheck.init(inst, def);
+    (_a = inst._zod.def).when ?? (_a.when = _whenHasLength);
+    inst._zod.check = (payload) => {
+      const input = payload.value;
+      const units = input.length;
+      const length = typeof input === "string" && units >= def.length && units <= def.length * 2 ? codePointLength(input) : units;
+      if (length === def.length)
+        return;
+      const origin = getLengthableOrigin(input);
+      const tooBig = length > def.length;
+      payload.issues.push({
+        origin,
+        ...tooBig ? { code: "too_big", maximum: def.length } : { code: "too_small", minimum: def.length },
+        inclusive: true,
+        exact: true,
+        input: payload.value,
+        inst,
+        continue: !def.abort
+      });
+    };
+  });
+  $ZodCheckStringFormat = /* @__PURE__ */ $constructor("$ZodCheckStringFormat", (inst, def) => {
+    var _a, _b;
+    $ZodCheck.init(inst, def);
+    if (def.pattern)
+      (_a = inst._zod).check ?? (_a.check = (payload) => {
+        def.pattern.lastIndex = 0;
+        if (def.pattern.test(payload.value))
+          return;
+        payload.issues.push({
+          origin: "string",
+          code: "invalid_format",
+          format: def.format,
+          input: payload.value,
+          ...def.pattern ? { pattern: def.pattern.toString() } : {},
+          inst,
+          continue: !def.abort
+        });
+      });
+    else
+      (_b = inst._zod).check ?? (_b.check = () => {});
+  });
+  $ZodCheckRegex = /* @__PURE__ */ $constructor("$ZodCheckRegex", (inst, def) => {
+    $ZodCheckStringFormat.init(inst, def);
+    inst._zod.check = (payload) => {
+      def.pattern.lastIndex = 0;
+      if (def.pattern.test(payload.value))
+        return;
+      payload.issues.push({
+        origin: "string",
+        code: "invalid_format",
+        format: "regex",
+        input: payload.value,
+        pattern: def.pattern.toString(),
+        inst,
+        continue: !def.abort
+      });
+    };
+  });
+  $ZodCheckLowerCase = /* @__PURE__ */ $constructor("$ZodCheckLowerCase", (inst, def) => {
+    def.pattern ?? (def.pattern = lowercase);
+    $ZodCheckStringFormat.init(inst, def);
+  });
+  $ZodCheckUpperCase = /* @__PURE__ */ $constructor("$ZodCheckUpperCase", (inst, def) => {
+    def.pattern ?? (def.pattern = uppercase);
+    $ZodCheckStringFormat.init(inst, def);
+  });
+  $ZodCheckIncludes = /* @__PURE__ */ $constructor("$ZodCheckIncludes", (inst, def) => {
+    $ZodCheck.init(inst, def);
+    const escapedRegex = escapeRegex(def.includes);
+    const pattern = new RegExp(typeof def.position === "number" ? `^.{${def.position},}${escapedRegex}` : escapedRegex);
+    def.pattern = pattern;
+    inst._zod.check = (payload) => {
+      if (payload.value.includes(def.includes, def.position))
+        return;
+      payload.issues.push({
+        origin: "string",
+        code: "invalid_format",
+        format: "includes",
+        includes: def.includes,
+        input: payload.value,
+        inst,
+        continue: !def.abort
+      });
+    };
+  });
+  $ZodCheckStartsWith = /* @__PURE__ */ $constructor("$ZodCheckStartsWith", (inst, def) => {
+    $ZodCheck.init(inst, def);
+    const pattern = new RegExp(`^${escapeRegex(def.prefix)}.*`);
+    def.pattern ?? (def.pattern = pattern);
+    inst._zod.check = (payload) => {
+      if (payload.value.startsWith(def.prefix))
+        return;
+      payload.issues.push({
+        origin: "string",
+        code: "invalid_format",
+        format: "starts_with",
+        prefix: def.prefix,
+        input: payload.value,
+        inst,
+        continue: !def.abort
+      });
+    };
+  });
+  $ZodCheckEndsWith = /* @__PURE__ */ $constructor("$ZodCheckEndsWith", (inst, def) => {
+    $ZodCheck.init(inst, def);
+    const pattern = new RegExp(`.*${escapeRegex(def.suffix)}$`);
+    def.pattern ?? (def.pattern = pattern);
+    inst._zod.check = (payload) => {
+      if (payload.value.endsWith(def.suffix))
+        return;
+      payload.issues.push({
+        origin: "string",
+        code: "invalid_format",
+        format: "ends_with",
+        suffix: def.suffix,
+        input: payload.value,
+        inst,
+        continue: !def.abort
+      });
+    };
+  });
+  $ZodCheckOverwrite = /* @__PURE__ */ $constructor("$ZodCheckOverwrite", (inst, def) => {
+    $ZodCheck.init(inst, def);
+    inst._zod.check = (payload) => {
+      payload.value = def.tx(payload.value);
+    };
+  });
+});
+
+// node_modules/zod/v4/core/doc.js
+class Doc {
+  constructor(args = [], closed = {}) {
+    this.content = [];
+    this.indent = 0;
+    this.args = args;
+    this.closed = closed;
+  }
+  indented(fn) {
+    this.indent += 1;
+    try {
+      fn(this);
+    } finally {
+      this.indent -= 1;
+    }
+  }
+  write(arg) {
+    if (typeof arg === "function") {
+      arg(this, { execution: "sync" });
+      arg(this, { execution: "async" });
+      return;
+    }
+    const content = arg;
+    const lines = content.split(`
+`).filter((x) => x);
+    const minIndent = Math.min(...lines.map((x) => x.length - x.trimStart().length));
+    const dedented = lines.map((x) => x.slice(minIndent)).map((x) => " ".repeat(this.indent * 2) + x);
+    for (const line of dedented) {
+      this.content.push(line);
+    }
+  }
+  compile() {
+    const F = Function;
+    const content = this?.content ?? [``];
+    const factory = new F(...Object.keys(this.closed), `return function (${this.args.join(", ")}) {
+${content.join(`
+`)}
+};`);
+    return factory(...Object.values(this.closed));
+  }
+}
+
+// node_modules/zod/v4/core/versions.js
+var version;
+var init_versions = __esm(() => {
+  version = {
+    major: 4,
+    minor: 6,
+    patch: 5
+  };
+});
+
+// node_modules/zod/v4/core/schemas.js
+async function validateAsync2(inst, value) {
+  const ctx = { async: true };
+  return toStandardResult(await inst._zod.run({ value, issues: [] }, ctx), ctx);
+}
+function standardProps(inst) {
+  return {
+    validate: (value) => {
+      const ctx = { async: false };
+      try {
+        const r = inst._zod.run({ value, issues: [] }, ctx);
+        if (!(r instanceof Promise))
+          return toStandardResult(r, ctx);
+      } catch (_) {}
+      return validateAsync2(inst, value);
+    },
+    vendor: "zod",
+    version: 1
+  };
+}
+function canParseURL(input) {
+  try {
+    if (typeof URL !== "undefined" && typeof URL.canParse === "function")
+      return URL.canParse(input);
+    new URL(input);
+    return true;
+  } catch {
+    return false;
+  }
+}
+function validateURL(trimmed, def) {
+  if (!("normalize" in def) && !("hostname" in def) && !("protocol" in def)) {
+    return canParseURL(trimmed) || URL_UNPARSEABLE;
+  }
+  return parseURLObject(trimmed, def);
+}
+function parseURLObject(trimmed, def) {
+  if (!def.normalize && def.protocol?.source === httpProtocol.source && !/^https?:\/\//i.test(trimmed)) {
+    return URL_BAD_FORMAT;
+  }
+  try {
+    if (typeof URL !== "undefined") {
+      const URLStatic = URL;
+      if (typeof URLStatic.parse === "function")
+        return URLStatic.parse(trimmed) ?? URL_UNPARSEABLE;
+    }
+    return new URL(trimmed);
+  } catch {
+    return URL_UNPARSEABLE;
+  }
+}
+function stripTabAndNewline(value) {
+  return value.replace(asciiTabOrNewline, "");
+}
+function urlHostnameOk(url, hostname) {
+  hostname.lastIndex = 0;
+  return hostname.test(url.hostname);
+}
+function urlProtocolOk(url, protocol) {
+  protocol.lastIndex = 0;
+  return protocol.test(url.protocol.endsWith(":") ? url.protocol.slice(0, -1) : url.protocol);
+}
+function isValidIPv6(value) {
+  if (!ipv6Alphabet.test(value))
+    return false;
+  return canParseURL(`http://[${value}]`);
+}
+function isValidCIDRv6(value) {
+  const parts = value.split("/");
+  if (parts.length !== 2)
+    return false;
+  const [address, prefix] = parts;
+  if (!prefix)
+    return false;
+  const prefixNum = Number(prefix);
+  if (`${prefixNum}` !== prefix)
+    return false;
+  if (prefixNum < 0 || prefixNum > 128)
+    return false;
+  return isValidIPv6(address);
+}
+function isValidBase64(data) {
+  if (data === "")
+    return true;
+  if (/\s/.test(data))
+    return false;
+  if (data.length % 4 !== 0)
+    return false;
+  try {
+    atob(data);
+    return true;
+  } catch {
+    return false;
+  }
+}
+function isValidBase64URL(data) {
+  if (!base64urlCharset.test(data))
+    return false;
+  const base64 = data.replace(/[-_]/g, (c) => c === "-" ? "+" : "/");
+  const padded = base64.padEnd(Math.ceil(base64.length / 4) * 4, "=");
+  return isValidBase64(padded);
+}
+function isValidJWT(token, algorithm = null) {
+  try {
+    const tokensParts = token.split(".");
+    if (tokensParts.length !== 3)
+      return false;
+    const [header] = tokensParts;
+    if (!header)
+      return false;
+    const parsedHeader = JSON.parse(atob(header));
+    if ("typ" in parsedHeader && parsedHeader?.typ !== "JWT")
+      return false;
+    if (!parsedHeader.alg)
+      return false;
+    if (algorithm && (!("alg" in parsedHeader) || parsedHeader.alg !== algorithm))
+      return false;
+    return true;
+  } catch {
+    return false;
+  }
+}
+function handleArrayResult(result, final, index) {
+  if (result.issues.length) {
+    final.issues.push(...prefixIssues(index, result.issues));
+  }
+  final.value[index] = result.value;
+}
+function handlePropertyResult(result, final, key, input, optin, optout) {
+  const isPresent = key in input;
+  const isOptionalOut = optout === "optional";
+  if (!isPresent && isOptionalOut && optin === "optional") {
+    return;
+  }
+  if (result.issues.length) {
+    if (optin !== undefined && isOptionalOut && !isPresent) {
+      return;
+    }
+    final.issues.push(...prefixIssues(key, result.issues));
+  }
+  if (!isPresent && optin === undefined) {
+    if (!result.issues.length) {
+      final.issues.push({
+        code: "invalid_type",
+        expected: "nonoptional",
+        input: undefined,
+        path: [key]
+      });
+    }
+    return;
+  }
+  if (result.value === undefined) {
+    if (isPresent || optin === "defaulted" && !isOptionalOut) {
+      final.value[key] = undefined;
+    }
+  } else {
+    final.value[key] = result.value;
+  }
+}
+function normalizeDef(def) {
+  const keys = Object.keys(def.shape);
+  const ownSymbols = Object.getOwnPropertySymbols(def.shape);
+  const symbolKeys = ownSymbols.length ? ownSymbols : NO_SYMBOL_KEYS;
+  const allKeys = symbolKeys.length ? [...keys, ...symbolKeys] : keys;
+  for (const k of allKeys) {
+    if (!def.shape?.[k]?._zod?.traits?.has("$ZodType")) {
+      throw new Error(`Invalid element at key "${String(k)}": expected a Zod schema`);
+    }
+  }
+  const okeys = optionalKeys(def.shape);
+  return {
+    ...def,
+    allKeys,
+    symbolKeys,
+    keySet: new Set(keys),
+    numKeys: keys.length,
+    optionalKeys: new Set(okeys)
+  };
+}
+function handleCatchall(proms, input, payload, ctx, def, inst, abortEarly) {
+  const unrecognized = [];
+  const keySet = def.keySet;
+  const _catchall = def.catchall._zod;
+  const t = _catchall.def.type;
+  const optin = _catchall.optin;
+  const optout = _catchall.optout;
+  let seen = 0;
+  for (const key in input) {
+    if (abortEarly && payload.issues.length !== seen) {
+      if (aborted(payload, seen))
+        break;
+      seen = payload.issues.length;
+    }
+    if (keySet.has(key))
+      continue;
+    if (key === "__proto__") {
+      if (t === "never")
+        unrecognized.push(key);
+      continue;
+    }
+    if (t === "never") {
+      unrecognized.push(key);
+      continue;
+    }
+    const r = _catchall.run({ value: input[key], issues: [] }, ctx);
+    if (r instanceof Promise) {
+      proms.push(r.then((r) => handlePropertyResult(r, payload, key, input, optin, optout)));
+    } else {
+      handlePropertyResult(r, payload, key, input, optin, optout);
+    }
+  }
+  if (unrecognized.length) {
+    payload.issues.push({
+      code: "unrecognized_keys",
+      keys: unrecognized,
+      input,
+      inst,
+      continue: true
+    });
+  }
+  if (!proms.length)
+    return payload;
+  return Promise.all(proms).then(() => {
+    return payload;
+  });
+}
+function handleUnionResults(results, final, inst, ctx) {
+  for (const result of results) {
+    if (result.issues.length === 0) {
+      final.value = result.value;
+      return final;
+    }
+  }
+  const nonaborted = results.filter((r) => !aborted(r));
+  if (nonaborted.length === 1) {
+    final.value = nonaborted[0].value;
+    return nonaborted[0];
+  }
+  final.issues.push({
+    code: "invalid_union",
+    input: final.value,
+    inst,
+    errors: results.map((result) => result.issues.map((iss) => finalizeIssue(iss, ctx, config())))
+  });
+  return final;
+}
+function discriminatorMap(def) {
+  const map = new Map;
+  for (const option of def.options) {
+    const values = option._zod.propValues?.[def.discriminator];
+    if (!values || values.size === 0)
+      throw new Error(`Invalid discriminated union option at index "${def.options.indexOf(option)}"`);
+    for (const value of values) {
+      if (map.has(value)) {
+        if (value !== undefined)
+          throw new Error(`Duplicate discriminator value "${String(value)}"`);
+        map.set(value, null);
+      } else {
+        map.set(value, option);
+      }
+    }
+  }
+  return map;
+}
+function mergeValues(a, b) {
+  if (a === b) {
+    return { valid: true, data: a };
+  }
+  if (a instanceof Date && b instanceof Date && +a === +b) {
+    return { valid: true, data: a };
+  }
+  if (isPlainObject(a) && isPlainObject(b)) {
+    const bKeys = Object.keys(b);
+    const sharedKeys = Object.keys(a).filter((key) => bKeys.indexOf(key) !== -1);
+    const newObj = { ...a, ...b };
+    if (Object.prototype.hasOwnProperty.call(newObj, "__proto__"))
+      delete newObj.__proto__;
+    for (const key of sharedKeys) {
+      if (key === "__proto__")
+        continue;
+      const sharedValue = mergeValues(a[key], b[key]);
+      if (!sharedValue.valid) {
+        return {
+          valid: false,
+          mergeErrorPath: [key, ...sharedValue.mergeErrorPath]
+        };
+      }
+      newObj[key] = sharedValue.data;
+    }
+    return { valid: true, data: newObj };
+  }
+  if (Array.isArray(a) && Array.isArray(b)) {
+    if (a.length !== b.length) {
+      return { valid: false, mergeErrorPath: [] };
+    }
+    const newArray = [];
+    for (let index = 0;index < a.length; index++) {
+      const itemA = a[index];
+      const itemB = b[index];
+      const sharedValue = mergeValues(itemA, itemB);
+      if (!sharedValue.valid) {
+        return {
+          valid: false,
+          mergeErrorPath: [index, ...sharedValue.mergeErrorPath]
+        };
+      }
+      newArray.push(sharedValue.data);
+    }
+    return { valid: true, data: newArray };
+  }
+  return { valid: false, mergeErrorPath: [] };
+}
+function handleIntersectionResults(result, left, right) {
+  const unrecKeys = new Map;
+  let unrecIssue;
+  const keyIssues = new Map;
+  const collect = (iss, side) => {
+    let keys;
+    if (iss.code === "unrecognized_keys" && !iss.path?.length) {
+      unrecIssue ?? (unrecIssue = iss);
+      keys = iss.keys;
+    } else if (iss.code === "invalid_key" && iss.origin === "record" && iss.path?.length === 1) {
+      const k = String(iss.path[0]);
+      if (!keyIssues.has(k))
+        keyIssues.set(k, iss);
+      keys = [k];
+    } else {
+      return false;
+    }
+    for (const k of keys) {
+      if (!unrecKeys.has(k))
+        unrecKeys.set(k, {});
+      unrecKeys.get(k)[side] = true;
+    }
+    return true;
+  };
+  for (const iss of left.issues) {
+    if (!collect(iss, "l"))
+      result.issues.push(iss);
+  }
+  for (const iss of right.issues) {
+    if (!collect(iss, "r"))
+      result.issues.push(iss);
+  }
+  const bothKeys = [...unrecKeys].filter(([, f]) => f.l && f.r).map(([k]) => k);
+  if (bothKeys.length) {
+    const aggregated = unrecIssue ? bothKeys.filter((k) => unrecIssue.keys.includes(k)) : [];
+    if (aggregated.length)
+      result.issues.push({ ...unrecIssue, keys: aggregated });
+    for (const k of bothKeys) {
+      if (!aggregated.includes(k) && keyIssues.has(k))
+        result.issues.push(keyIssues.get(k));
+    }
+  }
+  const merged = mergeValues(left.value, right.value);
+  if (!merged.valid) {
+    if (aborted(result))
+      return result;
+    throw new Error(`Unmergable intersection. Error path: ` + `${JSON.stringify(merged.mergeErrorPath)}`);
+  }
+  result.value = merged.data;
+  return result;
+}
+function handleOptionalResult(payload, result) {
+  payload.value = result.issues.length ? undefined : result.value;
+  return payload;
+}
+function handleDefaultResult(payload, def) {
+  if (payload.value === undefined) {
+    payload.value = def.defaultValue;
+  }
+  return payload;
+}
+function handleNonOptionalResult(payload, inst) {
+  if (!payload.issues.length && payload.value === undefined) {
+    payload.issues.push({
+      code: "invalid_type",
+      expected: "nonoptional",
+      input: payload.value,
+      inst
+    });
+  }
+  return payload;
+}
+function handleCatchResult(payload, result, def, ctx) {
+  if (!result.issues.length) {
+    payload.value = result.value;
+    if (result.memo)
+      payload.memo = true;
+    return payload;
+  }
+  payload.value = def.catchValue({
+    ...result,
+    value: payload.value,
+    error: {
+      issues: result.issues.map((iss) => finalizeIssue(iss, ctx, config()))
+    },
+    input: payload.value
+  });
+  return payload;
+}
+function handlePipeResult(left, next, ctx) {
+  if (left.issues.some((iss) => iss.code !== "unrecognized_keys")) {
+    left.aborted = true;
+    return left;
+  }
+  return next._zod.run({ value: left.value, issues: left.issues }, ctx);
+}
+function handleReadonlyResult(payload) {
+  if (!payload.memo)
+    payload.value = Object.freeze(payload.value);
+  return payload;
+}
+function handleRefineResult(result, payload, input, inst) {
+  if (!result) {
+    const _iss = {
+      code: "custom",
+      input,
+      inst,
+      path: [...inst._zod.def.path ?? []],
+      continue: !inst._zod.def.abort
+    };
+    if (inst._zod.def.params)
+      _iss.params = inst._zod.def.params;
+    payload.issues.push(issue(_iss));
+  }
+}
+var $ZodType, toStandardResult = (r, ctx) => r.issues.length ? { issues: r.issues.map((iss) => finalizeIssue(iss, ctx, config())) } : { value: r.value }, $ZodString, $ZodStringFormat, $ZodGUID, $ZodUUID, $ZodEmail, URL_BAD_FORMAT = 1, URL_UNPARSEABLE = 2, asciiTabOrNewline, $ZodURL, $ZodEmoji, $ZodNanoID, $ZodCUID, $ZodCUID2, $ZodULID, $ZodXID, $ZodKSUID, $ZodISODateTime, $ZodISODate, $ZodISOTime, $ZodISODuration, $ZodIPv4, ipv6Alphabet, $ZodIPv6, $ZodCIDRv4, $ZodCIDRv6, base64Charset, $ZodBase64, base64urlCharset, $ZodBase64URL, $ZodE164, $ZodJWT, $ZodNumber, $ZodNumberFormat, $ZodBoolean, $ZodNull, $ZodUnknown, $ZodNever, $ZodArray, NO_SYMBOL_KEYS, $ZodObject, $ZodObjectJIT, $ZodUnion, $ZodDiscriminatedUnion, $ZodIntersection, $ZodRecord, $ZodEnum, $ZodLiteral, $ZodTransform, $ZodOptional, $ZodExactOptional, $ZodNullable, $ZodDefault, $ZodPrefault, $ZodNonOptional, $ZodCatch, $ZodPipe, $ZodPreprocess, $ZodReadonly, $ZodCustom;
+var init_schemas = __esm(() => {
+  init_checks();
+  init_core();
+  init_regexes();
+  init_util();
+  init_versions();
+  init_util();
+  $ZodType = /* @__PURE__ */ $constructor("$ZodType", (inst, def) => {
+    var _a;
+    inst ?? (inst = {});
+    inst._zod.def = def;
+    inst._zod.bag = inst._zod.bag || {};
+    inst._zod.version = version;
+    const defChecks = inst._zod.def.checks;
+    const checks = inst._zod.traits.has("$ZodCheck") ? [inst, ...defChecks ?? []] : defChecks?.length ? [...defChecks] : [];
+    for (const ch of checks) {
+      for (const fn of ch._zod.onattach) {
+        fn(inst);
+      }
+    }
+    if (checks.length === 0) {
+      (_a = inst._zod).deferred ?? (_a.deferred = []);
+      inst._zod.deferred?.push(() => {
+        inst._zod.run = inst._zod.parse;
+      });
+    } else {
+      const runChecks = (payload, checks, ctx) => {
+        if (payload.memo)
+          return payload;
+        let isAborted = aborted(payload);
+        let asyncResult;
+        for (const ch of checks) {
+          if (ch._zod.def.when) {
+            if (explicitlyAborted(payload))
+              continue;
+            const shouldRun = ch._zod.def.when(payload);
+            if (!shouldRun)
+              continue;
+          } else if (isAborted) {
+            continue;
+          }
+          const currLen = payload.issues.length;
+          const _ = ch._zod.check(payload);
+          if (_ instanceof Promise && ctx?.async === false) {
+            throw new $ZodAsyncError;
+          }
+          if (asyncResult || _ instanceof Promise) {
+            asyncResult = (asyncResult ?? Promise.resolve()).then(async () => {
+              await _;
+              const nextLen = payload.issues.length;
+              if (nextLen === currLen)
+                return;
+              attachSchema(payload.issues, currLen, inst);
+              if (!isAborted)
+                isAborted = aborted(payload, currLen);
+            });
+          } else {
+            const nextLen = payload.issues.length;
+            if (nextLen === currLen)
+              continue;
+            attachSchema(payload.issues, currLen, inst);
+            if (!isAborted)
+              isAborted = aborted(payload, currLen);
+          }
+        }
+        if (asyncResult) {
+          return asyncResult.then(() => {
+            return payload;
+          });
+        }
+        return payload;
+      };
+      const handleCanaryResult = (canary, payload, ctx) => {
+        if (aborted(canary)) {
+          canary.aborted = true;
+          return canary;
+        }
+        const checkResult = runChecks(payload, checks, ctx);
+        if (checkResult instanceof Promise) {
+          if (ctx.async === false)
+            throw new $ZodAsyncError;
+          return checkResult.then((checkResult) => inst._zod.parse(checkResult, ctx));
+        }
+        return inst._zod.parse(checkResult, ctx);
+      };
+      inst._zod.run = (payload, ctx) => {
+        if (ctx.skipChecks) {
+          return inst._zod.parse(payload, ctx);
+        }
+        if (ctx.direction === "backward") {
+          const canary = inst._zod.parse({ value: payload.value, issues: [] }, { ...ctx, skipChecks: true });
+          if (canary instanceof Promise) {
+            return canary.then((canary) => {
+              return handleCanaryResult(canary, payload, ctx);
+            });
+          }
+          return handleCanaryResult(canary, payload, ctx);
+        }
+        const result = inst._zod.parse(payload, ctx);
+        if (result instanceof Promise) {
+          if (ctx.async === false)
+            throw new $ZodAsyncError;
+          return result.then((result) => runChecks(result, checks, ctx));
+        }
+        return runChecks(result, checks, ctx);
+      };
+    }
+  }, {
+    get "~standard"() {
+      return hide(this, "~standard", standardProps(this));
+    },
+    set "~standard"(value) {
+      own(this, "~standard", value);
+    }
+  });
+  $ZodString = /* @__PURE__ */ $constructor("$ZodString", (inst, def) => {
+    $ZodType.init(inst, def);
+    inst._zod.pattern = def.pattern ?? anyString;
+    inst._zod.parse = (payload, _) => {
+      if (def.coerce)
+        try {
+          payload.value = String(payload.value);
+        } catch (_) {}
+      if (typeof payload.value === "string")
+        return payload;
+      payload.issues.push({
+        expected: "string",
+        code: "invalid_type",
+        input: payload.value,
+        inst
+      });
+      return payload;
+    };
+  });
+  $ZodStringFormat = /* @__PURE__ */ $constructor("$ZodStringFormat", (inst, def) => {
+    $ZodCheckStringFormat.init(inst, def);
+    $ZodString.init(inst, def);
+  });
+  $ZodGUID = /* @__PURE__ */ $constructor("$ZodGUID", (inst, def) => {
+    def.pattern ?? (def.pattern = guid);
+    $ZodStringFormat.init(inst, def);
+  });
+  $ZodUUID = /* @__PURE__ */ $constructor("$ZodUUID", (inst, def) => {
+    if (def.version) {
+      const versionMap = {
+        v1: 1,
+        v2: 2,
+        v3: 3,
+        v4: 4,
+        v5: 5,
+        v6: 6,
+        v7: 7,
+        v8: 8
+      };
+      const v = versionMap[def.version];
+      if (v === undefined)
+        throw new Error(`Invalid UUID version: "${def.version}"`);
+      def.pattern ?? (def.pattern = uuid(v));
+    } else
+      def.pattern ?? (def.pattern = uuid());
+    $ZodStringFormat.init(inst, def);
+  });
+  $ZodEmail = /* @__PURE__ */ $constructor("$ZodEmail", (inst, def) => {
+    def.pattern ?? (def.pattern = email);
+    $ZodStringFormat.init(inst, def);
+  });
+  asciiTabOrNewline = /[\t\n\r]/g;
+  $ZodURL = /* @__PURE__ */ $constructor("$ZodURL", (inst, def) => {
+    $ZodStringFormat.init(inst, def);
+    inst._zod.check = (payload) => {
+      try {
+        const trimmed = payload.value.trim();
+        const url = validateURL(trimmed, def);
+        if (url === URL_BAD_FORMAT) {
+          payload.issues.push({
+            code: "invalid_format",
+            format: "url",
+            note: "Invalid URL format",
+            input: payload.value,
+            inst,
+            continue: !def.abort
+          });
+          return;
+        }
+        if (url === URL_UNPARSEABLE) {
+          payload.issues.push({
+            code: "invalid_format",
+            format: "url",
+            input: payload.value,
+            inst,
+            continue: !def.abort
+          });
+          return;
+        }
+        if (url === true) {
+          payload.value = stripTabAndNewline(trimmed);
+          return;
+        }
+        if (def.hostname && !urlHostnameOk(url, def.hostname)) {
+          payload.issues.push({
+            code: "invalid_format",
+            format: "url",
+            note: "Invalid hostname",
+            pattern: def.hostname.source,
+            input: payload.value,
+            inst,
+            continue: !def.abort
+          });
+        }
+        if (def.protocol && !urlProtocolOk(url, def.protocol)) {
+          payload.issues.push({
+            code: "invalid_format",
+            format: "url",
+            note: "Invalid protocol",
+            pattern: def.protocol.source,
+            input: payload.value,
+            inst,
+            continue: !def.abort
+          });
+        }
+        payload.value = def.normalize ? url.href : stripTabAndNewline(trimmed);
+        return;
+      } catch (_) {
+        payload.issues.push({
+          code: "invalid_format",
+          format: "url",
+          input: payload.value,
+          inst,
+          continue: !def.abort
+        });
+      }
+    };
+  });
+  $ZodEmoji = /* @__PURE__ */ $constructor("$ZodEmoji", (inst, def) => {
+    def.pattern ?? (def.pattern = emoji());
+    $ZodStringFormat.init(inst, def);
+  });
+  $ZodNanoID = /* @__PURE__ */ $constructor("$ZodNanoID", (inst, def) => {
+    if (def.length !== undefined && (!Number.isInteger(def.length) || def.length < 1))
+      throw new Error(`Invalid nanoid length: ${def.length}`);
+    def.pattern ?? (def.pattern = def.length === undefined ? nanoid : nanoidOfLength(def.length));
+    $ZodStringFormat.init(inst, def);
+  });
+  $ZodCUID = /* @__PURE__ */ $constructor("$ZodCUID", (inst, def) => {
+    def.pattern ?? (def.pattern = cuid);
+    $ZodStringFormat.init(inst, def);
+  });
+  $ZodCUID2 = /* @__PURE__ */ $constructor("$ZodCUID2", (inst, def) => {
+    def.pattern ?? (def.pattern = cuid2);
+    $ZodStringFormat.init(inst, def);
+  });
+  $ZodULID = /* @__PURE__ */ $constructor("$ZodULID", (inst, def) => {
+    def.pattern ?? (def.pattern = ulid);
+    $ZodStringFormat.init(inst, def);
+  });
+  $ZodXID = /* @__PURE__ */ $constructor("$ZodXID", (inst, def) => {
+    def.pattern ?? (def.pattern = xid);
+    $ZodStringFormat.init(inst, def);
+  });
+  $ZodKSUID = /* @__PURE__ */ $constructor("$ZodKSUID", (inst, def) => {
+    def.pattern ?? (def.pattern = ksuid);
+    $ZodStringFormat.init(inst, def);
+  });
+  $ZodISODateTime = /* @__PURE__ */ $constructor("$ZodISODateTime", (inst, def) => {
+    def.pattern ?? (def.pattern = datetime(def));
+    $ZodStringFormat.init(inst, def);
+  });
+  $ZodISODate = /* @__PURE__ */ $constructor("$ZodISODate", (inst, def) => {
+    def.pattern ?? (def.pattern = date);
+    $ZodStringFormat.init(inst, def);
+  });
+  $ZodISOTime = /* @__PURE__ */ $constructor("$ZodISOTime", (inst, def) => {
+    def.pattern ?? (def.pattern = time(def));
+    $ZodStringFormat.init(inst, def);
+  });
+  $ZodISODuration = /* @__PURE__ */ $constructor("$ZodISODuration", (inst, def) => {
+    def.pattern ?? (def.pattern = duration);
+    $ZodStringFormat.init(inst, def);
+  });
+  $ZodIPv4 = /* @__PURE__ */ $constructor("$ZodIPv4", (inst, def) => {
+    def.pattern ?? (def.pattern = ipv4);
+    $ZodStringFormat.init(inst, def);
+  });
+  ipv6Alphabet = /^[0-9a-fA-F:.]+$/;
+  $ZodIPv6 = /* @__PURE__ */ $constructor("$ZodIPv6", (inst, def) => {
+    def.pattern ?? (def.pattern = ipv6);
+    $ZodStringFormat.init(inst, def);
+    inst._zod.check = (payload) => {
+      if (!isValidIPv6(payload.value)) {
+        payload.issues.push({
+          code: "invalid_format",
+          format: "ipv6",
+          input: payload.value,
+          inst,
+          continue: !def.abort
+        });
+      }
+    };
+  });
+  $ZodCIDRv4 = /* @__PURE__ */ $constructor("$ZodCIDRv4", (inst, def) => {
+    def.pattern ?? (def.pattern = cidrv4);
+    $ZodStringFormat.init(inst, def);
+  });
+  $ZodCIDRv6 = /* @__PURE__ */ $constructor("$ZodCIDRv6", (inst, def) => {
+    def.pattern ?? (def.pattern = cidrv6);
+    $ZodStringFormat.init(inst, def);
+    inst._zod.check = (payload) => {
+      if (!isValidCIDRv6(payload.value)) {
+        payload.issues.push({
+          code: "invalid_format",
+          format: "cidrv6",
+          input: payload.value,
+          inst,
+          continue: !def.abort
+        });
+      }
+    };
+  });
+  base64Charset = /^[0-9a-zA-Z+/]*={0,2}$/;
+  $ZodBase64 = /* @__PURE__ */ $constructor("$ZodBase64", (inst, def) => {
+    def.pattern ?? (def.pattern = base64Charset);
+    $ZodStringFormat.init(inst, def);
+    inst._zod.check = (payload) => {
+      if (isValidBase64(payload.value))
+        return;
+      payload.issues.push({
+        code: "invalid_format",
+        format: "base64",
+        input: payload.value,
+        inst,
+        continue: !def.abort
+      });
+    };
+  });
+  base64urlCharset = /^[A-Za-z0-9_-]*$/;
+  $ZodBase64URL = /* @__PURE__ */ $constructor("$ZodBase64URL", (inst, def) => {
+    def.pattern ?? (def.pattern = base64urlCharset);
+    $ZodStringFormat.init(inst, def);
+    inst._zod.check = (payload) => {
+      if (isValidBase64URL(payload.value))
+        return;
+      payload.issues.push({
+        code: "invalid_format",
+        format: "base64url",
+        input: payload.value,
+        inst,
+        continue: !def.abort
+      });
+    };
+  });
+  $ZodE164 = /* @__PURE__ */ $constructor("$ZodE164", (inst, def) => {
+    def.pattern ?? (def.pattern = e164);
+    $ZodStringFormat.init(inst, def);
+  });
+  $ZodJWT = /* @__PURE__ */ $constructor("$ZodJWT", (inst, def) => {
+    $ZodStringFormat.init(inst, def);
+    inst._zod.check = (payload) => {
+      if (isValidJWT(payload.value, def.alg))
+        return;
+      payload.issues.push({
+        code: "invalid_format",
+        format: "jwt",
+        input: payload.value,
+        inst,
+        continue: !def.abort
+      });
+    };
+  });
+  $ZodNumber = /* @__PURE__ */ $constructor("$ZodNumber", (inst, def) => {
+    $ZodType.init(inst, def);
+    inst._zod.pattern = number;
+    inst._zod.parse = (payload, _ctx) => {
+      if (def.coerce)
+        try {
+          payload.value = Number(payload.value);
+        } catch (_) {}
+      const input = payload.value;
+      if (typeof input === "number" && !Number.isNaN(input) && Number.isFinite(input)) {
+        return payload;
+      }
+      const received = typeof input === "number" ? Number.isNaN(input) ? "NaN" : !Number.isFinite(input) ? String(input) : undefined : undefined;
+      payload.issues.push({
+        expected: "number",
+        code: "invalid_type",
+        input,
+        inst,
+        ...received ? { received } : {}
+      });
+      return payload;
+    };
+  });
+  $ZodNumberFormat = /* @__PURE__ */ $constructor("$ZodNumberFormat", (inst, def) => {
+    $ZodCheckNumberFormat.init(inst, def);
+    $ZodNumber.init(inst, def);
+  });
+  $ZodBoolean = /* @__PURE__ */ $constructor("$ZodBoolean", (inst, def) => {
+    $ZodType.init(inst, def);
+    inst._zod.pattern = boolean;
+    inst._zod.parse = (payload, _ctx) => {
+      if (def.coerce)
+        try {
+          payload.value = Boolean(payload.value);
+        } catch (_) {}
+      const input = payload.value;
+      if (typeof input === "boolean")
+        return payload;
+      payload.issues.push({
+        expected: "boolean",
+        code: "invalid_type",
+        input,
+        inst
+      });
+      return payload;
+    };
+  });
+  $ZodNull = /* @__PURE__ */ $constructor("$ZodNull", (inst, def) => {
+    $ZodType.init(inst, def);
+    inst._zod.pattern = _null;
+    inst._zod.values = new Set([null]);
+    inst._zod.parse = (payload, _ctx) => {
+      const input = payload.value;
+      if (input === null)
+        return payload;
+      payload.issues.push({
+        expected: "null",
+        code: "invalid_type",
+        input,
+        inst
+      });
+      return payload;
+    };
+  });
+  $ZodUnknown = /* @__PURE__ */ $constructor("$ZodUnknown", (inst, def) => {
+    $ZodType.init(inst, def);
+    inst._zod.parse = (payload) => payload;
+  });
+  $ZodNever = /* @__PURE__ */ $constructor("$ZodNever", (inst, def) => {
+    $ZodType.init(inst, def);
+    inst._zod.parse = (payload, _ctx) => {
+      payload.issues.push({
+        expected: "never",
+        code: "invalid_type",
+        input: payload.value,
+        inst
+      });
+      return payload;
+    };
+  });
+  $ZodArray = /* @__PURE__ */ $constructor("$ZodArray", (inst, def) => {
+    $ZodType.init(inst, def);
+    const memo = globalConfig.memoizer;
+    memo?.attach(inst);
+    inst._zod.parse = (payload, ctx) => {
+      const input = payload.value;
+      if (!Array.isArray(input)) {
+        payload.issues.push({
+          expected: "array",
+          code: "invalid_type",
+          input,
+          inst
+        });
+        return payload;
+      }
+      payload.value = memo ? memo.alloc(inst, payload, Array(input.length), ctx) : Array(input.length);
+      const proms = [];
+      const abortEarly = ctx?.abortEarly;
+      for (let i = 0;i < input.length; i++) {
+        const item = input[i];
+        const result = def.element._zod.run({
+          value: item,
+          issues: []
+        }, ctx);
+        if (result instanceof Promise) {
+          proms.push(result.then((result) => handleArrayResult(result, payload, i)));
+        } else {
+          handleArrayResult(result, payload, i);
+          if (abortEarly && result.issues.length !== 0 && aborted(result))
+            break;
+        }
+      }
+      if (proms.length) {
+        return Promise.all(proms).then(() => payload);
+      }
+      return payload;
+    };
+  });
+  NO_SYMBOL_KEYS = [];
+  $ZodObject = /* @__PURE__ */ $constructor("$ZodObject", (inst, def) => {
+    $ZodType.init(inst, def);
+    const desc = Object.getOwnPropertyDescriptor(def, "shape");
+    const sh = desc?.get ? desc.get.raw : def.shape ?? {};
+    if (sh) {
+      const get = () => {
+        const newSh = { ...sh };
+        Object.defineProperty(def, "shape", { value: newSh });
+        get.raw = newSh;
+        return newSh;
+      };
+      get.raw = sh;
+      Object.defineProperty(def, "shape", { get });
+    }
+    const _normalized = cached(() => normalizeDef(def));
+    defineLazyInternal(inst, "propValues", (zod) => {
+      const shape = zod.def.shape;
+      const propValues = {};
+      for (const key in shape) {
+        const field = shape[key]._zod;
+        if (field.values) {
+          if (!Object.prototype.hasOwnProperty.call(propValues, key)) {
+            assignProp(propValues, key, new Set);
+          }
+          for (const v of field.values)
+            propValues[key].add(v);
+          if (field.optin !== undefined)
+            propValues[key].add(undefined);
+        }
+      }
+      return propValues;
+    });
+    const isObject2 = isObject;
+    const catchall = def.catchall;
+    let value;
+    const memo = globalConfig.memoizer;
+    memo?.attach(inst);
+    inst._zod.parse = (payload, ctx) => {
+      value ?? (value = _normalized.value);
+      const input = payload.value;
+      if (!isObject2(input)) {
+        payload.issues.push({
+          expected: "object",
+          code: "invalid_type",
+          input,
+          inst
+        });
+        return payload;
+      }
+      payload.value = memo ? memo.alloc(inst, payload, {}, ctx) : {};
+      const proms = [];
+      const shape = value.shape;
+      const abortEarly = ctx?.abortEarly;
+      let seen = payload.issues.length;
+      for (const key of value.allKeys) {
+        if (abortEarly && payload.issues.length !== seen) {
+          if (aborted(payload, seen))
+            break;
+          seen = payload.issues.length;
+        }
+        if (key === "__proto__")
+          continue;
+        const el = shape[key];
+        const optin = el._zod.optin;
+        const optout = el._zod.optout;
+        const r = el._zod.run({ value: input[key], issues: [] }, ctx);
+        if (r instanceof Promise) {
+          proms.push(r.then((r) => handlePropertyResult(r, payload, key, input, optin, optout)));
+        } else {
+          handlePropertyResult(r, payload, key, input, optin, optout);
+        }
+      }
+      if (!catchall) {
+        return proms.length ? Promise.all(proms).then(() => payload) : payload;
+      }
+      return handleCatchall(proms, input, payload, ctx, _normalized.value, inst, abortEarly === true);
+    };
+  });
+  $ZodObjectJIT = /* @__PURE__ */ $constructor("$ZodObjectJIT", (inst, def) => {
+    $ZodObject.init(inst, def);
+    const superParse = inst._zod.parse;
+    const _normalized = cached(() => normalizeDef(def));
+    const memo = globalConfig.memoizer;
+    const generateFastpass = (shape) => {
+      const normalized = _normalized.value;
+      const syms = normalized.symbolKeys;
+      const doc = new Doc(["payload", "ctx"], { shape, inst, memo, syms });
+      const parseStr = (k) => `shape[${k}]._zod.run({ value: input[${k}], issues: [] }, ctx)`;
+      const prefixStr = (id, k) => `
+          let ${id}_ab = false;
+          for (let i = 0; i < ${id}.issues.length; i++) {
+            const iss = ${id}.issues[i];
+            iss.path = iss.path ? [${k}, ...iss.path] : [${k}];
+            payload.issues.push(iss);
+            if (iss.continue !== true) ${id}_ab = true;
+          }
+          if (${id}_ab && ctx && ctx.abortEarly) {
+            payload.value = newResult;
+            return payload;
+          }`;
+      doc.write(`const input = payload.value;`);
+      const ids = Object.create(null);
+      let counter = 0;
+      for (const key of normalized.allKeys) {
+        ids[key] = `key_${counter++}`;
+      }
+      doc.write(memo ? `const newResult = memo.alloc(inst, payload, {}, ctx);` : `const newResult = {};`);
+      for (const key of normalized.allKeys) {
+        if (key === "__proto__")
+          continue;
+        const id = ids[key];
+        const k = typeof key === "symbol" ? `syms[${syms.indexOf(key)}]` : esc(key);
+        const isPresent = `${k} in input`;
+        const schema = shape[key];
+        const optin = schema?._zod?.optin;
+        const isOptionalIn = optin !== undefined;
+        const isOptionalOut = schema?._zod?.optout === "optional";
+        doc.write(`const ${id} = ${parseStr(k)};`);
+        if (isOptionalIn && isOptionalOut) {
+          const assign = optin === "optional" ? `${id}_present` : `${id}.value !== undefined || ${id}_present`;
+          doc.write(`
+        const ${id}_present = ${isPresent};
+        if (!${id}.issues.length || ${id}_present) {
+          if (${id}.issues.length) {${prefixStr(id, k)}
+          }
+
+          if (${assign}) {
+            newResult[${k}] = ${id}.value;
+          }
+        }
+
+      `);
+        } else if (!isOptionalIn) {
+          doc.write(`
+        const ${id}_present = ${isPresent};
+        if (${id}.issues.length) {${prefixStr(id, k)}
+        }
+        if (!${id}_present && !${id}.issues.length) {
+          payload.issues.push({
+            code: "invalid_type",
+            expected: "nonoptional",
+            input: undefined,
+            path: [${k}]
+          });
+          if (ctx && ctx.abortEarly) {
+            payload.value = newResult;
+            return payload;
+          }
+        }
+
+        if (${id}_present) {
+          newResult[${k}] = ${id}.value;
+        }
+
+      `);
+        } else {
+          doc.write(`
+        if (${id}.issues.length) {${prefixStr(id, k)}
+        }
+      `);
+          if (optin === "defaulted") {
+            doc.write(`newResult[${k}] = ${id}.value;`);
+          } else {
+            doc.write(`
+        if (${id}.value !== undefined || ${isPresent}) {
+          newResult[${k}] = ${id}.value;
+        }
+      `);
+          }
+        }
+      }
+      doc.write(`payload.value = newResult;`);
+      doc.write(`return payload;`);
+      return doc.compile();
+    };
+    let fastpass;
+    const isObject2 = isObject;
+    const jit = !globalConfig.jitless;
+    const allowsEval2 = allowsEval;
+    const fastEnabled = jit && allowsEval2.value;
+    const catchall = def.catchall;
+    let value;
+    inst._zod.parse = (payload, ctx) => {
+      value ?? (value = _normalized.value);
+      const input = payload.value;
+      if (!isObject2(input)) {
+        payload.issues.push({
+          expected: "object",
+          code: "invalid_type",
+          input,
+          inst
+        });
+        return payload;
+      }
+      if (jit && fastEnabled && ctx?.async === false && ctx.jitless !== true) {
+        if (!fastpass)
+          fastpass = generateFastpass(def.shape);
+        payload = fastpass(payload, ctx);
+        if (!catchall)
+          return payload;
+        return handleCatchall([], input, payload, ctx, value, inst, ctx?.abortEarly === true);
+      }
+      return superParse(payload, ctx);
+    };
+  });
+  $ZodUnion = /* @__PURE__ */ $constructor("$ZodUnion", (inst, def) => {
+    $ZodType.init(inst, def);
+    defineLazyInternal(inst, "optin", (zod) => zod.def.options.some((o) => o._zod.optin === "defaulted") ? "defaulted" : zod.def.options.some((o) => o._zod.optin !== undefined) ? "optional" : undefined);
+    defineLazyInternal(inst, "optout", (zod) => zod.def.options.some((o) => o._zod.optout === "optional") ? "optional" : undefined);
+    defineLazyInternal(inst, "values", (zod) => {
+      if (zod.def.options.every((o) => o._zod.values)) {
+        return new Set(zod.def.options.flatMap((option) => Array.from(option._zod.values)));
+      }
+      return;
+    });
+    defineLazyInternal(inst, "pattern", (zod) => {
+      if (zod.def.options.every((o) => o._zod.pattern)) {
+        const patterns = zod.def.options.map((o) => o._zod.pattern);
+        return new RegExp(`^(${patterns.map((p) => cleanRegex(p.source)).join("|")})$`);
+      }
+      return;
+    });
+    const first = def.options.length === 1 ? def.options[0]._zod.run : null;
+    inst._zod.parse = (payload, ctx) => {
+      if (first) {
+        return first(payload, ctx);
+      }
+      let async = false;
+      const results = [];
+      for (const option of def.options) {
+        const result = option._zod.run({
+          value: payload.value,
+          issues: []
+        }, ctx);
+        if (result instanceof Promise) {
+          results.push(result);
+          async = true;
+        } else {
+          if (result.issues.length === 0)
+            return result;
+          results.push(result);
+        }
+      }
+      if (!async)
+        return handleUnionResults(results, payload, inst, ctx);
+      return Promise.all(results).then((results) => {
+        return handleUnionResults(results, payload, inst, ctx);
+      });
+    };
+  });
+  $ZodDiscriminatedUnion = /* @__PURE__ */ $constructor("$ZodDiscriminatedUnion", (inst, def) => {
+    def.inclusive = false;
+    $ZodUnion.init(inst, def);
+    const _super = inst._zod.parse;
+    defineLazyInternal(inst, "propValues", (zod) => {
+      const propValues = {};
+      let undefinedCount = 0;
+      for (const option of zod.def.options) {
+        const pv = option._zod.propValues;
+        if (!pv || Object.keys(pv).length === 0)
+          throw new Error(`Invalid discriminated union option at index "${zod.def.options.indexOf(option)}"`);
+        if (pv[zod.def.discriminator]?.has(undefined))
+          undefinedCount++;
+        for (const [k, v] of Object.entries(pv)) {
+          if (!Object.prototype.hasOwnProperty.call(propValues, k)) {
+            assignProp(propValues, k, new Set);
+          }
+          for (const val of v) {
+            propValues[k].add(val);
+          }
+        }
+      }
+      if (!zod.def.unionFallback && undefinedCount > 1)
+        propValues[zod.def.discriminator]?.delete(undefined);
+      return propValues;
+    });
+    def.options.forEach((option, i) => {
+      const propShape = rawShape(option._zod.def);
+      if (propShape && !Object.prototype.hasOwnProperty.call(propShape, def.discriminator)) {
+        throw new Error(`Invalid discriminated union option at index "${i}"`);
+      }
+    });
+    const disc = cached(() => discriminatorMap(def));
+    inst._zod.parse = (payload, ctx) => {
+      const input = payload.value;
+      if (!isObject(input)) {
+        payload.issues.push({
+          code: "invalid_type",
+          expected: "object",
+          input,
+          inst
+        });
+        return payload;
+      }
+      const value = input?.[def.discriminator];
+      const opt = disc.value.get(value);
+      if (opt && (value !== undefined || ctx.direction !== "backward")) {
+        return opt._zod.run(payload, ctx);
+      }
+      if (def.unionFallback || ctx.direction === "backward") {
+        return _super(payload, ctx);
+      }
+      payload.issues.push({
+        code: "invalid_union",
+        errors: [],
+        note: "No matching discriminator",
+        discriminator: def.discriminator,
+        options: Array.from(disc.value.keys()).filter((value) => disc.value.get(value) !== null),
+        input,
+        path: [def.discriminator],
+        inst
+      });
+      return payload;
+    };
+  });
+  $ZodIntersection = /* @__PURE__ */ $constructor("$ZodIntersection", (inst, def) => {
+    $ZodType.init(inst, def);
+    inst._zod.parse = (payload, ctx) => {
+      const input = payload.value;
+      const left = def.left._zod.run({ value: input, issues: [] }, ctx);
+      const right = def.right._zod.run({ value: input, issues: [] }, ctx);
+      const async = left instanceof Promise || right instanceof Promise;
+      if (async) {
+        return Promise.all([left, right]).then(([left, right]) => {
+          return handleIntersectionResults(payload, left, right);
+        });
+      }
+      return handleIntersectionResults(payload, left, right);
+    };
+  });
+  $ZodRecord = /* @__PURE__ */ $constructor("$ZodRecord", (inst, def) => {
+    $ZodType.init(inst, def);
+    const memo = globalConfig.memoizer;
+    memo?.attach(inst);
+    inst._zod.parse = (payload, ctx) => {
+      const input = payload.value;
+      if (!isPlainObject(input)) {
+        payload.issues.push({
+          expected: "record",
+          code: "invalid_type",
+          input,
+          inst
+        });
+        return payload;
+      }
+      const proms = [];
+      const values = def.keyType._zod.values;
+      if (values && !def.partial) {
+        payload.value = memo ? memo.alloc(inst, payload, {}, ctx) : {};
+        const recordKeys = new Set;
+        for (const key of values) {
+          if (typeof key === "string" || typeof key === "number" || typeof key === "symbol") {
+            recordKeys.add(typeof key === "number" ? key.toString() : key);
+            if (key === "__proto__")
+              continue;
+            const keyResult = def.keyType._zod.run({ value: key, issues: [] }, ctx);
+            if (keyResult instanceof Promise) {
+              throw new Error("Async schemas not supported in object keys currently");
+            }
+            if (keyResult.issues.length) {
+              payload.issues.push({
+                code: "invalid_key",
+                origin: "record",
+                issues: keyResult.issues.map((iss) => finalizeIssue(iss, ctx, config())),
+                input: key,
+                path: [key],
+                inst
+              });
+              continue;
+            }
+            const outKey = keyResult.value;
+            if (outKey === "__proto__")
+              continue;
+            const result = def.valueType._zod.run({ value: input[key], issues: [] }, ctx);
+            if (result instanceof Promise) {
+              proms.push(result.then((result) => {
+                if (result.issues.length) {
+                  payload.issues.push(...prefixIssues(key, result.issues));
+                }
+                payload.value[outKey] = result.value;
+              }));
+            } else {
+              if (result.issues.length) {
+                payload.issues.push(...prefixIssues(key, result.issues));
+              }
+              payload.value[outKey] = result.value;
+            }
+          }
+        }
+        let unrecognized;
+        for (const key in input) {
+          if (!recordKeys.has(key)) {
+            if (def.mode === "loose") {
+              if (key === "__proto__")
+                continue;
+              payload.value[key] = input[key];
+            } else {
+              unrecognized = unrecognized ?? [];
+              unrecognized.push(key);
+            }
+          }
+        }
+        if (unrecognized && unrecognized.length > 0) {
+          payload.issues.push({
+            code: "unrecognized_keys",
+            input,
+            inst,
+            keys: unrecognized,
+            continue: true
+          });
+        }
+      } else {
+        payload.value = memo ? memo.alloc(inst, payload, {}, ctx) : {};
+        let unrecognized;
+        for (const key of Reflect.ownKeys(input)) {
+          if (key === "__proto__")
+            continue;
+          if (!Object.prototype.propertyIsEnumerable.call(input, key))
+            continue;
+          let keyResult = def.keyType._zod.run({ value: key, issues: [] }, ctx);
+          if (keyResult instanceof Promise) {
+            throw new Error("Async schemas not supported in object keys currently");
+          }
+          const checkNumericKey = typeof key === "string" && number.test(key) && keyResult.issues.length;
+          if (checkNumericKey) {
+            const retryResult = def.keyType._zod.run({ value: Number(key), issues: [] }, ctx);
+            if (retryResult instanceof Promise) {
+              throw new Error("Async schemas not supported in object keys currently");
+            }
+            if (retryResult.issues.length === 0) {
+              keyResult = retryResult;
+            }
+          }
+          if (keyResult.issues.length) {
+            if (def.mode === "loose") {
+              payload.value[key] = input[key];
+            } else if (values) {
+              unrecognized = unrecognized ?? [];
+              unrecognized.push(key);
+            } else {
+              payload.issues.push({
+                code: "invalid_key",
+                origin: "record",
+                issues: keyResult.issues.map((iss) => finalizeIssue(iss, ctx, config())),
+                input: key,
+                path: [key],
+                inst
+              });
+            }
+            continue;
+          }
+          const outKey = keyResult.value;
+          if (outKey === "__proto__")
+            continue;
+          const result = def.valueType._zod.run({ value: input[key], issues: [] }, ctx);
+          if (result instanceof Promise) {
+            proms.push(result.then((result) => {
+              if (result.issues.length) {
+                payload.issues.push(...prefixIssues(key, result.issues));
+              }
+              payload.value[outKey] = result.value;
+            }));
+          } else {
+            if (result.issues.length) {
+              payload.issues.push(...prefixIssues(key, result.issues));
+            }
+            payload.value[outKey] = result.value;
+          }
+        }
+        if (unrecognized && unrecognized.length > 0) {
+          payload.issues.push({
+            code: "unrecognized_keys",
+            input,
+            inst,
+            keys: unrecognized,
+            continue: true
+          });
+        }
+      }
+      if (proms.length) {
+        return Promise.all(proms).then(() => payload);
+      }
+      return payload;
+    };
+  });
+  $ZodEnum = /* @__PURE__ */ $constructor("$ZodEnum", (inst, def) => {
+    $ZodType.init(inst, def);
+    const values = getEnumValues(def.entries);
+    const valuesSet = new Set(values);
+    inst._zod.values = valuesSet;
+    defineLazyInternal(inst, "pattern", (zod) => {
+      const patternValues = getEnumValues(zod.def.entries).filter((k) => propertyKeyTypes.has(typeof k));
+      return new RegExp(patternValues.length ? `^(${patternValues.map((o) => escapeRegex(o.toString())).join("|")})$` : "^[^\\s\\S]$");
+    });
+    inst._zod.parse = (payload, _ctx) => {
+      const input = payload.value;
+      if (valuesSet.has(input)) {
+        return payload;
+      }
+      payload.issues.push({
+        code: "invalid_value",
+        values,
+        input,
+        inst
+      });
+      return payload;
+    };
+  });
+  $ZodLiteral = /* @__PURE__ */ $constructor("$ZodLiteral", (inst, def) => {
+    $ZodType.init(inst, def);
+    const values = new Set(def.values);
+    inst._zod.values = values;
+    defineLazyInternal(inst, "pattern", (zod) => {
+      const vals = zod.def.values;
+      return new RegExp(vals.length ? `^(${vals.map((o) => typeof o === "string" ? escapeRegex(o) : o ? escapeRegex(o.toString()) : String(o)).join("|")})$` : "^[^\\s\\S]$");
+    });
+    inst._zod.parse = (payload, _ctx) => {
+      const input = payload.value;
+      if (values.has(input)) {
+        return payload;
+      }
+      payload.issues.push({
+        code: "invalid_value",
+        values: def.values,
+        input,
+        inst
+      });
+      return payload;
+    };
+  });
+  $ZodTransform = /* @__PURE__ */ $constructor("$ZodTransform", (inst, def) => {
+    $ZodType.init(inst, def);
+    inst._zod.optin = "optional";
+    globalConfig.memoizer?.guard(inst);
+    inst._zod.parse = (payload, ctx) => {
+      if (ctx.direction === "backward") {
+        throw new $ZodEncodeError(inst.constructor.name);
+      }
+      const _out = def.transform(payload.value, payload);
+      if (ctx.async) {
+        const output = _out instanceof Promise ? _out : Promise.resolve(_out);
+        return output.then((output) => {
+          payload.value = output;
+          return payload;
+        });
+      }
+      if (_out instanceof Promise) {
+        throw new $ZodAsyncError;
+      }
+      payload.value = _out;
+      return payload;
+    };
+  });
+  $ZodOptional = /* @__PURE__ */ $constructor("$ZodOptional", (inst, def) => {
+    $ZodType.init(inst, def);
+    defineLazyInternal(inst, "optin", (zod) => zod.def.innerType._zod.optin === "defaulted" ? "defaulted" : "optional");
+    inst._zod.optout = "optional";
+    defineLazyInternal(inst, "values", (zod) => {
+      const values = zod.def.innerType._zod.values;
+      return values ? new Set([...values, undefined]) : undefined;
+    });
+    defineLazyInternal(inst, "pattern", (zod) => {
+      const pattern = zod.def.innerType._zod.pattern;
+      return pattern ? new RegExp(`^(${cleanRegex(pattern.source)})?$`) : undefined;
+    });
+    inst._zod.parse = (payload, ctx) => {
+      if (payload.value === undefined) {
+        if (def.innerType._zod.optin !== "defaulted")
+          return payload;
+        const result = def.innerType._zod.run({ value: payload.value, issues: [] }, ctx);
+        if (result instanceof Promise)
+          return result.then((result) => handleOptionalResult(payload, result));
+        return handleOptionalResult(payload, result);
+      }
+      return def.innerType._zod.run(payload, ctx);
+    };
+  });
+  $ZodExactOptional = /* @__PURE__ */ $constructor("$ZodExactOptional", (inst, def) => {
+    $ZodOptional.init(inst, def);
+    defineLazyInternal(inst, "values", (zod) => zod.def.innerType._zod.values);
+    defineLazyInternal(inst, "pattern", (zod) => zod.def.innerType._zod.pattern);
+    inst._zod.parse = (payload, ctx) => {
+      return def.innerType._zod.run(payload, ctx);
+    };
+  });
+  $ZodNullable = /* @__PURE__ */ $constructor("$ZodNullable", (inst, def) => {
+    $ZodType.init(inst, def);
+    defineLazyInternal(inst, "optin", (zod) => zod.def.innerType._zod.optin);
+    defineLazyInternal(inst, "optout", (zod) => zod.def.innerType._zod.optout);
+    defineLazyInternal(inst, "pattern", (zod) => {
+      const pattern = zod.def.innerType._zod.pattern;
+      return pattern ? new RegExp(`^(${cleanRegex(pattern.source)}|null)$`) : undefined;
+    });
+    defineLazyInternal(inst, "values", (zod) => {
+      return zod.def.innerType._zod.values ? new Set([...zod.def.innerType._zod.values, null]) : undefined;
+    });
+    inst._zod.parse = (payload, ctx) => {
+      if (payload.value === null)
+        return payload;
+      return def.innerType._zod.run(payload, ctx);
+    };
+  });
+  $ZodDefault = /* @__PURE__ */ $constructor("$ZodDefault", (inst, def) => {
+    $ZodType.init(inst, def);
+    inst._zod.optin = "defaulted";
+    defineLazyInternal(inst, "values", (zod) => zod.def.innerType._zod.values);
+    inst._zod.parse = (payload, ctx) => {
+      if (ctx.direction === "backward") {
+        return def.innerType._zod.run(payload, ctx);
+      }
+      if (payload.value === undefined) {
+        payload.value = def.defaultValue;
+        return payload;
+      }
+      const result = def.innerType._zod.run(payload, ctx);
+      if (result instanceof Promise) {
+        return result.then((result) => handleDefaultResult(result, def));
+      }
+      return handleDefaultResult(result, def);
+    };
+  });
+  $ZodPrefault = /* @__PURE__ */ $constructor("$ZodPrefault", (inst, def) => {
+    $ZodType.init(inst, def);
+    inst._zod.optin = "defaulted";
+    defineLazyInternal(inst, "values", (zod) => zod.def.innerType._zod.values);
+    inst._zod.parse = (payload, ctx) => {
+      if (ctx.direction === "backward") {
+        return def.innerType._zod.run(payload, ctx);
+      }
+      if (payload.value === undefined) {
+        payload.value = def.defaultValue;
+      }
+      return def.innerType._zod.run(payload, ctx);
+    };
+  });
+  $ZodNonOptional = /* @__PURE__ */ $constructor("$ZodNonOptional", (inst, def) => {
+    $ZodType.init(inst, def);
+    defineLazyInternal(inst, "values", (zod) => {
+      const v = zod.def.innerType._zod.values;
+      return v ? new Set([...v].filter((x) => x !== undefined)) : undefined;
+    });
+    inst._zod.parse = (payload, ctx) => {
+      const result = def.innerType._zod.run(payload, ctx);
+      if (result instanceof Promise) {
+        return result.then((result) => handleNonOptionalResult(result, inst));
+      }
+      return handleNonOptionalResult(result, inst);
+    };
+  });
+  $ZodCatch = /* @__PURE__ */ $constructor("$ZodCatch", (inst, def) => {
+    $ZodType.init(inst, def);
+    defineLazyInternal(inst, "optin", (zod) => zod.def.innerType._zod.optin === "defaulted" ? "defaulted" : "optional");
+    defineLazyInternal(inst, "optout", (zod) => zod.def.innerType._zod.optout);
+    defineLazyInternal(inst, "values", (zod) => zod.def.innerType._zod.values);
+    inst._zod.parse = (payload, ctx) => {
+      if (ctx.direction === "backward") {
+        return def.innerType._zod.run(payload, ctx);
+      }
+      const result = def.innerType._zod.run({ value: payload.value, issues: [] }, ctx);
+      if (result instanceof Promise) {
+        return result.then((result) => handleCatchResult(payload, result, def, ctx));
+      }
+      return handleCatchResult(payload, result, def, ctx);
+    };
+  });
+  $ZodPipe = /* @__PURE__ */ $constructor("$ZodPipe", (inst, def) => {
+    $ZodType.init(inst, def);
+    defineLazyInternal(inst, "values", (zod) => zod.def.in._zod.values);
+    defineLazyInternal(inst, "optin", (zod) => zod.def.in._zod.optin);
+    defineLazyInternal(inst, "optout", (zod) => zod.def.out._zod.optout);
+    defineLazyInternal(inst, "propValues", (zod) => zod.def.in._zod.propValues);
+    inst._zod.parse = (payload, ctx) => {
+      if (ctx.direction === "backward") {
+        const right = def.out._zod.run(payload, ctx);
+        if (right instanceof Promise) {
+          return right.then((right) => handlePipeResult(right, def.in, ctx));
+        }
+        return handlePipeResult(right, def.in, ctx);
+      }
+      const left = def.in._zod.run(payload, ctx);
+      if (left instanceof Promise) {
+        return left.then((left) => handlePipeResult(left, def.out, ctx));
+      }
+      return handlePipeResult(left, def.out, ctx);
+    };
+  });
+  $ZodPreprocess = /* @__PURE__ */ $constructor("$ZodPreprocess", (inst, def) => {
+    $ZodPipe.init(inst, def);
+  });
+  $ZodReadonly = /* @__PURE__ */ $constructor("$ZodReadonly", (inst, def) => {
+    $ZodType.init(inst, def);
+    defineLazyInternal(inst, "propValues", (zod) => zod.def.innerType._zod.propValues);
+    defineLazyInternal(inst, "values", (zod) => zod.def.innerType._zod.values);
+    defineLazyInternal(inst, "optin", (zod) => zod.def.innerType?._zod?.optin);
+    defineLazyInternal(inst, "optout", (zod) => zod.def.innerType?._zod?.optout);
+    inst._zod.parse = (payload, ctx) => {
+      if (ctx.direction === "backward") {
+        return def.innerType._zod.run(payload, ctx);
+      }
+      const result = def.innerType._zod.run(payload, ctx);
+      if (result instanceof Promise) {
+        return result.then(handleReadonlyResult);
+      }
+      return handleReadonlyResult(result);
+    };
+  });
+  $ZodCustom = /* @__PURE__ */ $constructor("$ZodCustom", (inst, def) => {
+    $ZodCheck.init(inst, def);
+    $ZodType.init(inst, def);
+    inst._zod.parse = (payload, _) => {
+      return payload;
+    };
+    inst._zod.check = (payload) => {
+      const input = payload.value;
+      const r = def.fn(input);
+      if (r instanceof Promise) {
+        return r.then((r) => handleRefineResult(r, payload, input, inst));
+      }
+      handleRefineResult(r, payload, input, inst);
+      return;
+    };
+  });
+});
+
+// node_modules/zod/v4/core/memoizer.js
+function isRef(value) {
+  return value !== null && typeof value === "object";
+}
+function cloneIssues(issues) {
+  return issues.map((iss) => iss.path ? { ...iss, path: iss.path.slice() } : { ...iss });
+}
+function isRecursive(inst, stack, resolve) {
+  const cached = recursive.get(inst);
+  if (cached !== undefined)
+    return cached ? PROVEN : NONE;
+  if (stack.has(inst))
+    return PROVEN;
+  stack.add(inst);
+  let result = NONE;
+  const check = (child) => {
+    if (result !== PROVEN && child?._zod) {
+      const answer = isRecursive(child, stack, resolve);
+      if (answer > result)
+        result = answer;
+    }
+  };
+  const shape = (sh, spread) => {
+    let answer = NONE;
+    for (const key of Reflect.ownKeys(sh)) {
+      const desc = Object.getOwnPropertyDescriptor(sh, key);
+      if (spread && !desc.enumerable)
+        continue;
+      const child = desc.get ? ASSUMED : desc.value?._zod ? isRecursive(desc.value, stack, resolve) : NONE;
+      if (child > answer)
+        answer = child;
+    }
+    return answer;
+  };
+  const merge = (answer) => {
+    if (answer > result)
+      result = answer;
+  };
+  const def = inst._zod.def;
+  const kind = def.type;
+  switch (kind) {
+    case "object": {
+      const raw = rawShape(def);
+      merge(raw ? shape(raw, true) : ASSUMED);
+      check(def.catchall);
+      break;
+    }
+    case "array":
+      check(def.element);
+      break;
+    case "tuple":
+      for (const el of def.items)
+        check(el);
+      check(def.rest);
+      break;
+    case "record":
+    case "map":
+      check(def.keyType);
+      check(def.valueType);
+      break;
+    case "set":
+      check(def.valueType);
+      break;
+    case "union":
+      for (const el of def.options)
+        check(el);
+      break;
+    case "intersection":
+      check(def.left);
+      check(def.right);
+      break;
+    case "optional":
+    case "nullable":
+    case "default":
+    case "prefault":
+    case "catch":
+    case "readonly":
+    case "nonoptional":
+    case "promise":
+    case "success":
+      check(def.innerType);
+      break;
+    case "pipe":
+      check(def.in);
+      check(def.out);
+      break;
+    case "function":
+      check(def.input);
+      check(def.output);
+      break;
+    case "lazy": {
+      const inner = def._cachedInner ?? (resolve ? inst._zod.innerType : undefined);
+      merge(inner ? isRecursive(inner, stack, false) : ASSUMED);
+      break;
+    }
+    case "template_literal":
+    case "string":
+    case "number":
+    case "int":
+    case "boolean":
+    case "bigint":
+    case "symbol":
+    case "undefined":
+    case "null":
+    case "void":
+    case "never":
+    case "any":
+    case "unknown":
+    case "date":
+    case "nan":
+    case "enum":
+    case "literal":
+    case "file":
+    case "transform":
+    case "custom":
+      break;
+    default: {
+      for (const key in def) {
+        const desc = Object.getOwnPropertyDescriptor(def, key);
+        if (!desc || desc.get)
+          continue;
+        const value = desc.value;
+        if (!value || typeof value !== "object")
+          continue;
+        if (value._zod)
+          check(value);
+        else if (Array.isArray(value))
+          for (const el of value)
+            check(el);
+      }
+    }
+  }
+  stack.delete(inst);
+  return settle(inst, result);
+}
+function settle(inst, answer) {
+  if (answer !== ASSUMED)
+    recursive.set(inst, answer === PROVEN);
+  return answer;
+}
+function bucketFor(state, inst) {
+  let bucket = state.buckets.get(inst);
+  if (!bucket) {
+    bucket = new WeakMap;
+    state.buckets.set(inst, bucket);
+  }
+  return bucket;
+}
+function memoizer() {
+  return memo;
+}
+function isBackEdge(ctx, value) {
+  const backEdges = ctx[STATE]?.backEdges;
+  return backEdges !== undefined && isRef(value) && backEdges.has(value);
+}
+var $ZodCyclicError, STATE = "~memo", NO_ISSUES, recursive, NONE = 0, ASSUMED = 1, PROVEN = 2, handoff, open, memo;
+var init_memoizer = __esm(() => {
+  init_util();
+  $ZodCyclicError = class $ZodCyclicError extends Error {
+    constructor() {
+      super(`Cannot parse a reference cycle that closes through a transform`);
+      this.name = "ZodCyclicError";
+    }
+  };
+  NO_ISSUES = [];
+  recursive = /* @__PURE__ */ new WeakMap;
+  open = [];
+  memo = {
+    alloc(_inst, payload, empty) {
+      const bucket = handoff;
+      if (!bucket)
+        return empty;
+      handoff = undefined;
+      const entry = { value: empty, issues: null };
+      bucket.set(payload.value, entry);
+      open.push(entry);
+      return empty;
+    },
+    guard(inst) {
+      var _a;
+      (_a = inst._zod).deferred ?? (_a.deferred = []);
+      inst._zod.deferred.push(() => {
+        const base = inst._zod.parse;
+        const wrapped = (payload, ctx) => {
+          if (ctx.direction !== "backward" && isBackEdge(ctx, payload.value))
+            throw new $ZodCyclicError;
+          return base(payload, ctx);
+        };
+        inst._zod.parse = wrapped;
+        if (inst._zod.run === base)
+          inst._zod.run = wrapped;
+      });
+    },
+    attach(inst) {
+      var _a;
+      let isRecursiveInst;
+      let rechecked = false;
+      let lastCtx;
+      let lastBucket;
+      (_a = inst._zod).deferred ?? (_a.deferred = []);
+      inst._zod.deferred.push(() => {
+        const base = inst._zod.parse;
+        const wrapped = (payload, ctx) => {
+          if (isRecursiveInst === undefined) {
+            const walked = isRecursive(inst, new Set, false);
+            if (walked === NONE) {
+              inst._zod.parse = base;
+              if (inst._zod.run === wrapped)
+                inst._zod.run = base;
+              return base(payload, ctx);
+            }
+            if (walked === PROVEN || rechecked)
+              isRecursiveInst = true;
+            else
+              rechecked = true;
+          }
+          const input = payload.value;
+          if (!isRef(input))
+            return base(payload, ctx);
+          let state = ctx[STATE];
+          if (!state) {
+            state = { buckets: new WeakMap, backEdges: undefined };
+            ctx[STATE] = state;
+          }
+          let bucket;
+          if (lastCtx === ctx) {
+            bucket = lastBucket;
+          } else {
+            bucket = bucketFor(state, inst);
+            lastCtx = ctx;
+            lastBucket = bucket;
+          }
+          const hit = bucket.get(input);
+          if (hit) {
+            payload.value = hit.value;
+            if (hit.issues) {
+              if (hit.issues.length)
+                payload.issues.push(...cloneIssues(hit.issues));
+            } else {
+              payload.memo = true;
+              state.backEdges ?? (state.backEdges = new WeakSet);
+              state.backEdges.add(hit.value);
+            }
+            return payload;
+          }
+          handoff = bucket;
+          const depth = open.length;
+          const result = base(payload, ctx);
+          handoff = undefined;
+          const entry = open.length > depth ? open.pop() : undefined;
+          if (result instanceof Promise) {
+            return result.then((r) => {
+              if (entry)
+                entry.issues = r.issues.length ? cloneIssues(r.issues) : NO_ISSUES;
+              return r;
+            });
+          }
+          if (entry)
+            entry.issues = result.issues.length ? cloneIssues(result.issues) : NO_ISSUES;
+          return result;
+        };
+        inst._zod.parse = wrapped;
+        if (inst._zod.run === base)
+          inst._zod.run = wrapped;
+      });
+    }
+  };
+});
+
+// node_modules/zod/v4/locales/en.js
+function en_default() {
+  return {
+    localeError: error()
+  };
+}
+var error = () => {
+  const Sizable = {
+    string: { unit: "characters", verb: "to have" },
+    file: { unit: "bytes", verb: "to have" },
+    array: { unit: "items", verb: "to have" },
+    set: { unit: "items", verb: "to have" },
+    map: { unit: "entries", verb: "to have" }
+  };
+  function getSizing(origin) {
+    return Sizable[origin] ?? null;
+  }
+  const FormatDictionary = {
+    regex: "input",
+    email: "email address",
+    url: "URL",
+    emoji: "emoji",
+    uuid: "UUID",
+    uuidv4: "UUIDv4",
+    uuidv6: "UUIDv6",
+    nanoid: "nanoid",
+    guid: "GUID",
+    cuid: "cuid",
+    cuid2: "cuid2",
+    ulid: "ULID",
+    xid: "XID",
+    ksuid: "KSUID",
+    datetime: "ISO datetime",
+    date: "ISO date",
+    time: "ISO time",
+    duration: "ISO duration",
+    ipv4: "IPv4 address",
+    ipv6: "IPv6 address",
+    mac: "MAC address",
+    cidrv4: "IPv4 range",
+    cidrv6: "IPv6 range",
+    base64: "base64-encoded string",
+    base64url: "base64url-encoded string",
+    json_string: "JSON string",
+    e164: "E.164 number",
+    currency_code: "currency code",
+    credit_card: "credit card number",
+    iban: "IBAN",
+    jwt: "JWT",
+    template_literal: "input"
+  };
+  const TypeDictionary = {
+    nan: "NaN"
+  };
+  function getTypeName(type, input) {
+    if (type === "number" && typeof input === "number" && !Number.isFinite(input)) {
+      return String(input);
+    }
+    return TypeDictionary[type] ?? type;
+  }
+  return (issue) => {
+    switch (issue.code) {
+      case "invalid_type": {
+        const expected = getTypeName(issue.expected);
+        const receivedType = parsedType(issue.input);
+        const received = getTypeName(receivedType, issue.input);
+        return `Invalid input: expected ${expected}, received ${received}`;
+      }
+      case "invalid_value":
+        if (issue.values.length === 1)
+          return `Invalid input: expected ${stringifyPrimitive(issue.values[0])}`;
+        return `Invalid option: expected one of ${joinValues(issue.values, "|")}`;
+      case "too_big": {
+        const adj = issue.exact ? "exactly " : issue.inclusive ? "<=" : "<";
+        const sizing = getSizing(issue.origin);
+        if (sizing)
+          return `Too big: expected ${issue.origin ?? "value"} to have ${adj}${issue.maximum.toString()} ${sizing.unit ?? "elements"}`;
+        return `Too big: expected ${issue.origin ?? "value"} to be ${adj}${issue.maximum.toString()}`;
+      }
+      case "too_small": {
+        const adj = issue.exact ? "exactly " : issue.inclusive ? ">=" : ">";
+        const sizing = getSizing(issue.origin);
+        if (sizing) {
+          return `Too small: expected ${issue.origin} to have ${adj}${issue.minimum.toString()} ${sizing.unit}`;
+        }
+        return `Too small: expected ${issue.origin} to be ${adj}${issue.minimum.toString()}`;
+      }
+      case "invalid_format": {
+        const _issue = issue;
+        if (_issue.format === "starts_with") {
+          return `Invalid string: must start with "${_issue.prefix}"`;
+        }
+        if (_issue.format === "ends_with")
+          return `Invalid string: must end with "${_issue.suffix}"`;
+        if (_issue.format === "includes")
+          return `Invalid string: must include "${_issue.includes}"`;
+        if (_issue.format === "regex")
+          return `Invalid string: must match pattern ${_issue.pattern}`;
+        return `Invalid ${FormatDictionary[_issue.format] ?? issue.format}`;
+      }
+      case "not_multiple_of":
+        return `Invalid number: must be a multiple of ${issue.divisor}`;
+      case "unrecognized_keys":
+        return `Unrecognized key${issue.keys.length > 1 ? "s" : ""}: ${joinValues(issue.keys, ", ")}`;
+      case "invalid_key":
+        return `Invalid key in ${issue.origin}`;
+      case "invalid_union":
+        if (issue.options && Array.isArray(issue.options) && issue.options.length > 0) {
+          const opts = issue.options.map((o) => `'${o}'`).join(" | ");
+          return `Invalid discriminator value. Expected ${opts}`;
+        }
+        if (issue.inclusive === false) {
+          return "Invalid input: more than one option matched";
+        }
+        return "Invalid input";
+      case "invalid_element":
+        return `Invalid value in ${issue.origin}`;
+      default:
+        return `Invalid input`;
+    }
+  };
+};
+var init_en = __esm(() => {
+  init_util();
+});
+
+// node_modules/zod/v4/locales/index.js
+var init_locales = () => {};
+
+// node_modules/zod/v4/core/registries.js
+class $ZodRegistry {
+  constructor() {
+    this._map = new WeakMap;
+    this._idmap = new Map;
+  }
+  add(schema, ..._meta) {
+    const meta = _meta[0];
+    this._map.set(schema, meta);
+    if (meta && typeof meta === "object" && "id" in meta) {
+      this._idmap.set(meta.id, schema);
+    }
+    return this;
+  }
+  clear() {
+    this._map = new WeakMap;
+    this._idmap = new Map;
+    return this;
+  }
+  remove(schema) {
+    const meta = this._map.get(schema);
+    if (meta && typeof meta === "object" && "id" in meta) {
+      this._idmap.delete(meta.id);
+    }
+    this._map.delete(schema);
+    return this;
+  }
+  get(schema) {
+    const p = schema._zod.parent;
+    if (p) {
+      const pm = { ...this.get(p) ?? {} };
+      delete pm.id;
+      const f = { ...pm, ...this._map.get(schema) };
+      return Object.keys(f).length ? f : undefined;
+    }
+    return this._map.get(schema);
+  }
+  has(schema) {
+    return this._map.has(schema);
+  }
+}
+function registry() {
+  return new $ZodRegistry;
+}
+var _a2, globalRegistry;
+var init_registries = __esm(() => {
+  (_a2 = globalThis).__zod_globalRegistry ?? (_a2.__zod_globalRegistry = registry());
+  globalRegistry = globalThis.__zod_globalRegistry;
+});
+
+// node_modules/zod/v4/core/compile.js
+var INVALID, FALLBACK_FLAG, WHEN_DEFAULTED_CHECKS, PATTERN_IS_COMPLETE;
+var init_compile = __esm(() => {
+  INVALID = Symbol.for("zod.compile.invalid");
+  FALLBACK_FLAG = Symbol.for("zod.compile.fallback");
+  WHEN_DEFAULTED_CHECKS = new Set([
+    "max_size",
+    "min_size",
+    "size_equals",
+    "max_length",
+    "min_length",
+    "length_equals"
+  ]);
+  PATTERN_IS_COMPLETE = new Set([
+    "cidrv4",
+    "cuid",
+    "cuid2",
+    "date",
+    "datetime",
+    "duration",
+    "e164",
+    "email",
+    "emoji",
+    "ends_with",
+    "guid",
+    "includes",
+    "ipv4",
+    "ksuid",
+    "lowercase",
+    "mac",
+    "nanoid",
+    "regex",
+    "starts_with",
+    "time",
+    "ulid",
+    "uppercase",
+    "uuid",
+    "xid"
+  ]);
+});
+
+// node_modules/zod/v4/core/api.js
+function snapshotChecks(def) {
+  if (def.checks)
+    def.checks = [...def.checks];
+  return def;
+}
+function _string(Class, params) {
+  return new Class(snapshotChecks({ type: "string", ...normalizeParams(params) }));
+}
+function _email(Class, params) {
+  return new Class({
+    type: "string",
+    format: "email",
+    check: "string_format",
+    abort: false,
+    ...normalizeParams(params)
+  });
+}
+function _guid(Class, params) {
+  return new Class({
+    type: "string",
+    format: "guid",
+    check: "string_format",
+    abort: false,
+    ...normalizeParams(params)
+  });
+}
+function _uuid(Class, params) {
+  return new Class({
+    type: "string",
+    format: "uuid",
+    check: "string_format",
+    abort: false,
+    ...normalizeParams(params)
+  });
+}
+function _uuidv4(Class, params) {
+  return new Class({
+    type: "string",
+    format: "uuid",
+    check: "string_format",
+    abort: false,
+    version: "v4",
+    ...normalizeParams(params)
+  });
+}
+function _uuidv6(Class, params) {
+  return new Class({
+    type: "string",
+    format: "uuid",
+    check: "string_format",
+    abort: false,
+    version: "v6",
+    ...normalizeParams(params)
+  });
+}
+function _uuidv7(Class, params) {
+  return new Class({
+    type: "string",
+    format: "uuid",
+    check: "string_format",
+    abort: false,
+    version: "v7",
+    ...normalizeParams(params)
+  });
+}
+function _url(Class, params) {
+  return new Class({
+    type: "string",
+    format: "url",
+    check: "string_format",
+    abort: false,
+    ...normalizeParams(params)
+  });
+}
+function _emoji2(Class, params) {
+  return new Class({
+    type: "string",
+    format: "emoji",
+    check: "string_format",
+    abort: false,
+    ...normalizeParams(params)
+  });
+}
+function _nanoid(Class, params) {
+  return new Class({
+    type: "string",
+    format: "nanoid",
+    check: "string_format",
+    abort: false,
+    ...normalizeParams(params)
+  });
+}
+function _cuid(Class, params) {
+  return new Class({
+    type: "string",
+    format: "cuid",
+    check: "string_format",
+    abort: false,
+    ...normalizeParams(params)
+  });
+}
+function _cuid2(Class, params) {
+  return new Class({
+    type: "string",
+    format: "cuid2",
+    check: "string_format",
+    abort: false,
+    ...normalizeParams(params)
+  });
+}
+function _ulid(Class, params) {
+  return new Class({
+    type: "string",
+    format: "ulid",
+    check: "string_format",
+    abort: false,
+    ...normalizeParams(params)
+  });
+}
+function _xid(Class, params) {
+  return new Class({
+    type: "string",
+    format: "xid",
+    check: "string_format",
+    abort: false,
+    ...normalizeParams(params)
+  });
+}
+function _ksuid(Class, params) {
+  return new Class({
+    type: "string",
+    format: "ksuid",
+    check: "string_format",
+    abort: false,
+    ...normalizeParams(params)
+  });
+}
+function _ipv4(Class, params) {
+  return new Class({
+    type: "string",
+    format: "ipv4",
+    check: "string_format",
+    abort: false,
+    ...normalizeParams(params)
+  });
+}
+function _ipv6(Class, params) {
+  return new Class({
+    type: "string",
+    format: "ipv6",
+    check: "string_format",
+    abort: false,
+    ...normalizeParams(params)
+  });
+}
+function _cidrv4(Class, params) {
+  return new Class({
+    type: "string",
+    format: "cidrv4",
+    check: "string_format",
+    abort: false,
+    ...normalizeParams(params)
+  });
+}
+function _cidrv6(Class, params) {
+  return new Class({
+    type: "string",
+    format: "cidrv6",
+    check: "string_format",
+    abort: false,
+    ...normalizeParams(params)
+  });
+}
+function _base64(Class, params) {
+  return new Class({
+    type: "string",
+    format: "base64",
+    check: "string_format",
+    abort: false,
+    ...normalizeParams(params)
+  });
+}
+function _base64url(Class, params) {
+  return new Class({
+    type: "string",
+    format: "base64url",
+    check: "string_format",
+    abort: false,
+    ...normalizeParams(params)
+  });
+}
+function _e164(Class, params) {
+  return new Class({
+    type: "string",
+    format: "e164",
+    check: "string_format",
+    abort: false,
+    ...normalizeParams(params)
+  });
+}
+function _jwt(Class, params) {
+  return new Class({
+    type: "string",
+    format: "jwt",
+    check: "string_format",
+    abort: false,
+    ...normalizeParams(params)
+  });
+}
+function _isoDateTime(Class, params) {
+  return new Class({
+    type: "string",
+    format: "datetime",
+    check: "string_format",
+    offset: false,
+    local: false,
+    precision: null,
+    ...normalizeParams(params)
+  });
+}
+function _isoDate(Class, params) {
+  return new Class({
+    type: "string",
+    format: "date",
+    check: "string_format",
+    ...normalizeParams(params)
+  });
+}
+function _isoTime(Class, params) {
+  return new Class({
+    type: "string",
+    format: "time",
+    check: "string_format",
+    precision: null,
+    ...normalizeParams(params)
+  });
+}
+function _isoDuration(Class, params) {
+  return new Class({
+    type: "string",
+    format: "duration",
+    check: "string_format",
+    ...normalizeParams(params)
+  });
+}
+function _number(Class, params) {
+  return new Class(snapshotChecks({ type: "number", checks: [], ...normalizeParams(params) }));
+}
+function _int(Class, params) {
+  return new Class({
+    type: "number",
+    check: "number_format",
+    abort: false,
+    format: "safeint",
+    ...normalizeParams(params)
+  });
+}
+function _boolean(Class, params) {
+  return new Class({
+    type: "boolean",
+    ...normalizeParams(params)
+  });
+}
+function _null2(Class, params) {
+  return new Class({
+    type: "null",
+    ...normalizeParams(params)
+  });
+}
+function _unknown(Class) {
+  return new Class({
+    type: "unknown"
+  });
+}
+function _never(Class, params) {
+  return new Class({
+    type: "never",
+    ...normalizeParams(params)
+  });
+}
+function _lt(value, params) {
+  return new $ZodCheckLessThan({
+    check: "less_than",
+    ...normalizeParams(params),
+    value,
+    inclusive: false
+  });
+}
+function _lte(value, params) {
+  return new $ZodCheckLessThan({
+    check: "less_than",
+    ...normalizeParams(params),
+    value,
+    inclusive: true
+  });
+}
+function _gt(value, params) {
+  return new $ZodCheckGreaterThan({
+    check: "greater_than",
+    ...normalizeParams(params),
+    value,
+    inclusive: false
+  });
+}
+function _gte(value, params) {
+  return new $ZodCheckGreaterThan({
+    check: "greater_than",
+    ...normalizeParams(params),
+    value,
+    inclusive: true
+  });
+}
+function _multipleOf(value, params) {
+  return new $ZodCheckMultipleOf({
+    check: "multiple_of",
+    ...normalizeParams(params),
+    value
+  });
+}
+function _maxLength(maximum, params) {
+  const ch = new $ZodCheckMaxLength({
+    check: "max_length",
+    ...normalizeParams(params),
+    maximum
+  });
+  return ch;
+}
+function _minLength(minimum, params) {
+  return new $ZodCheckMinLength({
+    check: "min_length",
+    ...normalizeParams(params),
+    minimum
+  });
+}
+function _length(length, params) {
+  return new $ZodCheckLengthEquals({
+    check: "length_equals",
+    ...normalizeParams(params),
+    length
+  });
+}
+function _regex(pattern, params) {
+  return new $ZodCheckRegex({
+    check: "string_format",
+    format: "regex",
+    ...normalizeParams(params),
+    pattern
+  });
+}
+function _lowercase(params) {
+  return new $ZodCheckLowerCase({
+    check: "string_format",
+    format: "lowercase",
+    ...normalizeParams(params)
+  });
+}
+function _uppercase(params) {
+  return new $ZodCheckUpperCase({
+    check: "string_format",
+    format: "uppercase",
+    ...normalizeParams(params)
+  });
+}
+function _includes(includes, params) {
+  return new $ZodCheckIncludes({
+    check: "string_format",
+    format: "includes",
+    ...normalizeParams(params),
+    includes
+  });
+}
+function _startsWith(prefix, params) {
+  return new $ZodCheckStartsWith({
+    check: "string_format",
+    format: "starts_with",
+    ...normalizeParams(params),
+    prefix
+  });
+}
+function _endsWith(suffix, params) {
+  return new $ZodCheckEndsWith({
+    check: "string_format",
+    format: "ends_with",
+    ...normalizeParams(params),
+    suffix
+  });
+}
+function _overwrite(tx) {
+  return new $ZodCheckOverwrite({
+    check: "overwrite",
+    tx
+  });
+}
+function _normalize(form) {
+  return _overwrite((input) => input.normalize(form));
+}
+function _trim() {
+  return _overwrite((input) => input.trim());
+}
+function _toLowerCase() {
+  return _overwrite((input) => input.toLowerCase());
+}
+function _toUpperCase() {
+  return _overwrite((input) => input.toUpperCase());
+}
+function _slugify() {
+  return _overwrite((input) => slugify(input));
+}
+function _array(Class, element, params) {
+  return new Class({
+    type: "array",
+    element,
+    ...normalizeParams(params)
+  });
+}
+function _custom(Class, fn, _params) {
+  const norm = normalizeParams(_params);
+  norm.abort ?? (norm.abort = true);
+  const schema = new Class({
+    type: "custom",
+    check: "custom",
+    fn,
+    ...norm
+  });
+  return schema;
+}
+function _refine(Class, fn, _params) {
+  const schema = new Class({
+    type: "custom",
+    check: "custom",
+    fn,
+    ...normalizeParams(_params)
+  });
+  return schema;
+}
+function _superRefine(fn, params) {
+  const ch = _check((payload) => {
+    payload.addIssue = (issue2) => {
+      if (typeof issue2 === "string") {
+        payload.issues.push(issue(issue2, payload.value, ch._zod.def));
+      } else {
+        const _issue = issue2;
+        if (_issue.fatal)
+          _issue.continue = false;
+        _issue.code ?? (_issue.code = "custom");
+        if (!("input" in _issue))
+          _issue.input = payload.value;
+        _issue.inst ?? (_issue.inst = ch);
+        _issue.continue ?? (_issue.continue = !ch._zod.def.abort);
+        payload.issues.push(issue(_issue));
+      }
+    };
+    return fn(payload.value, payload);
+  }, params);
+  return ch;
+}
+function _check(fn, params) {
+  const ch = new $ZodCheck({
+    check: "custom",
+    ...normalizeParams(params)
+  });
+  ch._zod.check = fn;
+  return ch;
+}
+var init_api = __esm(() => {
+  init_checks();
+  init_util();
+});
+
+// node_modules/zod/v4/core/to-json-schema.js
+function assignProps(target, ...sources) {
+  for (const source of sources) {
+    for (const key of Reflect.ownKeys(source)) {
+      if (Object.prototype.propertyIsEnumerable.call(source, key)) {
+        assignProp(target, key, source[key]);
+      }
+    }
+  }
+  return target;
+}
+function initializeContext(params) {
+  let target = params?.target ?? "draft-2020-12";
+  if (target === "draft-4")
+    target = "draft-04";
+  if (target === "draft-7")
+    target = "draft-07";
+  return {
+    processors: params.processors ?? {},
+    metadataRegistry: params?.metadata ?? globalRegistry,
+    target,
+    unrepresentable: params?.unrepresentable ?? "throw",
+    override: params?.override ?? (() => {}),
+    io: params?.io ?? "output",
+    counter: 0,
+    seen: new Map,
+    sharedDefsExtractedFor: undefined,
+    sharedEmitDoneFor: undefined,
+    cycles: params?.cycles ?? "ref",
+    reused: params?.reused ?? "inline",
+    intersections: [],
+    deferred: [],
+    external: params?.external ?? undefined
+  };
+}
+function handleUnrepresentable(schema, ctx, json, params, message) {
+  const result = typeof ctx.unrepresentable === "function" ? ctx.unrepresentable({ zodSchema: schema, path: params.path, message }) : ctx.unrepresentable;
+  if (result === "any")
+    return false;
+  if (result === undefined || result === "throw")
+    throw new Error(message);
+  Object.assign(json, result);
+  return true;
+}
+function processSchema(schema, ctx, _params = { path: [], schemaPath: [] }) {
+  var _a;
+  const def = schema._zod.def;
+  const seen = ctx.seen.get(schema);
+  if (seen) {
+    seen.count++;
+    const isCycle = _params.schemaPath.includes(schema);
+    if (isCycle) {
+      seen.cycle = _params.path;
+    }
+    return seen.schema;
+  }
+  const result = { schema: {}, count: 1, cycle: undefined, path: _params.path };
+  ctx.seen.set(schema, result);
+  ctx.sharedDefsExtractedFor = undefined;
+  ctx.sharedEmitDoneFor = undefined;
+  const overrideSchema = schema._zod.toJSONSchema?.();
+  if (overrideSchema) {
+    result.schema = overrideSchema;
+  } else {
+    const params = {
+      ..._params,
+      schemaPath: [..._params.schemaPath, schema],
+      path: _params.path
+    };
+    if (schema._zod.processJSONSchema) {
+      schema._zod.processJSONSchema(ctx, result.schema, params);
+    } else {
+      const _json = result.schema;
+      const processor = ctx.processors[def.type];
+      if (!processor) {
+        throw new Error(`[toJSONSchema]: Non-representable type encountered: ${def.type}`);
+      }
+      processor(schema, ctx, _json, params);
+    }
+    const parent = schema._zod.parent;
+    if (parent) {
+      if (!result.ref)
+        result.ref = parent;
+      processSchema(parent, ctx, params);
+      ctx.seen.get(parent).isParent = true;
+    }
+  }
+  const meta = ctx.metadataRegistry.get(schema);
+  if (meta)
+    assignProps(result.schema, meta);
+  if (ctx.io === "input" && isTransforming(schema)) {
+    delete result.schema.examples;
+    delete result.schema.default;
+  }
+  if (ctx.io === "input" && "_prefault" in result.schema)
+    (_a = result.schema).default ?? (_a.default = result.schema._prefault);
+  delete result.schema._prefault;
+  const _result = ctx.seen.get(schema);
+  return _result.schema;
+}
+function encodeJSONPointerSegment(segment) {
+  return segment.replace(/~/g, "~0").replace(/\//g, "~1");
+}
+function extractDefs(ctx, schema) {
+  const root = ctx.seen.get(schema);
+  if (!root)
+    throw new Error("Unprocessed schema. This is a bug in Zod.");
+  if (ctx.external && ctx.sharedDefsExtractedFor === ctx.external)
+    return;
+  const idToSchema = new Map;
+  for (const entry of ctx.seen.entries()) {
+    const id = ctx.metadataRegistry.get(entry[0])?.id;
+    if (id) {
+      const existing = idToSchema.get(id);
+      if (existing && existing !== entry[0]) {
+        throw new Error(`Duplicate schema id "${id}" detected during JSON Schema conversion. Two different schemas cannot share the same id when converted together.`);
+      }
+      idToSchema.set(id, entry[0]);
+    }
+  }
+  const makeURI = (entry) => {
+    const defsSegment = ctx.target === "draft-2020-12" ? "$defs" : "definitions";
+    if (ctx.external) {
+      const externalId = ctx.external.registry.get(entry[0])?.id;
+      const uriGenerator = ctx.external.uri ?? ((id) => id);
+      if (externalId) {
+        return { ref: uriGenerator(externalId) };
+      }
+      const id = entry[1].defId ?? entry[1].schema.id ?? `schema${ctx.counter++}`;
+      entry[1].defId = id;
+      return { defId: id, ref: `${uriGenerator("__shared")}#/${defsSegment}/${encodeJSONPointerSegment(id)}` };
+    }
+    const uriPrefix = `#`;
+    const defUriPrefix = `${uriPrefix}/${defsSegment}/`;
+    if (entry[1] === root && !entry[1].schema.id) {
+      return { ref: uriPrefix };
+    }
+    const defId = entry[1].schema.id ?? `__schema${ctx.counter++}`;
+    return { defId, ref: defUriPrefix + encodeJSONPointerSegment(defId) };
+  };
+  const extractToDef = (entry) => {
+    if (entry[1].schema.$ref) {
+      return;
+    }
+    const seen = entry[1];
+    const { ref, defId } = makeURI(entry);
+    seen.def = { ...seen.schema };
+    if (defId)
+      seen.defId = defId;
+    const schema = seen.schema;
+    for (const key in schema) {
+      delete schema[key];
+    }
+    schema.$ref = ref;
+  };
+  if (ctx.cycles === "throw") {
+    for (const entry of ctx.seen.entries()) {
+      const seen = entry[1];
+      if (seen.cycle) {
+        throw new Error("Cycle detected: " + `#/${seen.cycle?.join("/")}/<root>` + '\n\nSet the `cycles` parameter to `"ref"` to resolve cyclical schemas with defs.');
+      }
+    }
+  }
+  for (const entry of ctx.seen.entries()) {
+    const seen = entry[1];
+    if (schema === entry[0]) {
+      extractToDef(entry);
+      continue;
+    }
+    if (ctx.external) {
+      const ext = ctx.external.registry.get(entry[0])?.id;
+      if (schema !== entry[0] && ext) {
+        extractToDef(entry);
+        continue;
+      }
+    }
+    const id = ctx.metadataRegistry.get(entry[0])?.id;
+    if (id) {
+      extractToDef(entry);
+      continue;
+    }
+    if (seen.cycle) {
+      extractToDef(entry);
+      continue;
+    }
+    if (seen.count > 1) {
+      if (ctx.reused === "ref") {
+        extractToDef(entry);
+      }
+    }
+  }
+  if (ctx.external)
+    ctx.sharedDefsExtractedFor = ctx.external;
+}
+function compactTypeUnion(schema) {
+  const options = schema.anyOf;
+  if (!Array.isArray(options) || options.length === 0 || schema.type !== undefined)
+    return;
+  const types = [];
+  for (const option of options) {
+    if (!option || typeof option !== "object")
+      return;
+    compactTypeUnion(option);
+    const keys = Object.keys(option);
+    if (keys.length !== 1 || keys[0] !== "type")
+      return;
+    const type = option.type;
+    for (const member of Array.isArray(type) ? type : [type]) {
+      if (typeof member !== "string")
+        return;
+      if (!types.includes(member))
+        types.push(member);
+    }
+  }
+  delete schema.anyOf;
+  schema.type = types.length === 1 ? types[0] : types;
+}
+function undeclaredConstraint(member) {
+  const extra = member.additionalProperties;
+  if (extra === undefined || extra === false || typeof extra !== "object" || extra === null)
+    return null;
+  return Object.keys(extra).length ? extra : null;
+}
+function foldObjects(members) {
+  const objects = [];
+  for (const member of members) {
+    if (typeof member !== "object" || member.type !== "object")
+      return null;
+    for (const key in member) {
+      if (!FOLDABLE_KEYS.has(key))
+        return null;
+    }
+    objects.push(member);
+  }
+  const properties = {};
+  const required = new Set;
+  for (const object of objects) {
+    for (const key in object.properties) {
+      if (Object.prototype.hasOwnProperty.call(properties, key))
+        continue;
+      const parts = [];
+      for (const other of objects) {
+        const part = other.properties?.[key] ?? undeclaredConstraint(other);
+        if (part === null || part === undefined)
+          continue;
+        if (!parts.some((seen) => JSON.stringify(seen) === JSON.stringify(part)))
+          parts.push(part);
+      }
+      const merged = parts.length === 1 ? parts[0] : foldObjects(parts) ?? { allOf: parts };
+      assignProp(properties, key, merged);
+    }
+    for (const key of object.required ?? [])
+      required.add(key);
+  }
+  const folded = { type: "object", properties };
+  if (required.size)
+    folded.required = [...required];
+  if (objects.every((object) => object.additionalProperties === false)) {
+    folded.additionalProperties = false;
+  } else {
+    const constraints = [];
+    for (const object of objects) {
+      const constraint = undeclaredConstraint(object);
+      if (constraint && !constraints.some((seen) => JSON.stringify(seen) === JSON.stringify(constraint)))
+        constraints.push(constraint);
+    }
+    if (constraints.length === 1)
+      folded.additionalProperties = constraints[0];
+    else if (constraints.length > 1)
+      folded.additionalProperties = { allOf: constraints };
+  }
+  return folded;
+}
+function foldIntersection(json) {
+  const allOf = json.allOf;
+  if (!Array.isArray(allOf) || allOf.length < 2)
+    return;
+  for (const key of FOLDABLE_KEYS)
+    if (key in json)
+      return;
+  const unions = allOf.filter((m) => UNION_KEYS.some((k) => Array.isArray(m[k])));
+  let folded = null;
+  if (!unions.length) {
+    folded = foldObjects(allOf);
+  } else {
+    const union = unions[0];
+    const keyword = UNION_KEYS.find((k) => Array.isArray(union[k]));
+    if (Object.keys(union).length !== 1)
+      return;
+    const rest = allOf.filter((m) => m !== union);
+    const branches = union[keyword].map((branch) => foldObjects([...rest, branch]));
+    if (branches.some((b) => !b))
+      return;
+    folded = { [keyword]: branches };
+  }
+  if (!folded)
+    return;
+  delete json.allOf;
+  assignProps(json, folded);
+}
+function finalize(ctx, schema) {
+  const root = ctx.seen.get(schema);
+  if (!root)
+    throw new Error("Unprocessed schema. This is a bug in Zod.");
+  const flattenRef = (zodSchema) => {
+    const seen = ctx.seen.get(zodSchema);
+    if (seen.ref === null)
+      return;
+    const schema = seen.def ?? seen.schema;
+    const _cached = { ...schema };
+    const ref = seen.ref;
+    seen.ref = null;
+    if (ref) {
+      flattenRef(ref);
+      const refSeen = ctx.seen.get(ref);
+      const refSchema = refSeen.schema;
+      if (refSchema.$ref && (ctx.target === "draft-07" || ctx.target === "draft-04" || ctx.target === "openapi-3.0")) {
+        schema.allOf = schema.allOf ?? [];
+        schema.allOf.push(refSchema);
+      } else {
+        assignProps(schema, refSchema);
+      }
+      assignProps(schema, _cached);
+      const isParentRef = zodSchema._zod.parent === ref;
+      if (isParentRef) {
+        for (const key in schema) {
+          if (key === "$ref" || key === "allOf")
+            continue;
+          if (!(key in _cached)) {
+            delete schema[key];
+          }
+        }
+      }
+      if (refSchema.$ref && refSeen.def) {
+        for (const key in schema) {
+          if (key === "$ref" || key === "allOf")
+            continue;
+          if (key in refSeen.def && JSON.stringify(schema[key]) === JSON.stringify(refSeen.def[key])) {
+            delete schema[key];
+          }
+        }
+      }
+    }
+    const parent = zodSchema._zod.parent;
+    if (parent && parent !== ref) {
+      flattenRef(parent);
+      const parentSeen = ctx.seen.get(parent);
+      if (parentSeen?.schema.$ref) {
+        schema.$ref = parentSeen.schema.$ref;
+        if (parentSeen.def) {
+          for (const key in schema) {
+            if (key === "$ref" || key === "allOf")
+              continue;
+            if (key in parentSeen.def && JSON.stringify(schema[key]) === JSON.stringify(parentSeen.def[key])) {
+              delete schema[key];
+            }
+          }
+        }
+      }
+    }
+    ctx.override({
+      zodSchema,
+      jsonSchema: schema,
+      path: seen.path ?? []
+    });
+  };
+  if (!ctx.external || ctx.sharedEmitDoneFor !== ctx.external) {
+    for (const entry of [...ctx.seen.entries()].reverse()) {
+      flattenRef(entry[0]);
+    }
+    if (ctx.target !== "openapi-3.0") {
+      for (const entry of ctx.seen.entries()) {
+        compactTypeUnion(entry[1].def ?? entry[1].schema);
+      }
+    }
+    for (const rewrite of ctx.deferred)
+      rewrite();
+    if (ctx.intersections.length) {
+      const carriers = new Map;
+      for (const seen of ctx.seen.values()) {
+        for (const json of [seen.schema, seen.def]) {
+          const allOf = json?.allOf;
+          if (!Array.isArray(allOf))
+            continue;
+          const existing = carriers.get(allOf);
+          if (existing)
+            existing.push(json);
+          else
+            carriers.set(allOf, [json]);
+        }
+      }
+      for (const allOf of ctx.intersections) {
+        for (const json of carriers.get(allOf) ?? [])
+          foldIntersection(json);
+      }
+    }
+  }
+  const result = {};
+  if (ctx.target === "draft-2020-12") {
+    result.$schema = "https://json-schema.org/draft/2020-12/schema";
+  } else if (ctx.target === "draft-07") {
+    result.$schema = "http://json-schema.org/draft-07/schema#";
+  } else if (ctx.target === "draft-04") {
+    result.$schema = "http://json-schema.org/draft-04/schema#";
+  } else if (ctx.target === "openapi-3.0") {}
+  if (ctx.external?.uri) {
+    const id = ctx.external.registry.get(schema)?.id;
+    if (!id)
+      throw new Error("Schema is missing an `id` property");
+    result.$id = ctx.external.uri(id);
+  }
+  assignProps(result, root.defId ? root.schema : root.def ?? root.schema);
+  const rootMetaId = ctx.metadataRegistry.get(schema)?.id;
+  if (rootMetaId !== undefined && result.id === rootMetaId)
+    delete result.id;
+  const defs = ctx.external?.defs ?? {};
+  if (!ctx.external || ctx.sharedEmitDoneFor !== ctx.external) {
+    for (const entry of ctx.seen.entries()) {
+      const seen = entry[1];
+      if (seen.def && seen.defId) {
+        if (seen.def.id === seen.defId)
+          delete seen.def.id;
+        assignProp(defs, seen.defId, seen.def);
+      }
+    }
+  }
+  if (ctx.external)
+    ctx.sharedEmitDoneFor = ctx.external;
+  if (ctx.external) {} else {
+    if (Object.keys(defs).length > 0) {
+      if (ctx.target === "draft-2020-12") {
+        result.$defs = defs;
+      } else {
+        result.definitions = defs;
+      }
+    }
+  }
+  try {
+    const finalized = JSON.parse(JSON.stringify(result));
+    Object.defineProperty(finalized, "~standard", {
+      value: {
+        ...schema["~standard"],
+        jsonSchema: {
+          input: createStandardJSONSchemaMethod(schema, "input", ctx.processors),
+          output: createStandardJSONSchemaMethod(schema, "output", ctx.processors)
+        }
+      },
+      enumerable: false,
+      writable: false
+    });
+    return finalized;
+  } catch (_err) {
+    throw new Error("Error converting schema to JSON.");
+  }
+}
+function isTransforming(_schema, _ctx) {
+  const ctx = _ctx ?? { seen: new Set };
+  if (ctx.seen.has(_schema))
+    return false;
+  ctx.seen.add(_schema);
+  const def = _schema._zod.def;
+  if (def.type === "transform")
+    return true;
+  if (def.type === "array")
+    return isTransforming(def.element, ctx);
+  if (def.type === "set")
+    return isTransforming(def.valueType, ctx);
+  if (def.type === "lazy")
+    return isTransforming(def.getter(), ctx);
+  if (def.type === "promise" || def.type === "optional" || def.type === "nonoptional" || def.type === "nullable" || def.type === "readonly" || def.type === "default" || def.type === "prefault" || def.type === "catch") {
+    return isTransforming(def.innerType, ctx);
+  }
+  if (def.type === "intersection") {
+    return isTransforming(def.left, ctx) || isTransforming(def.right, ctx);
+  }
+  if (def.type === "record" || def.type === "map") {
+    return isTransforming(def.keyType, ctx) || isTransforming(def.valueType, ctx);
+  }
+  if (def.type === "pipe") {
+    if (_schema._zod.traits.has("$ZodCodec"))
+      return true;
+    return isTransforming(def.in, ctx) || isTransforming(def.out, ctx);
+  }
+  if (def.type === "object") {
+    for (const key in def.shape) {
+      if (isTransforming(def.shape[key], ctx))
+        return true;
+    }
+    return false;
+  }
+  if (def.type === "union") {
+    for (const option of def.options) {
+      if (isTransforming(option, ctx))
+        return true;
+    }
+    return false;
+  }
+  if (def.type === "tuple") {
+    for (const item of def.items) {
+      if (isTransforming(item, ctx))
+        return true;
+    }
+    if (def.rest && isTransforming(def.rest, ctx))
+      return true;
+    return false;
+  }
+  return false;
+}
+var FOLDABLE_KEYS, UNION_KEYS, createToJSONSchemaMethod = (schema, processors = {}) => (params) => {
+  const ctx = initializeContext({ ...params, processors });
+  processSchema(schema, ctx);
+  extractDefs(ctx, schema);
+  return finalize(ctx, schema);
+}, createStandardJSONSchemaMethod = (schema, io, processors = {}) => (params) => {
+  const { libraryOptions, target } = params ?? {};
+  const ctx = initializeContext({ ...libraryOptions ?? {}, target, io, processors });
+  processSchema(schema, ctx);
+  extractDefs(ctx, schema);
+  return finalize(ctx, schema);
+};
+var init_to_json_schema = __esm(() => {
+  init_registries();
+  init_util();
+  FOLDABLE_KEYS = new Set(["type", "properties", "required", "additionalProperties"]);
+  UNION_KEYS = ["oneOf", "anyOf"];
+});
+
+// node_modules/zod/v4/core/json-schema-processors.js
+function aggregateChecks(schema) {
+  const agg = {};
+  const def = schema._zod.def;
+  const list = schema._zod.traits.has("$ZodCheck") ? [schema, ...def.checks ?? []] : def.checks ?? [];
+  for (const ch of list)
+    contributors[ch._zod.def.check]?.(agg, ch._zod.def);
+  const bag = schema._zod.bag;
+  if (bag.minimum !== undefined)
+    narrowMin(agg, "minimum", bag.minimum);
+  if (bag.exclusiveMinimum !== undefined)
+    narrowMin(agg, "exclusiveMinimum", bag.exclusiveMinimum);
+  if (bag.maximum !== undefined)
+    narrowMax(agg, "maximum", bag.maximum);
+  if (bag.exclusiveMaximum !== undefined)
+    narrowMax(agg, "exclusiveMaximum", bag.exclusiveMaximum);
+  if (bag.multipleOf !== undefined)
+    addDivisor(agg, bag.multipleOf);
+  if (bag.format !== undefined) {
+    agg.format ?? (agg.format = bag.format);
+    if (bag.format.includes("int"))
+      agg.isInt = true;
+  }
+  if (bag.mime)
+    intersectMime(agg, bag.mime);
+  for (const pattern of bag.patterns ?? [])
+    addPattern(agg, pattern);
+  return agg;
+}
+function inputOptin(schema) {
+  const def = schema._zod.def;
+  if (def.type === "pipe" && def.in._zod.traits.has("$ZodTransform")) {
+    return inputOptin(def.out);
+  }
+  if (def.type === "catch") {
+    return inputOptin(def.innerType);
+  }
+  return schema._zod.optin;
+}
+function stringifyKeyNames(bySchema, json, visited) {
+  if (json.$ref) {
+    if (visited.has(json))
+      return json;
+    visited.add(json);
+    const def = bySchema.get(json)?.def;
+    if (!def)
+      return json;
+    const inlined = stringifyKeyNames(bySchema, def, visited);
+    return inlined === def ? json : inlined;
+  }
+  for (const keyword of ["anyOf", "oneOf"]) {
+    const branches = json[keyword];
+    if (!Array.isArray(branches))
+      continue;
+    const mapped = branches.map((branch) => stringifyKeyNames(bySchema, branch, visited));
+    if (mapped.some((branch, i) => branch !== branches[i]))
+      json = { ...json, [keyword]: mapped };
+  }
+  const types = Array.isArray(json.type) ? json.type : [json.type];
+  const numericType = !types.includes("string") && types.some((t) => t === "number" || t === "integer");
+  const values = json.enum ?? (json.const !== undefined ? [json.const] : undefined);
+  if (!numericType && !values?.some((v) => typeof v === "number"))
+    return json;
+  const { minimum, maximum, exclusiveMinimum, exclusiveMaximum, multipleOf, format, id, ...rest } = json;
+  if (rest.enum)
+    rest.enum = rest.enum.map((v) => typeof v === "number" ? String(v) : v);
+  else if (typeof rest.const === "number")
+    rest.const = String(rest.const);
+  if (!numericType)
+    return rest;
+  rest.type = "string";
+  if (!values)
+    rest.pattern = (types.includes("number") ? number : integer).source;
+  return rest;
+}
+function rewriteKeyNames(ctx) {
+  const bySchema = new Map;
+  for (const entry of ctx.seen.values()) {
+    if (entry.def && !bySchema.has(entry.schema))
+      bySchema.set(entry.schema, entry);
+  }
+  const rewrites = new Map;
+  for (const record of pendingRecords.get(ctx) ?? []) {
+    const seen = ctx.seen.get(record);
+    const names = (seen?.def ?? seen?.schema)?.propertyNames;
+    if (!names || names === true || rewrites.has(names))
+      continue;
+    const rewritten = stringifyKeyNames(bySchema, names, new Set);
+    if (rewritten !== names)
+      rewrites.set(names, rewritten);
+  }
+  if (!rewrites.size)
+    return;
+  for (const entry of ctx.seen.values()) {
+    for (const carrier of [entry.schema, entry.def]) {
+      const rewritten = carrier && rewrites.get(carrier.propertyNames);
+      if (rewritten)
+        carrier.propertyNames = rewritten;
+    }
+  }
+}
+function serializeDefaultValue(value, schema, ctx, json, params) {
+  let unrepresentable = false;
+  const serialized = JSON.stringify(value, (_, val) => {
+    if (typeof val !== "bigint")
+      return val;
+    unrepresentable = true;
+    return null;
+  });
+  if (!unrepresentable)
+    return JSON.parse(serialized);
+  handleUnrepresentable(schema, ctx, json, params, "BigInt defaults cannot be represented in JSON Schema");
+  return UNREPRESENTABLE_DEFAULT;
+}
+var narrowMin = (agg, key, value) => {
+  if (agg[key] === undefined || value > agg[key])
+    agg[key] = value;
+}, narrowMax = (agg, key, value) => {
+  if (agg[key] === undefined || value < agg[key])
+    agg[key] = value;
+}, narrowBoth = (agg, value) => {
+  narrowMin(agg, "minimum", value);
+  narrowMax(agg, "maximum", value);
+}, addDivisor = (agg, value) => {
+  agg.multipleOf ?? (agg.multipleOf = []);
+  if (!agg.multipleOf.includes(value))
+    agg.multipleOf.push(value);
+}, addPattern = (agg, pattern) => {
+  agg.patterns ?? (agg.patterns = new Set);
+  agg.patterns.add(pattern);
+}, intersectMime = (agg, mime) => {
+  agg.mime = agg.mime ? agg.mime.filter((m) => mime.includes(m)) : [...mime];
+}, setFormat = (agg, format) => {
+  agg.format = format;
+  if (format.includes("int"))
+    agg.isInt = true;
+}, minContributor = (agg, def) => narrowMin(agg, "minimum", def.minimum), maxContributor = (agg, def) => narrowMax(agg, "maximum", def.maximum), formatContributor = (ranges) => (agg, def) => {
+  setFormat(agg, def.format);
+  const [minimum, maximum] = ranges[def.format];
+  narrowMin(agg, "minimum", minimum);
+  narrowMax(agg, "maximum", maximum);
+}, contributors, formatMap, exactPatterns, exactPattern = (p) => exactPatterns.get(p) ?? p, stringProcessor = (schema, ctx, _json, _params) => {
+  const json = _json;
+  json.type = "string";
+  const { minimum, maximum, format, patterns, contentEncoding, laxFormat } = aggregateChecks(schema);
+  if (typeof minimum === "number")
+    json.minLength = minimum;
+  if (typeof maximum === "number")
+    json.maxLength = maximum;
+  if (format) {
+    json.format = formatMap[format] ?? format;
+    if (json.format === "")
+      delete json.format;
+    if (format === "time" || laxFormat) {
+      delete json.format;
+    }
+  }
+  if (contentEncoding)
+    json.contentEncoding = contentEncoding;
+  if (patterns && patterns.size > 0) {
+    const patternList = [...patterns].map(exactPattern);
+    if (patternList.length === 1)
+      json.pattern = patternList[0].source;
+    else if (patternList.length > 1) {
+      json.allOf = [
+        ...patternList.map((regex) => ({
+          ...ctx.target === "draft-07" || ctx.target === "draft-04" || ctx.target === "openapi-3.0" ? { type: "string" } : {},
+          pattern: regex.source
+        }))
+      ];
+    }
+  }
+}, numberProcessor = (schema, ctx, _json, params) => {
+  const json = _json;
+  const { minimum, maximum, multipleOf, exclusiveMaximum, exclusiveMinimum, isInt } = aggregateChecks(schema);
+  json.type = isInt ? "integer" : "number";
+  const exMin = typeof exclusiveMinimum === "number" && exclusiveMinimum >= (minimum ?? Number.NEGATIVE_INFINITY);
+  const exMax = typeof exclusiveMaximum === "number" && exclusiveMaximum <= (maximum ?? Number.POSITIVE_INFINITY);
+  const legacy = ctx.target === "draft-04" || ctx.target === "openapi-3.0";
+  if (exMin) {
+    if (legacy) {
+      json.minimum = exclusiveMinimum;
+      json.exclusiveMinimum = true;
+    } else {
+      json.exclusiveMinimum = exclusiveMinimum;
+    }
+  } else if (typeof minimum === "number") {
+    json.minimum = minimum;
+  }
+  if (exMax) {
+    if (legacy) {
+      json.maximum = exclusiveMaximum;
+      json.exclusiveMaximum = true;
+    } else {
+      json.exclusiveMaximum = exclusiveMaximum;
+    }
+  } else if (typeof maximum === "number") {
+    json.maximum = maximum;
+  }
+  if (multipleOf) {
+    const divisors = new Set;
+    for (const divisor of multipleOf) {
+      if (Number.isFinite(divisor) && divisor !== 0)
+        divisors.add(Math.abs(divisor));
+      else
+        handleUnrepresentable(schema, ctx, json, params, `A multipleOf divisor of ${divisor} cannot be represented in JSON Schema`);
+    }
+    const [first, ...rest] = divisors;
+    if (first !== undefined)
+      json.multipleOf = first;
+    if (rest.length)
+      json.allOf = [...json.allOf ?? [], ...rest.map((m) => ({ multipleOf: m }))];
+  }
+}, booleanProcessor = (_schema, _ctx, json, _params) => {
+  json.type = "boolean";
+}, nullProcessor = (_schema, ctx, json, _params) => {
+  if (ctx.target === "openapi-3.0") {
+    json.type = "string";
+    json.nullable = true;
+    json.enum = [null];
+  } else {
+    json.type = "null";
+  }
+}, neverProcessor = (_schema, _ctx, json, _params) => {
+  json.not = {};
+}, unknownProcessor = (_schema, _ctx, _json, _params) => {}, enumProcessor = (schema, _ctx, json, _params) => {
+  const def = schema._zod.def;
+  const values = getEnumValues(def.entries);
+  if (values.length === 0) {
+    json.not = {};
+    return;
+  }
+  if (values.every((v) => typeof v === "number"))
+    json.type = "number";
+  if (values.every((v) => typeof v === "string"))
+    json.type = "string";
+  json.enum = values;
+}, literalProcessor = (schema, ctx, json, params) => {
+  const def = schema._zod.def;
+  if (def.values.length === 0) {
+    json.not = {};
+    return;
+  }
+  const vals = [];
+  for (const val of def.values) {
+    if (val === undefined) {
+      if (handleUnrepresentable(schema, ctx, json, params, "Literal `undefined` cannot be represented in JSON Schema"))
+        return;
+    } else if (typeof val === "bigint") {
+      if (handleUnrepresentable(schema, ctx, json, params, "BigInt literals cannot be represented in JSON Schema"))
+        return;
+      vals.push(Number(val));
+    } else {
+      vals.push(val);
+    }
+  }
+  if (vals.length === 0) {} else if (vals.length === 1) {
+    const val = vals[0];
+    json.type = val === null ? "null" : typeof val;
+    if (ctx.target === "draft-04" || ctx.target === "openapi-3.0") {
+      json.enum = [val];
+    } else {
+      json.const = val;
+    }
+  } else {
+    if (vals.every((v) => typeof v === "number"))
+      json.type = "number";
+    if (vals.every((v) => typeof v === "string"))
+      json.type = "string";
+    if (vals.every((v) => typeof v === "boolean"))
+      json.type = "boolean";
+    if (vals.every((v) => v === null))
+      json.type = "null";
+    json.enum = vals;
+  }
+}, customProcessor = (schema, ctx, json, params) => {
+  handleUnrepresentable(schema, ctx, json, params, "Custom types cannot be represented in JSON Schema");
+}, transformProcessor = (schema, ctx, json, params) => {
+  handleUnrepresentable(schema, ctx, json, params, "Transforms cannot be represented in JSON Schema");
+}, arrayProcessor = (schema, ctx, _json, params) => {
+  const json = _json;
+  const def = schema._zod.def;
+  const { minimum, maximum } = aggregateChecks(schema);
+  if (typeof minimum === "number")
+    json.minItems = minimum;
+  if (typeof maximum === "number")
+    json.maxItems = maximum;
+  json.type = "array";
+  json.items = processSchema(def.element, ctx, {
+    ...params,
+    path: [...params.path, "items"]
+  });
+}, objectProcessor = (schema, ctx, _json, params) => {
+  const json = _json;
+  const def = schema._zod.def;
+  const shape = def.shape;
+  const symbolKeys = Object.getOwnPropertySymbols(shape);
+  if (symbolKeys.length && handleUnrepresentable(schema, ctx, json, params, "Symbol keys cannot be represented in JSON Schema")) {
+    return;
+  }
+  json.type = "object";
+  json.properties = {};
+  for (const key in shape) {
+    assignProp(json.properties, key, processSchema(shape[key], ctx, {
+      ...params,
+      path: [...params.path, "properties", key]
+    }));
+  }
+  const requiredKeys = [];
+  for (const key of Object.keys(shape)) {
+    const field = def.shape[key];
+    if (ctx.io === "input" ? inputOptin(field) === undefined : field._zod.optout === undefined) {
+      requiredKeys.push(key);
+    }
+  }
+  if (requiredKeys.length > 0) {
+    json.required = requiredKeys;
+  }
+  if (def.catchall?._zod.def.type === "never") {
+    json.additionalProperties = false;
+  } else if (!def.catchall) {
+    if (ctx.io === "output")
+      json.additionalProperties = false;
+  } else if (def.catchall) {
+    json.additionalProperties = processSchema(def.catchall, ctx, {
+      ...params,
+      path: [...params.path, "additionalProperties"]
+    });
+  }
+}, unionProcessor = (schema, ctx, json, params) => {
+  const def = schema._zod.def;
+  const isExclusive = def.inclusive === false;
+  const options = def.options.map((x, i) => processSchema(x, ctx, {
+    ...params,
+    path: [...params.path, isExclusive ? "oneOf" : "anyOf", i]
+  }));
+  if (isExclusive) {
+    json.oneOf = options;
+  } else {
+    json.anyOf = options;
+  }
+}, intersectionProcessor = (schema, ctx, json, params) => {
+  const def = schema._zod.def;
+  const a = processSchema(def.left, ctx, {
+    ...params,
+    path: [...params.path, "allOf", 0]
+  });
+  const b = processSchema(def.right, ctx, {
+    ...params,
+    path: [...params.path, "allOf", 1]
+  });
+  const isSimpleIntersection = (val) => ("allOf" in val) && Object.keys(val).length === 1;
+  const allOf = [
+    ...isSimpleIntersection(a) ? a.allOf : [a],
+    ...isSimpleIntersection(b) ? b.allOf : [b]
+  ];
+  json.allOf = allOf;
+  ctx.intersections.push(allOf);
+}, pendingRecords, recordProcessor = (schema, ctx, _json, params) => {
+  const json = _json;
+  const def = schema._zod.def;
+  json.type = "object";
+  const keyType = def.keyType;
+  const patterns = aggregateChecks(keyType).patterns;
+  if (def.mode === "loose" && patterns && patterns.size > 0) {
+    const valueSchema = processSchema(def.valueType, ctx, {
+      ...params,
+      path: [...params.path, "patternProperties", "*"]
+    });
+    json.patternProperties = {};
+    for (const pattern of patterns) {
+      assignProp(json.patternProperties, exactPattern(pattern).source, valueSchema);
+    }
+  } else {
+    if (ctx.target === "draft-07" || ctx.target === "draft-2020-12") {
+      json.propertyNames = processSchema(def.keyType, ctx, {
+        ...params,
+        path: [...params.path, "propertyNames"]
+      });
+      let pending = pendingRecords.get(ctx);
+      if (!pending) {
+        pending = [];
+        pendingRecords.set(ctx, pending);
+        ctx.deferred.push(() => rewriteKeyNames(ctx));
+      }
+      pending.push(schema);
+    }
+    json.additionalProperties = processSchema(def.valueType, ctx, {
+      ...params,
+      path: [...params.path, "additionalProperties"]
+    });
+  }
+  const keyValues = keyType._zod.values;
+  const omittableOnInput = ctx.io === "input" && inputOptin(def.valueType) !== undefined;
+  if (keyValues && !def.partial && !omittableOnInput) {
+    const validKeyValues = [...keyValues].filter((v) => typeof v === "string" || typeof v === "number");
+    if (validKeyValues.length > 0) {
+      json.required = validKeyValues.map(String);
+    }
+  }
+}, nullableProcessor = (schema, ctx, json, params) => {
+  const def = schema._zod.def;
+  const inner = processSchema(def.innerType, ctx, params);
+  const seen = ctx.seen.get(schema);
+  if (ctx.target === "openapi-3.0") {
+    seen.ref = def.innerType;
+    json.nullable = true;
+  } else {
+    json.anyOf = [inner, { type: "null" }];
+  }
+}, nonoptionalProcessor = (schema, ctx, _json, params) => {
+  const def = schema._zod.def;
+  processSchema(def.innerType, ctx, params);
+  const seen = ctx.seen.get(schema);
+  seen.ref = def.innerType;
+}, UNREPRESENTABLE_DEFAULT, defaultProcessor = (schema, ctx, json, params) => {
+  const def = schema._zod.def;
+  processSchema(def.innerType, ctx, params);
+  const seen = ctx.seen.get(schema);
+  seen.ref = def.innerType;
+  const value = serializeDefaultValue(def.defaultValue, schema, ctx, json, params);
+  if (value !== UNREPRESENTABLE_DEFAULT)
+    json.default = value;
+}, prefaultProcessor = (schema, ctx, json, params) => {
+  const def = schema._zod.def;
+  processSchema(def.innerType, ctx, params);
+  const seen = ctx.seen.get(schema);
+  seen.ref = def.innerType;
+  if (ctx.io !== "input")
+    return;
+  const value = serializeDefaultValue(def.defaultValue, schema, ctx, json, params);
+  if (value !== UNREPRESENTABLE_DEFAULT)
+    json._prefault = value;
+}, catchProcessor = (schema, ctx, json, params) => {
+  const def = schema._zod.def;
+  processSchema(def.innerType, ctx, params);
+  const seen = ctx.seen.get(schema);
+  seen.ref = def.innerType;
+  let catchValue;
+  try {
+    catchValue = def.catchValue(undefined);
+  } catch {
+    handleUnrepresentable(schema, ctx, json, params, "Dynamic catch values are not supported in JSON Schema");
+    return;
+  }
+  json.default = catchValue;
+}, pipeProcessor = (schema, ctx, _json, params) => {
+  const def = schema._zod.def;
+  const inIsTransform = def.in._zod.traits.has("$ZodTransform");
+  const innerType = ctx.io === "input" ? inIsTransform ? def.out : def.in : def.out;
+  processSchema(innerType, ctx, params);
+  const seen = ctx.seen.get(schema);
+  seen.ref = innerType;
+}, readonlyProcessor = (schema, ctx, json, params) => {
+  const def = schema._zod.def;
+  processSchema(def.innerType, ctx, params);
+  const seen = ctx.seen.get(schema);
+  seen.ref = def.innerType;
+  json.readOnly = true;
+}, optionalProcessor = (schema, ctx, _json, params) => {
+  const def = schema._zod.def;
+  processSchema(def.innerType, ctx, params);
+  const seen = ctx.seen.get(schema);
+  seen.ref = def.innerType;
+};
+var init_json_schema_processors = __esm(() => {
+  init_regexes();
+  init_schemas();
+  init_to_json_schema();
+  init_util();
+  contributors = {
+    greater_than: (agg, def) => narrowMin(agg, def.inclusive ? "minimum" : "exclusiveMinimum", def.value),
+    less_than: (agg, def) => narrowMax(agg, def.inclusive ? "maximum" : "exclusiveMaximum", def.value),
+    multiple_of: (agg, def) => addDivisor(agg, def.value),
+    number_format: formatContributor(NUMBER_FORMAT_RANGES),
+    bigint_format: formatContributor(BIGINT_FORMAT_RANGES),
+    min_length: minContributor,
+    max_length: maxContributor,
+    length_equals: (agg, def) => narrowBoth(agg, def.length),
+    min_size: minContributor,
+    max_size: maxContributor,
+    size_equals: (agg, def) => narrowBoth(agg, def.size),
+    string_format: (agg, def) => {
+      setFormat(agg, def.format);
+      if (def.pattern)
+        addPattern(agg, def.pattern);
+      if (def.format === "base64" || def.format === "base64url")
+        agg.contentEncoding = def.format;
+      if (def.local || def.precision === -1)
+        agg.laxFormat = true;
+    },
+    mime_type: (agg, def) => intersectMime(agg, def.mime)
+  };
+  formatMap = {
+    guid: "uuid",
+    url: "uri",
+    datetime: "date-time",
+    json_string: "json-string",
+    regex: ""
+  };
+  exactPatterns = new Map([
+    [base64Charset, base64],
+    [base64urlCharset, base64url]
+  ]);
+  pendingRecords = new WeakMap;
+  UNREPRESENTABLE_DEFAULT = Symbol();
+});
+
+// node_modules/zod/v4/core/json-schema.js
+var init_json_schema = () => {};
+
+// node_modules/zod/v4/core/index.js
+var init_core2 = __esm(() => {
+  init_util();
+  init_regexes();
+  init_locales();
+  init_json_schema();
+  init_core();
+  init_parse();
+  init_errors();
+  init_schemas();
+  init_memoizer();
+  init_checks();
+  init_versions();
+  init_registries();
+  init_compile();
+  init_api();
+  init_to_json_schema();
+});
+
+// node_modules/zod/v4/mini/parse.js
+var init_parse2 = __esm(() => {
+  init_core2();
+});
+
+// node_modules/zod/v4/mini/schemas.js
+var init_schemas2 = () => {};
+
+// node_modules/zod/v4/mini/checks.js
+var init_checks2 = () => {};
+
+// node_modules/zod/v4/mini/iso.js
+var init_iso = () => {};
+
+// node_modules/zod/v4/mini/coerce.js
+var init_coerce = () => {};
+
+// node_modules/zod/v4/mini/external.js
+var init_external = __esm(() => {
+  init_core2();
+  init_locales();
+  init_iso();
+  init_coerce();
+  init_parse2();
+  init_schemas2();
+  init_checks2();
+});
+
+// node_modules/zod/v4-mini/index.js
+var init_v4_mini = __esm(() => {
+  init_external();
+});
+
+// node_modules/@modelcontextprotocol/sdk/dist/esm/server/zod-compat.js
+function isZ4Schema(s) {
+  const schema = s;
+  return !!schema._zod;
+}
+function safeParse2(schema, data) {
+  if (isZ4Schema(schema)) {
+    const result = safeParse(schema, data);
+    return result;
+  }
+  const v3Schema = schema;
+  const result = v3Schema.safeParse(data);
+  return result;
+}
+function getObjectShape(schema) {
+  if (!schema)
+    return;
+  let rawShape;
+  if (isZ4Schema(schema)) {
+    const v4Schema = schema;
+    rawShape = v4Schema._zod?.def?.shape;
+  } else {
+    const v3Schema = schema;
+    rawShape = v3Schema.shape;
+  }
+  if (!rawShape)
+    return;
+  if (typeof rawShape === "function") {
+    try {
+      return rawShape();
+    } catch {
+      return;
+    }
+  }
+  return rawShape;
+}
+function getLiteralValue(schema) {
+  if (isZ4Schema(schema)) {
+    const v4Schema = schema;
+    const def = v4Schema._zod?.def;
+    if (def) {
+      if (def.value !== undefined)
+        return def.value;
+      if (Array.isArray(def.values) && def.values.length > 0) {
+        return def.values[0];
+      }
+    }
+  }
+  const v3Schema = schema;
+  const def = v3Schema._def;
+  if (def) {
+    if (def.value !== undefined)
+      return def.value;
+    if (Array.isArray(def.values) && def.values.length > 0) {
+      return def.values[0];
+    }
+  }
+  const directValue = schema.value;
+  if (directValue !== undefined)
+    return directValue;
+  return;
+}
+var init_zod_compat = __esm(() => {
+  init_v4_mini();
+});
+
+// node_modules/zod/v4/classic/checks.js
+var init_checks3 = __esm(() => {
+  init_core2();
+});
+
+// node_modules/zod/v4/classic/errors.js
+function _lazyMethod(proto, key, make) {
+  Object.defineProperty(proto, key, {
+    configurable: true,
+    enumerable: false,
+    get() {
+      const value = make(this);
+      Object.defineProperty(this, key, { value, configurable: true, writable: true });
+      return value;
+    },
+    set(value) {
+      Object.defineProperty(this, key, { value, configurable: true, writable: true });
+    }
+  });
+}
+var _installedErrorProtos, initializer2 = (inst, issues) => {
+  $ZodError.init(inst, issues);
+  inst.name = "ZodError";
+  const proto = Object.getPrototypeOf(inst);
+  if (_installedErrorProtos.has(proto))
+    return;
+  _installedErrorProtos.add(proto);
+  _lazyMethod(proto, "format", (self) => (mapper) => formatError(self, mapper));
+  _lazyMethod(proto, "flatten", (self) => (mapper) => flattenError(self, mapper));
+  _lazyMethod(proto, "addIssue", (self) => (issue) => {
+    self.issues.push(issue);
+    self.message = JSON.stringify(self.issues, jsonStringifyReplacer, 2);
+  });
+  _lazyMethod(proto, "addIssues", (self) => (issues) => {
+    self.issues.push(...issues);
+    self.message = JSON.stringify(self.issues, jsonStringifyReplacer, 2);
+  });
+  Object.defineProperty(proto, "isEmpty", {
+    configurable: true,
+    enumerable: false,
+    get() {
+      return this.issues.length === 0;
+    }
+  });
+}, ZodRealError;
+var init_errors2 = __esm(() => {
+  init_core2();
+  init_core2();
+  init_util();
+  _installedErrorProtos = /* @__PURE__ */ new WeakSet([Object.prototype, Error.prototype]);
+  ZodRealError = /* @__PURE__ */ $constructor("ZodError", initializer2, undefined, {
+    Parent: Error
+  });
+});
+
+// node_modules/zod/v4/classic/parse.js
+var parse4, parseAsync2, safeParse3, safeParseAsync2, encode2, decode2, encodeAsync2, decodeAsync2, safeEncode2, safeDecode2, safeEncodeAsync2, safeDecodeAsync2;
+var init_parse3 = __esm(() => {
+  init_core2();
+  init_errors2();
+  init_core2();
+  parse4 = /* @__PURE__ */ _parse(ZodRealError);
+  parseAsync2 = /* @__PURE__ */ _parseAsync(ZodRealError);
+  safeParse3 = /* @__PURE__ */ _safeParse(ZodRealError);
+  safeParseAsync2 = /* @__PURE__ */ _safeParseAsync(ZodRealError);
+  encode2 = /* @__PURE__ */ _encode(ZodRealError);
+  decode2 = /* @__PURE__ */ _decode(ZodRealError);
+  encodeAsync2 = /* @__PURE__ */ _encodeAsync(ZodRealError);
+  decodeAsync2 = /* @__PURE__ */ _decodeAsync(ZodRealError);
+  safeEncode2 = /* @__PURE__ */ _safeEncode(ZodRealError);
+  safeDecode2 = /* @__PURE__ */ _safeDecode(ZodRealError);
+  safeEncodeAsync2 = /* @__PURE__ */ _safeEncodeAsync(ZodRealError);
+  safeDecodeAsync2 = /* @__PURE__ */ _safeDecodeAsync(ZodRealError);
+});
+
+// node_modules/zod/v4/classic/schemas.js
+function _ensureDefaultLocale() {
+  if (!globalConfig.localeError)
+    config(en_default());
+}
+function _ensureDefaultMemoizer() {
+  if (!globalConfig.memoizer)
+    config({ memoizer: memoizer() });
+}
+function string2(params) {
+  return _string(ZodString, params);
+}
+function number2(params) {
+  return _number(ZodNumber, params);
+}
+function int(params) {
+  return _int(ZodNumberFormat, params);
+}
+function boolean2(params) {
+  return _boolean(ZodBoolean, params);
+}
+function _null3(params) {
+  return _null2(ZodNull, params);
+}
+function unknown() {
+  return _unknown(ZodUnknown);
+}
+function never(params) {
+  return _never(ZodNever, params);
+}
+function array(element, params) {
+  return _array(ZodArray, element, params);
+}
+function object2(shape, params) {
+  const def = {
+    type: "object",
+    shape: shape ?? {},
+    ...normalizeParams(params)
+  };
+  return new ZodObject(def);
+}
+function looseObject(shape, params) {
+  return new ZodObject({
+    type: "object",
+    shape,
+    catchall: unknown(),
+    ...normalizeParams(params)
+  });
+}
+function union(options, params) {
+  return new ZodUnion({
+    type: "union",
+    options,
+    ...normalizeParams(params)
+  });
+}
+function discriminatedUnion(discriminator, options, params) {
+  return new ZodDiscriminatedUnion({
+    type: "union",
+    options,
+    discriminator,
+    ...normalizeParams(params)
+  });
+}
+function intersection(left, right) {
+  return new ZodIntersection({
+    type: "intersection",
+    left,
+    right
+  });
+}
+function record(keyType, valueType, params) {
+  if (!valueType || !valueType._zod) {
+    return new ZodRecord({
+      type: "record",
+      keyType: string2(),
+      valueType: keyType,
+      ...normalizeParams(valueType)
+    });
+  }
+  return new ZodRecord({
+    type: "record",
+    keyType,
+    valueType,
+    ...normalizeParams(params)
+  });
+}
+function _enum(values, params) {
+  const entries = Array.isArray(values) ? Object.fromEntries(values.map((v) => [v, v])) : values;
+  return new ZodEnum({
+    type: "enum",
+    entries,
+    ...normalizeParams(params)
+  });
+}
+function literal(value, params) {
+  return new ZodLiteral({
+    type: "literal",
+    values: Array.isArray(value) ? value : [value],
+    ...normalizeParams(params)
+  });
+}
+function transform(fn) {
+  return new ZodTransform({
+    type: "transform",
+    transform: fn
+  });
+}
+function optional(innerType) {
+  return new ZodOptional({
+    type: "optional",
+    innerType
+  });
+}
+function exactOptional(innerType) {
+  return new ZodExactOptional({
+    type: "optional",
+    innerType
+  });
+}
+function nullable(innerType) {
+  return new ZodNullable({
+    type: "nullable",
+    innerType
+  });
+}
+function _default(innerType, defaultValue) {
+  return new ZodDefault({
+    type: "default",
+    innerType,
+    get defaultValue() {
+      return typeof defaultValue === "function" ? defaultValue() : shallowClone(defaultValue);
+    }
+  });
+}
+function prefault(innerType, defaultValue) {
+  return new ZodPrefault({
+    type: "prefault",
+    innerType,
+    get defaultValue() {
+      return typeof defaultValue === "function" ? defaultValue() : shallowClone(defaultValue);
+    }
+  });
+}
+function nonoptional(innerType, params) {
+  return new ZodNonOptional({
+    type: "nonoptional",
+    innerType,
+    ...normalizeParams(params)
+  });
+}
+function _catch(innerType, catchValue) {
+  return new ZodCatch({
+    type: "catch",
+    innerType,
+    catchValue: typeof catchValue === "function" ? catchValue : constantCatch(catchValue)
+  });
+}
+function pipe(in_, out) {
+  return new ZodPipe({
+    type: "pipe",
+    in: in_,
+    out
+  });
+}
+function readonly(innerType) {
+  return new ZodReadonly({
+    type: "readonly",
+    innerType
+  });
+}
+function custom(fn, _params) {
+  return _custom(ZodCustom, fn ?? (() => true), _params);
+}
+function refine(fn, _params = {}) {
+  return _refine(ZodCustom, fn, _params);
+}
+function superRefine(fn, params) {
+  return _superRefine(fn, params);
+}
+function preprocess(fn, schema) {
+  return new ZodPreprocess({
+    type: "pipe",
+    in: transform(fn),
+    out: schema
+  });
+}
+var ZodType, _ZodString, ZodString, ZodStringFormat, ZodISODateTime, ZodISODate, ZodISOTime, ZodISODuration, ZodEmail, ZodGUID, ZodUUID, ZodURL, ZodEmoji, ZodNanoID, ZodCUID, ZodCUID2, ZodULID, ZodXID, ZodKSUID, ZodIPv4, ZodIPv6, ZodCIDRv4, ZodCIDRv6, ZodBase64, ZodBase64URL, ZodE164, ZodJWT, ZodNumber, ZodNumberFormat, ZodBoolean, ZodNull, ZodUnknown, ZodNever, ZodArray, ZodObject, ZodUnion, ZodDiscriminatedUnion, ZodIntersection, ZodRecord, ZodEnum, ZodLiteral, ZodTransform, ZodOptional, ZodExactOptional, ZodNullable, ZodDefault, ZodPrefault, ZodNonOptional, ZodCatch, ZodPipe, ZodPreprocess, ZodReadonly, ZodCustom;
+var init_schemas3 = __esm(() => {
+  init_core2();
+  init_core2();
+  init_json_schema_processors();
+  init_to_json_schema();
+  init_en();
+  init_checks3();
+  init_parse3();
+  ZodType = /* @__PURE__ */ $constructor("ZodType", (inst, def) => {
+    _ensureDefaultLocale();
+    $ZodType.init(inst, def);
+    inst.def = def;
+    inst.type = def.type;
+    return inst;
+  }, {
+    check(...chks) {
+      const def = this.def;
+      return this.clone(mergeDefs(def, {
+        checks: [
+          ...def.checks ?? [],
+          ...chks.map((ch) => typeof ch === "function" ? { _zod: { check: ch, def: { check: "custom" }, onattach: [] } } : ch)
+        ]
+      }), { parent: true });
+    },
+    with(...chks) {
+      return this.check(...chks);
+    },
+    clone(def, params) {
+      return clone(this, def, params);
+    },
+    brand() {
+      return this;
+    },
+    register(reg, meta) {
+      reg.add(this, meta);
+      return this;
+    },
+    refine(check, params) {
+      return this.check(refine(check, params));
+    },
+    superRefine(refinement, params) {
+      return this.check(superRefine(refinement, params));
+    },
+    overwrite(fn) {
+      return this.check(_overwrite(fn));
+    },
+    optional() {
+      return optional(this);
+    },
+    exactOptional() {
+      return exactOptional(this);
+    },
+    nullable() {
+      return nullable(this);
+    },
+    nullish() {
+      return optional(nullable(this));
+    },
+    nonoptional(params) {
+      return nonoptional(this, params);
+    },
+    array() {
+      return array(this);
+    },
+    or(arg) {
+      return union([this, arg]);
+    },
+    and(arg) {
+      return intersection(this, arg);
+    },
+    transform(tx) {
+      return pipe(this, transform(tx));
+    },
+    default(d) {
+      return _default(this, d);
+    },
+    prefault(d) {
+      return prefault(this, d);
+    },
+    catch(params) {
+      return _catch(this, params);
+    },
+    pipe(target) {
+      return pipe(this, target);
+    },
+    readonly() {
+      return readonly(this);
+    },
+    describe(description) {
+      const cl = this.clone();
+      globalRegistry.add(cl, { description });
+      return cl;
+    },
+    meta(...args) {
+      if (args.length === 0)
+        return globalRegistry.get(this);
+      const cl = this.clone();
+      globalRegistry.add(cl, args[0]);
+      return cl;
+    },
+    isOptional() {
+      return this.safeParse(undefined).success;
+    },
+    isNullable() {
+      return this.safeParse(null).success;
+    },
+    apply(fn, ...args) {
+      return args.length === 0 ? fn(this) : fn(this, ...args);
+    },
+    get "~standard"() {
+      return hide(this, "~standard", {
+        ...standardProps(this),
+        jsonSchema: {
+          input: createStandardJSONSchemaMethod(this, "input"),
+          output: createStandardJSONSchemaMethod(this, "output")
+        }
+      });
+    },
+    set "~standard"(value) {
+      own(this, "~standard", value);
+    },
+    parse: function _parse(data, params) {
+      return parse4(this, data, params, { callee: _parse });
+    },
+    parseAsync: async function _parseAsync(data, params) {
+      return await parseAsync2(this, data, params, { callee: _parseAsync });
+    },
+    safeParse(data, params) {
+      return safeParse3(this, data, params);
+    },
+    async safeParseAsync(data, params) {
+      return safeParseAsync2(this, data, params);
+    },
+    get spa() {
+      return this?.safeParseAsync;
+    },
+    set spa(value) {
+      own(this, "spa", value);
+    },
+    validate(data, params) {
+      return validate(this, data, params);
+    },
+    validateAsync(data, params) {
+      return validateAsync(this, data, params);
+    },
+    encode: function _encode(data, params) {
+      return encode2(this, data, params, { callee: _encode });
+    },
+    decode: function _decode(data, params) {
+      return decode2(this, data, params, { callee: _decode });
+    },
+    encodeAsync: async function _encodeAsync(data, params) {
+      return await encodeAsync2(this, data, params, { callee: _encodeAsync });
+    },
+    decodeAsync: async function _decodeAsync(data, params) {
+      return await decodeAsync2(this, data, params, { callee: _decodeAsync });
+    },
+    safeEncode(data, params) {
+      return safeEncode2(this, data, params);
+    },
+    safeDecode(data, params) {
+      return safeDecode2(this, data, params);
+    },
+    async safeEncodeAsync(data, params) {
+      return safeEncodeAsync2(this, data, params);
+    },
+    async safeDecodeAsync(data, params) {
+      return safeDecodeAsync2(this, data, params);
+    },
+    toJSONSchema(params) {
+      return createToJSONSchemaMethod(this, {})(params);
+    },
+    get description() {
+      return globalRegistry.get(this)?.description;
+    },
+    get _def() {
+      return this._zod.def;
+    }
+  });
+  _ZodString = /* @__PURE__ */ $constructor("_ZodString", (inst, def) => {
+    $ZodString.init(inst, def);
+    ZodType.init(inst, def);
+    inst._zod.processJSONSchema = (ctx, json, params) => stringProcessor(inst, ctx, json, params);
+  }, /* @__PURE__ */ derived({
+    format: (inst) => aggregateChecks(inst).format ?? null,
+    minLength: (inst) => aggregateChecks(inst).minimum ?? null,
+    maxLength: (inst) => aggregateChecks(inst).maximum ?? null
+  }, {
+    regex(...args) {
+      return this.check(_regex(...args));
+    },
+    includes(...args) {
+      return this.check(_includes(...args));
+    },
+    startsWith(...args) {
+      return this.check(_startsWith(...args));
+    },
+    endsWith(...args) {
+      return this.check(_endsWith(...args));
+    },
+    min(...args) {
+      return this.check(_minLength(...args));
+    },
+    max(...args) {
+      return this.check(_maxLength(...args));
+    },
+    length(...args) {
+      return this.check(_length(...args));
+    },
+    nonempty(...args) {
+      return this.check(_minLength(1, ...args));
+    },
+    lowercase(params) {
+      return this.check(_lowercase(params));
+    },
+    uppercase(params) {
+      return this.check(_uppercase(params));
+    },
+    trim() {
+      return this.check(_trim());
+    },
+    normalize(...args) {
+      return this.check(_normalize(...args));
+    },
+    toLowerCase() {
+      return this.check(_toLowerCase());
+    },
+    toUpperCase() {
+      return this.check(_toUpperCase());
+    },
+    slugify() {
+      return this.check(_slugify());
+    }
+  }));
+  ZodString = /* @__PURE__ */ $constructor("ZodString", (inst, def) => {
+    $ZodString.init(inst, def);
+    _ZodString.init(inst, def);
+  }, {
+    email(params) {
+      return this.check(_email(ZodEmail, params));
+    },
+    url(params) {
+      return this.check(_url(ZodURL, params));
+    },
+    jwt(params) {
+      return this.check(_jwt(ZodJWT, params));
+    },
+    emoji(params) {
+      return this.check(_emoji2(ZodEmoji, params));
+    },
+    guid(params) {
+      return this.check(_guid(ZodGUID, params));
+    },
+    uuid(params) {
+      return this.check(_uuid(ZodUUID, params));
+    },
+    uuidv4(params) {
+      return this.check(_uuidv4(ZodUUID, params));
+    },
+    uuidv6(params) {
+      return this.check(_uuidv6(ZodUUID, params));
+    },
+    uuidv7(params) {
+      return this.check(_uuidv7(ZodUUID, params));
+    },
+    nanoid(params) {
+      return this.check(_nanoid(ZodNanoID, params));
+    },
+    cuid(params) {
+      return this.check(_cuid(ZodCUID, params));
+    },
+    cuid2(params) {
+      return this.check(_cuid2(ZodCUID2, params));
+    },
+    ulid(params) {
+      return this.check(_ulid(ZodULID, params));
+    },
+    base64(params) {
+      return this.check(_base64(ZodBase64, params));
+    },
+    base64url(params) {
+      return this.check(_base64url(ZodBase64URL, params));
+    },
+    xid(params) {
+      return this.check(_xid(ZodXID, params));
+    },
+    ksuid(params) {
+      return this.check(_ksuid(ZodKSUID, params));
+    },
+    ipv4(params) {
+      return this.check(_ipv4(ZodIPv4, params));
+    },
+    ipv6(params) {
+      return this.check(_ipv6(ZodIPv6, params));
+    },
+    cidrv4(params) {
+      return this.check(_cidrv4(ZodCIDRv4, params));
+    },
+    cidrv6(params) {
+      return this.check(_cidrv6(ZodCIDRv6, params));
+    },
+    e164(params) {
+      return this.check(_e164(ZodE164, params));
+    },
+    datetime(params) {
+      return this.check(_isoDateTime(ZodISODateTime, params));
+    },
+    date(params) {
+      return this.check(_isoDate(ZodISODate, params));
+    },
+    time(params) {
+      return this.check(_isoTime(ZodISOTime, params));
+    },
+    duration(params) {
+      return this.check(_isoDuration(ZodISODuration, params));
+    }
+  });
+  ZodStringFormat = /* @__PURE__ */ $constructor("ZodStringFormat", (inst, def) => {
+    $ZodStringFormat.init(inst, def);
+    _ZodString.init(inst, def);
+  });
+  ZodISODateTime = /* @__PURE__ */ $constructor("ZodISODateTime", (inst, def) => {
+    $ZodISODateTime.init(inst, def);
+    ZodStringFormat.init(inst, def);
+  });
+  ZodISODate = /* @__PURE__ */ $constructor("ZodISODate", (inst, def) => {
+    $ZodISODate.init(inst, def);
+    ZodStringFormat.init(inst, def);
+  });
+  ZodISOTime = /* @__PURE__ */ $constructor("ZodISOTime", (inst, def) => {
+    $ZodISOTime.init(inst, def);
+    ZodStringFormat.init(inst, def);
+  });
+  ZodISODuration = /* @__PURE__ */ $constructor("ZodISODuration", (inst, def) => {
+    $ZodISODuration.init(inst, def);
+    ZodStringFormat.init(inst, def);
+  });
+  ZodEmail = /* @__PURE__ */ $constructor("ZodEmail", (inst, def) => {
+    $ZodEmail.init(inst, def);
+    ZodStringFormat.init(inst, def);
+  });
+  ZodGUID = /* @__PURE__ */ $constructor("ZodGUID", (inst, def) => {
+    $ZodGUID.init(inst, def);
+    ZodStringFormat.init(inst, def);
+  });
+  ZodUUID = /* @__PURE__ */ $constructor("ZodUUID", (inst, def) => {
+    $ZodUUID.init(inst, def);
+    ZodStringFormat.init(inst, def);
+  });
+  ZodURL = /* @__PURE__ */ $constructor("ZodURL", (inst, def) => {
+    $ZodURL.init(inst, def);
+    ZodStringFormat.init(inst, def);
+  });
+  ZodEmoji = /* @__PURE__ */ $constructor("ZodEmoji", (inst, def) => {
+    $ZodEmoji.init(inst, def);
+    ZodStringFormat.init(inst, def);
+  });
+  ZodNanoID = /* @__PURE__ */ $constructor("ZodNanoID", (inst, def) => {
+    $ZodNanoID.init(inst, def);
+    ZodStringFormat.init(inst, def);
+  });
+  ZodCUID = /* @__PURE__ */ $constructor("ZodCUID", (inst, def) => {
+    $ZodCUID.init(inst, def);
+    ZodStringFormat.init(inst, def);
+  });
+  ZodCUID2 = /* @__PURE__ */ $constructor("ZodCUID2", (inst, def) => {
+    $ZodCUID2.init(inst, def);
+    ZodStringFormat.init(inst, def);
+  });
+  ZodULID = /* @__PURE__ */ $constructor("ZodULID", (inst, def) => {
+    $ZodULID.init(inst, def);
+    ZodStringFormat.init(inst, def);
+  });
+  ZodXID = /* @__PURE__ */ $constructor("ZodXID", (inst, def) => {
+    $ZodXID.init(inst, def);
+    ZodStringFormat.init(inst, def);
+  });
+  ZodKSUID = /* @__PURE__ */ $constructor("ZodKSUID", (inst, def) => {
+    $ZodKSUID.init(inst, def);
+    ZodStringFormat.init(inst, def);
+  });
+  ZodIPv4 = /* @__PURE__ */ $constructor("ZodIPv4", (inst, def) => {
+    $ZodIPv4.init(inst, def);
+    ZodStringFormat.init(inst, def);
+  });
+  ZodIPv6 = /* @__PURE__ */ $constructor("ZodIPv6", (inst, def) => {
+    $ZodIPv6.init(inst, def);
+    ZodStringFormat.init(inst, def);
+  });
+  ZodCIDRv4 = /* @__PURE__ */ $constructor("ZodCIDRv4", (inst, def) => {
+    $ZodCIDRv4.init(inst, def);
+    ZodStringFormat.init(inst, def);
+  });
+  ZodCIDRv6 = /* @__PURE__ */ $constructor("ZodCIDRv6", (inst, def) => {
+    $ZodCIDRv6.init(inst, def);
+    ZodStringFormat.init(inst, def);
+  });
+  ZodBase64 = /* @__PURE__ */ $constructor("ZodBase64", (inst, def) => {
+    $ZodBase64.init(inst, def);
+    ZodStringFormat.init(inst, def);
+  });
+  ZodBase64URL = /* @__PURE__ */ $constructor("ZodBase64URL", (inst, def) => {
+    $ZodBase64URL.init(inst, def);
+    ZodStringFormat.init(inst, def);
+  });
+  ZodE164 = /* @__PURE__ */ $constructor("ZodE164", (inst, def) => {
+    $ZodE164.init(inst, def);
+    ZodStringFormat.init(inst, def);
+  });
+  ZodJWT = /* @__PURE__ */ $constructor("ZodJWT", (inst, def) => {
+    $ZodJWT.init(inst, def);
+    ZodStringFormat.init(inst, def);
+  });
+  ZodNumber = /* @__PURE__ */ $constructor("ZodNumber", (inst, def) => {
+    $ZodNumber.init(inst, def);
+    ZodType.init(inst, def);
+    inst._zod.processJSONSchema = (ctx, json, params) => numberProcessor(inst, ctx, json, params);
+    inst.isFinite = true;
+  }, /* @__PURE__ */ derived({
+    minValue: (inst) => {
+      const { minimum, exclusiveMinimum } = aggregateChecks(inst);
+      return Math.max(minimum ?? Number.NEGATIVE_INFINITY, exclusiveMinimum ?? Number.NEGATIVE_INFINITY);
+    },
+    maxValue: (inst) => {
+      const { maximum, exclusiveMaximum } = aggregateChecks(inst);
+      return Math.min(maximum ?? Number.POSITIVE_INFINITY, exclusiveMaximum ?? Number.POSITIVE_INFINITY);
+    },
+    isInt: (inst) => {
+      const { isInt, multipleOf } = aggregateChecks(inst);
+      return !!isInt || !!multipleOf?.some(Number.isSafeInteger);
+    },
+    format: (inst) => aggregateChecks(inst).format ?? null
+  }, {
+    gt(value, params) {
+      return this.check(_gt(value, params));
+    },
+    gte(value, params) {
+      return this.check(_gte(value, params));
+    },
+    min(value, params) {
+      return this.check(_gte(value, params));
+    },
+    lt(value, params) {
+      return this.check(_lt(value, params));
+    },
+    lte(value, params) {
+      return this.check(_lte(value, params));
+    },
+    max(value, params) {
+      return this.check(_lte(value, params));
+    },
+    int(params) {
+      return this.check(int(params));
+    },
+    safe(params) {
+      return this.check(int(params));
+    },
+    positive(params) {
+      return this.check(_gt(0, params));
+    },
+    nonnegative(params) {
+      return this.check(_gte(0, params));
+    },
+    negative(params) {
+      return this.check(_lt(0, params));
+    },
+    nonpositive(params) {
+      return this.check(_lte(0, params));
+    },
+    multipleOf(value, params) {
+      return this.check(_multipleOf(value, params));
+    },
+    step(value, params) {
+      return this.check(_multipleOf(value, params));
+    },
+    finite() {
+      return this;
+    }
+  }));
+  ZodNumberFormat = /* @__PURE__ */ $constructor("ZodNumberFormat", (inst, def) => {
+    $ZodNumberFormat.init(inst, def);
+    ZodNumber.init(inst, def);
+  });
+  ZodBoolean = /* @__PURE__ */ $constructor("ZodBoolean", (inst, def) => {
+    $ZodBoolean.init(inst, def);
+    ZodType.init(inst, def);
+    inst._zod.processJSONSchema = (ctx, json, params) => booleanProcessor(inst, ctx, json, params);
+  });
+  ZodNull = /* @__PURE__ */ $constructor("ZodNull", (inst, def) => {
+    $ZodNull.init(inst, def);
+    ZodType.init(inst, def);
+    inst._zod.processJSONSchema = (ctx, json, params) => nullProcessor(inst, ctx, json, params);
+  });
+  ZodUnknown = /* @__PURE__ */ $constructor("ZodUnknown", (inst, def) => {
+    $ZodUnknown.init(inst, def);
+    ZodType.init(inst, def);
+    inst._zod.processJSONSchema = (ctx, json, params) => unknownProcessor(inst, ctx, json, params);
+  });
+  ZodNever = /* @__PURE__ */ $constructor("ZodNever", (inst, def) => {
+    $ZodNever.init(inst, def);
+    ZodType.init(inst, def);
+    inst._zod.processJSONSchema = (ctx, json, params) => neverProcessor(inst, ctx, json, params);
+  });
+  ZodArray = /* @__PURE__ */ $constructor("ZodArray", (inst, def) => {
+    _ensureDefaultMemoizer();
+    $ZodArray.init(inst, def);
+    ZodType.init(inst, def);
+    inst._zod.processJSONSchema = (ctx, json, params) => arrayProcessor(inst, ctx, json, params);
+    inst.element = def.element;
+  }, {
+    min(n, params) {
+      return this.check(_minLength(n, params));
+    },
+    nonempty(params) {
+      return this.check(_minLength(1, params));
+    },
+    max(n, params) {
+      return this.check(_maxLength(n, params));
+    },
+    length(n, params) {
+      return this.check(_length(n, params));
+    },
+    unwrap() {
+      return this.element;
+    }
+  });
+  ZodObject = /* @__PURE__ */ $constructor("ZodObject", (inst, def) => {
+    _ensureDefaultMemoizer();
+    $ZodObjectJIT.init(inst, def);
+    ZodType.init(inst, def);
+    inst._zod.processJSONSchema = (ctx, json, params) => objectProcessor(inst, ctx, json, params);
+    installLazyProp(inst, "shape", (self) => self._zod.def.shape, false);
+  }, {
+    keyof() {
+      return _enum(Object.keys(this._zod.def.shape));
+    },
+    catchall(catchall) {
+      return this.clone(mergeDefs(this._zod.def, { catchall }));
+    },
+    passthrough() {
+      return this.clone(mergeDefs(this._zod.def, { catchall: unknown() }));
+    },
+    loose() {
+      return this.clone(mergeDefs(this._zod.def, { catchall: unknown() }));
+    },
+    strict() {
+      return this.clone(mergeDefs(this._zod.def, { catchall: never() }));
+    },
+    strip() {
+      return this.clone(mergeDefs(this._zod.def, { catchall: undefined }));
+    },
+    extend(incoming) {
+      return extend(this, incoming);
+    },
+    safeExtend(incoming) {
+      return safeExtend(this, incoming);
+    },
+    merge(other) {
+      return merge(this, other);
+    },
+    pick(mask) {
+      return pick(this, mask);
+    },
+    omit(mask) {
+      return omit(this, mask);
+    },
+    partial(...args) {
+      return partial(ZodOptional, this, args[0]);
+    },
+    exactPartial(...args) {
+      return partial(ZodExactOptional, this, args[0], "exactPartial");
+    },
+    required(...args) {
+      return required(ZodNonOptional, this, args[0]);
+    }
+  });
+  ZodUnion = /* @__PURE__ */ $constructor("ZodUnion", (inst, def) => {
+    $ZodUnion.init(inst, def);
+    ZodType.init(inst, def);
+    inst._zod.processJSONSchema = (ctx, json, params) => unionProcessor(inst, ctx, json, params);
+    inst.options = def.options;
+  });
+  ZodDiscriminatedUnion = /* @__PURE__ */ $constructor("ZodDiscriminatedUnion", (inst, def) => {
+    ZodUnion.init(inst, def);
+    $ZodDiscriminatedUnion.init(inst, def);
+  });
+  ZodIntersection = /* @__PURE__ */ $constructor("ZodIntersection", (inst, def) => {
+    $ZodIntersection.init(inst, def);
+    ZodType.init(inst, def);
+    inst._zod.processJSONSchema = (ctx, json, params) => intersectionProcessor(inst, ctx, json, params);
+  });
+  ZodRecord = /* @__PURE__ */ $constructor("ZodRecord", (inst, def) => {
+    _ensureDefaultMemoizer();
+    $ZodRecord.init(inst, def);
+    ZodType.init(inst, def);
+    inst._zod.processJSONSchema = (ctx, json, params) => recordProcessor(inst, ctx, json, params);
+    inst.keyType = def.keyType;
+    inst.valueType = def.valueType;
+  });
+  ZodEnum = /* @__PURE__ */ $constructor("ZodEnum", (inst, def) => {
+    $ZodEnum.init(inst, def);
+    ZodType.init(inst, def);
+    inst._zod.processJSONSchema = (ctx, json, params) => enumProcessor(inst, ctx, json, params);
+    inst.enum = def.entries;
+    inst.options = [...inst._zod.values];
+    const keys = new Set(Object.keys(def.entries));
+    inst.extract = (values, params) => {
+      const newEntries = {};
+      for (const value of values) {
+        if (keys.has(value)) {
+          newEntries[value] = def.entries[value];
+        } else
+          throw new Error(`Key ${value} not found in enum`);
+      }
+      return new ZodEnum({
+        ...def,
+        checks: [],
+        ...normalizeParams(params),
+        entries: newEntries
+      });
+    };
+    inst.exclude = (values, params) => {
+      const newEntries = { ...def.entries };
+      for (const value of values) {
+        if (keys.has(value)) {
+          delete newEntries[value];
+        } else
+          throw new Error(`Key ${value} not found in enum`);
+      }
+      return new ZodEnum({
+        ...def,
+        checks: [],
+        ...normalizeParams(params),
+        entries: newEntries
+      });
+    };
+  });
+  ZodLiteral = /* @__PURE__ */ $constructor("ZodLiteral", (inst, def) => {
+    $ZodLiteral.init(inst, def);
+    ZodType.init(inst, def);
+    inst._zod.processJSONSchema = (ctx, json, params) => literalProcessor(inst, ctx, json, params);
+    inst.values = new Set(def.values);
+    Object.defineProperty(inst, "value", {
+      get() {
+        if (def.values.length > 1) {
+          throw new Error("This schema contains multiple valid literal values. Use `.values` instead.");
+        }
+        return def.values[0];
+      }
+    });
+  });
+  ZodTransform = /* @__PURE__ */ $constructor("ZodTransform", (inst, def) => {
+    _ensureDefaultMemoizer();
+    $ZodTransform.init(inst, def);
+    ZodType.init(inst, def);
+    inst._zod.processJSONSchema = (ctx, json, params) => transformProcessor(inst, ctx, json, params);
+    inst._zod.parse = (payload, _ctx) => {
+      if (_ctx.direction === "backward") {
+        throw new $ZodEncodeError(inst.constructor.name);
+      }
+      payload.addIssue = (issue2) => {
+        if (typeof issue2 === "string") {
+          payload.issues.push(issue(issue2, payload.value, def));
+        } else {
+          const _issue = issue2;
+          if (_issue.fatal)
+            _issue.continue = false;
+          _issue.code ?? (_issue.code = "custom");
+          if (!("input" in _issue))
+            _issue.input = payload.value;
+          _issue.inst ?? (_issue.inst = inst);
+          payload.issues.push(issue(_issue));
+        }
+      };
+      const output = def.transform(payload.value, payload);
+      if (output instanceof Promise) {
+        return output.then((output) => {
+          payload.value = output;
+          return payload;
+        });
+      }
+      payload.value = output;
+      return payload;
+    };
+  });
+  ZodOptional = /* @__PURE__ */ $constructor("ZodOptional", (inst, def) => {
+    $ZodOptional.init(inst, def);
+    ZodType.init(inst, def);
+    inst._zod.processJSONSchema = (ctx, json, params) => optionalProcessor(inst, ctx, json, params);
+    inst.unwrap = () => inst._zod.def.innerType;
+  });
+  ZodExactOptional = /* @__PURE__ */ $constructor("ZodExactOptional", (inst, def) => {
+    $ZodExactOptional.init(inst, def);
+    ZodType.init(inst, def);
+    inst._zod.processJSONSchema = (ctx, json, params) => optionalProcessor(inst, ctx, json, params);
+    inst.unwrap = () => inst._zod.def.innerType;
+  });
+  ZodNullable = /* @__PURE__ */ $constructor("ZodNullable", (inst, def) => {
+    $ZodNullable.init(inst, def);
+    ZodType.init(inst, def);
+    inst._zod.processJSONSchema = (ctx, json, params) => nullableProcessor(inst, ctx, json, params);
+    inst.unwrap = () => inst._zod.def.innerType;
+  });
+  ZodDefault = /* @__PURE__ */ $constructor("ZodDefault", (inst, def) => {
+    $ZodDefault.init(inst, def);
+    ZodType.init(inst, def);
+    inst._zod.processJSONSchema = (ctx, json, params) => defaultProcessor(inst, ctx, json, params);
+    inst.unwrap = () => inst._zod.def.innerType;
+    inst.removeDefault = inst.unwrap;
+  });
+  ZodPrefault = /* @__PURE__ */ $constructor("ZodPrefault", (inst, def) => {
+    $ZodPrefault.init(inst, def);
+    ZodType.init(inst, def);
+    inst._zod.processJSONSchema = (ctx, json, params) => prefaultProcessor(inst, ctx, json, params);
+    inst.unwrap = () => inst._zod.def.innerType;
+  });
+  ZodNonOptional = /* @__PURE__ */ $constructor("ZodNonOptional", (inst, def) => {
+    $ZodNonOptional.init(inst, def);
+    ZodType.init(inst, def);
+    inst._zod.processJSONSchema = (ctx, json, params) => nonoptionalProcessor(inst, ctx, json, params);
+    inst.unwrap = () => inst._zod.def.innerType;
+  });
+  ZodCatch = /* @__PURE__ */ $constructor("ZodCatch", (inst, def) => {
+    $ZodCatch.init(inst, def);
+    ZodType.init(inst, def);
+    inst._zod.processJSONSchema = (ctx, json, params) => catchProcessor(inst, ctx, json, params);
+    inst.unwrap = () => inst._zod.def.innerType;
+    inst.removeCatch = inst.unwrap;
+  });
+  ZodPipe = /* @__PURE__ */ $constructor("ZodPipe", (inst, def) => {
+    $ZodPipe.init(inst, def);
+    ZodType.init(inst, def);
+    inst._zod.processJSONSchema = (ctx, json, params) => pipeProcessor(inst, ctx, json, params);
+    inst.in = def.in;
+    inst.out = def.out;
+  });
+  ZodPreprocess = /* @__PURE__ */ $constructor("ZodPreprocess", (inst, def) => {
+    ZodPipe.init(inst, def);
+    $ZodPreprocess.init(inst, def);
+  });
+  ZodReadonly = /* @__PURE__ */ $constructor("ZodReadonly", (inst, def) => {
+    $ZodReadonly.init(inst, def);
+    ZodType.init(inst, def);
+    inst._zod.processJSONSchema = (ctx, json, params) => readonlyProcessor(inst, ctx, json, params);
+    inst.unwrap = () => inst._zod.def.innerType;
+  });
+  ZodCustom = /* @__PURE__ */ $constructor("ZodCustom", (inst, def) => {
+    $ZodCustom.init(inst, def);
+    ZodType.init(inst, def);
+    inst._zod.processJSONSchema = (ctx, json, params) => customProcessor(inst, ctx, json, params);
+  });
+});
+
+// node_modules/zod/v4/classic/compat.js
+var ZodFirstPartyTypeKind;
+var init_compat = __esm(() => {
+  (function(ZodFirstPartyTypeKind) {})(ZodFirstPartyTypeKind || (ZodFirstPartyTypeKind = {}));
+});
+
+// node_modules/zod/v4/classic/iso.js
+function datetime2(params) {
+  return _isoDateTime(ZodISODateTime, params);
+}
+var init_iso2 = __esm(() => {
+  init_core2();
+  init_schemas3();
+});
+
+// node_modules/zod/v4/classic/coerce.js
+var init_coerce2 = () => {};
+
+// node_modules/zod/v4/classic/external.js
+var init_external2 = __esm(() => {
+  init_core2();
+  init_locales();
+  init_iso2();
+  init_coerce2();
+  init_schemas3();
+  init_checks3();
+  init_errors2();
+  init_parse3();
+  init_compat();
+});
+
+// node_modules/zod/v4/classic/index.js
+var init_classic = __esm(() => {
+  init_external2();
+});
+
+// node_modules/zod/v4/index.js
+var init_v4 = __esm(() => {
+  init_classic();
+});
+
+// node_modules/@modelcontextprotocol/sdk/dist/esm/types.js
+var LATEST_PROTOCOL_VERSION = "2025-11-25", SUPPORTED_PROTOCOL_VERSIONS, RELATED_TASK_META_KEY = "io.modelcontextprotocol/related-task", JSONRPC_VERSION = "2.0", AssertObjectSchema, ProgressTokenSchema, CursorSchema, TaskCreationParamsSchema, TaskMetadataSchema, RelatedTaskMetadataSchema, RequestMetaSchema, BaseRequestParamsSchema, TaskAugmentedRequestParamsSchema, isTaskAugmentedRequestParams = (value) => TaskAugmentedRequestParamsSchema.safeParse(value).success, RequestSchema, NotificationsParamsSchema, NotificationSchema, ResultSchema, RequestIdSchema, JSONRPCRequestSchema, isJSONRPCRequest = (value) => JSONRPCRequestSchema.safeParse(value).success, JSONRPCNotificationSchema, isJSONRPCNotification = (value) => JSONRPCNotificationSchema.safeParse(value).success, JSONRPCResultResponseSchema, isJSONRPCResultResponse = (value) => JSONRPCResultResponseSchema.safeParse(value).success, ErrorCode, JSONRPCErrorResponseSchema, isJSONRPCErrorResponse = (value) => JSONRPCErrorResponseSchema.safeParse(value).success, JSONRPCMessageSchema, JSONRPCResponseSchema, EmptyResultSchema, CancelledNotificationParamsSchema, CancelledNotificationSchema, IconSchema, IconsSchema, BaseMetadataSchema, ImplementationSchema, FormElicitationCapabilitySchema, ElicitationCapabilitySchema, ClientTasksCapabilitySchema, ServerTasksCapabilitySchema, ClientCapabilitiesSchema, InitializeRequestParamsSchema, InitializeRequestSchema, ServerCapabilitiesSchema, InitializeResultSchema, InitializedNotificationSchema, PingRequestSchema, ProgressSchema, ProgressNotificationParamsSchema, ProgressNotificationSchema, PaginatedRequestParamsSchema, PaginatedRequestSchema, PaginatedResultSchema, TaskStatusSchema, TaskSchema, CreateTaskResultSchema, TaskStatusNotificationParamsSchema, TaskStatusNotificationSchema, GetTaskRequestSchema, GetTaskResultSchema, GetTaskPayloadRequestSchema, GetTaskPayloadResultSchema, ListTasksRequestSchema, ListTasksResultSchema, CancelTaskRequestSchema, CancelTaskResultSchema, ResourceContentsSchema, TextResourceContentsSchema, Base64Schema, BlobResourceContentsSchema, RoleSchema, AnnotationsSchema, ResourceSchema, ResourceTemplateSchema, ListResourcesRequestSchema, ListResourcesResultSchema, ListResourceTemplatesRequestSchema, ListResourceTemplatesResultSchema, ResourceRequestParamsSchema, ReadResourceRequestParamsSchema, ReadResourceRequestSchema, ReadResourceResultSchema, ResourceListChangedNotificationSchema, SubscribeRequestParamsSchema, SubscribeRequestSchema, UnsubscribeRequestParamsSchema, UnsubscribeRequestSchema, ResourceUpdatedNotificationParamsSchema, ResourceUpdatedNotificationSchema, PromptArgumentSchema, PromptSchema, ListPromptsRequestSchema, ListPromptsResultSchema, GetPromptRequestParamsSchema, GetPromptRequestSchema, TextContentSchema, ImageContentSchema, AudioContentSchema, ToolUseContentSchema, EmbeddedResourceSchema, ResourceLinkSchema, ContentBlockSchema, PromptMessageSchema, GetPromptResultSchema, PromptListChangedNotificationSchema, ToolAnnotationsSchema, ToolExecutionSchema, ToolSchema, ListToolsRequestSchema, ListToolsResultSchema, CallToolResultSchema, CompatibilityCallToolResultSchema, CallToolRequestParamsSchema, CallToolRequestSchema, ToolListChangedNotificationSchema, ListChangedOptionsBaseSchema, LoggingLevelSchema, SetLevelRequestParamsSchema, SetLevelRequestSchema, LoggingMessageNotificationParamsSchema, LoggingMessageNotificationSchema, ModelHintSchema, ModelPreferencesSchema, ToolChoiceSchema, ToolResultContentSchema, SamplingContentSchema, SamplingMessageContentBlockSchema, SamplingMessageSchema, CreateMessageRequestParamsSchema, CreateMessageRequestSchema, CreateMessageResultSchema, CreateMessageResultWithToolsSchema, BooleanSchemaSchema, StringSchemaSchema, NumberSchemaSchema, UntitledSingleSelectEnumSchemaSchema, TitledSingleSelectEnumSchemaSchema, LegacyTitledEnumSchemaSchema, SingleSelectEnumSchemaSchema, UntitledMultiSelectEnumSchemaSchema, TitledMultiSelectEnumSchemaSchema, MultiSelectEnumSchemaSchema, EnumSchemaSchema, PrimitiveSchemaDefinitionSchema, ElicitRequestFormParamsSchema, ElicitRequestURLParamsSchema, ElicitRequestParamsSchema, ElicitRequestSchema, ElicitationCompleteNotificationParamsSchema, ElicitationCompleteNotificationSchema, ElicitResultSchema, ResourceTemplateReferenceSchema, PromptReferenceSchema, CompleteRequestParamsSchema, CompleteRequestSchema, CompleteResultSchema, RootSchema, ListRootsRequestSchema, ListRootsResultSchema, RootsListChangedNotificationSchema, ClientRequestSchema, ClientNotificationSchema, ClientResultSchema, ServerRequestSchema, ServerNotificationSchema, ServerResultSchema, McpError, UrlElicitationRequiredError;
+var init_types = __esm(() => {
+  init_v4();
+  SUPPORTED_PROTOCOL_VERSIONS = [LATEST_PROTOCOL_VERSION, "2025-06-18", "2025-03-26", "2024-11-05", "2024-10-07"];
+  AssertObjectSchema = custom((v) => v !== null && (typeof v === "object" || typeof v === "function"));
+  ProgressTokenSchema = union([string2(), number2().int()]);
+  CursorSchema = string2();
+  TaskCreationParamsSchema = looseObject({
+    ttl: number2().optional(),
+    pollInterval: number2().optional()
+  });
+  TaskMetadataSchema = object2({
+    ttl: number2().optional()
+  });
+  RelatedTaskMetadataSchema = object2({
+    taskId: string2()
+  });
+  RequestMetaSchema = looseObject({
+    progressToken: ProgressTokenSchema.optional(),
+    [RELATED_TASK_META_KEY]: RelatedTaskMetadataSchema.optional()
+  });
+  BaseRequestParamsSchema = object2({
+    _meta: RequestMetaSchema.optional()
+  });
+  TaskAugmentedRequestParamsSchema = BaseRequestParamsSchema.extend({
+    task: TaskMetadataSchema.optional()
+  });
+  RequestSchema = object2({
+    method: string2(),
+    params: BaseRequestParamsSchema.loose().optional()
+  });
+  NotificationsParamsSchema = object2({
+    _meta: RequestMetaSchema.optional()
+  });
+  NotificationSchema = object2({
+    method: string2(),
+    params: NotificationsParamsSchema.loose().optional()
+  });
+  ResultSchema = looseObject({
+    _meta: RequestMetaSchema.optional()
+  });
+  RequestIdSchema = union([string2(), number2().int()]);
+  JSONRPCRequestSchema = object2({
+    jsonrpc: literal(JSONRPC_VERSION),
+    id: RequestIdSchema,
+    ...RequestSchema.shape
+  }).strict();
+  JSONRPCNotificationSchema = object2({
+    jsonrpc: literal(JSONRPC_VERSION),
+    ...NotificationSchema.shape
+  }).strict();
+  JSONRPCResultResponseSchema = object2({
+    jsonrpc: literal(JSONRPC_VERSION),
+    id: RequestIdSchema,
+    result: ResultSchema
+  }).strict();
+  (function(ErrorCode) {
+    ErrorCode[ErrorCode["ConnectionClosed"] = -32000] = "ConnectionClosed";
+    ErrorCode[ErrorCode["RequestTimeout"] = -32001] = "RequestTimeout";
+    ErrorCode[ErrorCode["ParseError"] = -32700] = "ParseError";
+    ErrorCode[ErrorCode["InvalidRequest"] = -32600] = "InvalidRequest";
+    ErrorCode[ErrorCode["MethodNotFound"] = -32601] = "MethodNotFound";
+    ErrorCode[ErrorCode["InvalidParams"] = -32602] = "InvalidParams";
+    ErrorCode[ErrorCode["InternalError"] = -32603] = "InternalError";
+    ErrorCode[ErrorCode["UrlElicitationRequired"] = -32042] = "UrlElicitationRequired";
+  })(ErrorCode || (ErrorCode = {}));
+  JSONRPCErrorResponseSchema = object2({
+    jsonrpc: literal(JSONRPC_VERSION),
+    id: RequestIdSchema.optional(),
+    error: object2({
+      code: number2().int(),
+      message: string2(),
+      data: unknown().optional()
+    })
+  }).strict();
+  JSONRPCMessageSchema = union([
+    JSONRPCRequestSchema,
+    JSONRPCNotificationSchema,
+    JSONRPCResultResponseSchema,
+    JSONRPCErrorResponseSchema
+  ]);
+  JSONRPCResponseSchema = union([JSONRPCResultResponseSchema, JSONRPCErrorResponseSchema]);
+  EmptyResultSchema = ResultSchema.strict();
+  CancelledNotificationParamsSchema = NotificationsParamsSchema.extend({
+    requestId: RequestIdSchema.optional(),
+    reason: string2().optional()
+  });
+  CancelledNotificationSchema = NotificationSchema.extend({
+    method: literal("notifications/cancelled"),
+    params: CancelledNotificationParamsSchema
+  });
+  IconSchema = object2({
+    src: string2(),
+    mimeType: string2().optional(),
+    sizes: array(string2()).optional(),
+    theme: _enum(["light", "dark"]).optional()
+  });
+  IconsSchema = object2({
+    icons: array(IconSchema).optional()
+  });
+  BaseMetadataSchema = object2({
+    name: string2(),
+    title: string2().optional()
+  });
+  ImplementationSchema = BaseMetadataSchema.extend({
+    ...BaseMetadataSchema.shape,
+    ...IconsSchema.shape,
+    version: string2(),
+    websiteUrl: string2().optional(),
+    description: string2().optional()
+  });
+  FormElicitationCapabilitySchema = intersection(object2({
+    applyDefaults: boolean2().optional()
+  }), record(string2(), unknown()));
+  ElicitationCapabilitySchema = preprocess((value) => {
+    if (value && typeof value === "object" && !Array.isArray(value)) {
+      if (Object.keys(value).length === 0) {
+        return { form: {} };
+      }
+    }
+    return value;
+  }, intersection(object2({
+    form: FormElicitationCapabilitySchema.optional(),
+    url: AssertObjectSchema.optional()
+  }), record(string2(), unknown()).optional()));
+  ClientTasksCapabilitySchema = looseObject({
+    list: AssertObjectSchema.optional(),
+    cancel: AssertObjectSchema.optional(),
+    requests: looseObject({
+      sampling: looseObject({
+        createMessage: AssertObjectSchema.optional()
+      }).optional(),
+      elicitation: looseObject({
+        create: AssertObjectSchema.optional()
+      }).optional()
+    }).optional()
+  });
+  ServerTasksCapabilitySchema = looseObject({
+    list: AssertObjectSchema.optional(),
+    cancel: AssertObjectSchema.optional(),
+    requests: looseObject({
+      tools: looseObject({
+        call: AssertObjectSchema.optional()
+      }).optional()
+    }).optional()
+  });
+  ClientCapabilitiesSchema = object2({
+    experimental: record(string2(), AssertObjectSchema).optional(),
+    sampling: object2({
+      context: AssertObjectSchema.optional(),
+      tools: AssertObjectSchema.optional()
+    }).optional(),
+    elicitation: ElicitationCapabilitySchema.optional(),
+    roots: object2({
+      listChanged: boolean2().optional()
+    }).optional(),
+    tasks: ClientTasksCapabilitySchema.optional(),
+    extensions: record(string2(), AssertObjectSchema).optional()
+  });
+  InitializeRequestParamsSchema = BaseRequestParamsSchema.extend({
+    protocolVersion: string2(),
+    capabilities: ClientCapabilitiesSchema,
+    clientInfo: ImplementationSchema
+  });
+  InitializeRequestSchema = RequestSchema.extend({
+    method: literal("initialize"),
+    params: InitializeRequestParamsSchema
+  });
+  ServerCapabilitiesSchema = object2({
+    experimental: record(string2(), AssertObjectSchema).optional(),
+    logging: AssertObjectSchema.optional(),
+    completions: AssertObjectSchema.optional(),
+    prompts: object2({
+      listChanged: boolean2().optional()
+    }).optional(),
+    resources: object2({
+      subscribe: boolean2().optional(),
+      listChanged: boolean2().optional()
+    }).optional(),
+    tools: object2({
+      listChanged: boolean2().optional()
+    }).optional(),
+    tasks: ServerTasksCapabilitySchema.optional(),
+    extensions: record(string2(), AssertObjectSchema).optional()
+  });
+  InitializeResultSchema = ResultSchema.extend({
+    protocolVersion: string2(),
+    capabilities: ServerCapabilitiesSchema,
+    serverInfo: ImplementationSchema,
+    instructions: string2().optional()
+  });
+  InitializedNotificationSchema = NotificationSchema.extend({
+    method: literal("notifications/initialized"),
+    params: NotificationsParamsSchema.optional()
+  });
+  PingRequestSchema = RequestSchema.extend({
+    method: literal("ping"),
+    params: BaseRequestParamsSchema.optional()
+  });
+  ProgressSchema = object2({
+    progress: number2(),
+    total: optional(number2()),
+    message: optional(string2())
+  });
+  ProgressNotificationParamsSchema = object2({
+    ...NotificationsParamsSchema.shape,
+    ...ProgressSchema.shape,
+    progressToken: ProgressTokenSchema
+  });
+  ProgressNotificationSchema = NotificationSchema.extend({
+    method: literal("notifications/progress"),
+    params: ProgressNotificationParamsSchema
+  });
+  PaginatedRequestParamsSchema = BaseRequestParamsSchema.extend({
+    cursor: CursorSchema.optional()
+  });
+  PaginatedRequestSchema = RequestSchema.extend({
+    params: PaginatedRequestParamsSchema.optional()
+  });
+  PaginatedResultSchema = ResultSchema.extend({
+    nextCursor: CursorSchema.optional()
+  });
+  TaskStatusSchema = _enum(["working", "input_required", "completed", "failed", "cancelled"]);
+  TaskSchema = object2({
+    taskId: string2(),
+    status: TaskStatusSchema,
+    ttl: union([number2(), _null3()]),
+    createdAt: string2(),
+    lastUpdatedAt: string2(),
+    pollInterval: optional(number2()),
+    statusMessage: optional(string2())
+  });
+  CreateTaskResultSchema = ResultSchema.extend({
+    task: TaskSchema
+  });
+  TaskStatusNotificationParamsSchema = NotificationsParamsSchema.merge(TaskSchema);
+  TaskStatusNotificationSchema = NotificationSchema.extend({
+    method: literal("notifications/tasks/status"),
+    params: TaskStatusNotificationParamsSchema
+  });
+  GetTaskRequestSchema = RequestSchema.extend({
+    method: literal("tasks/get"),
+    params: BaseRequestParamsSchema.extend({
+      taskId: string2()
+    })
+  });
+  GetTaskResultSchema = ResultSchema.merge(TaskSchema);
+  GetTaskPayloadRequestSchema = RequestSchema.extend({
+    method: literal("tasks/result"),
+    params: BaseRequestParamsSchema.extend({
+      taskId: string2()
+    })
+  });
+  GetTaskPayloadResultSchema = ResultSchema.loose();
+  ListTasksRequestSchema = PaginatedRequestSchema.extend({
+    method: literal("tasks/list")
+  });
+  ListTasksResultSchema = PaginatedResultSchema.extend({
+    tasks: array(TaskSchema)
+  });
+  CancelTaskRequestSchema = RequestSchema.extend({
+    method: literal("tasks/cancel"),
+    params: BaseRequestParamsSchema.extend({
+      taskId: string2()
+    })
+  });
+  CancelTaskResultSchema = ResultSchema.merge(TaskSchema);
+  ResourceContentsSchema = object2({
+    uri: string2(),
+    mimeType: optional(string2()),
+    _meta: record(string2(), unknown()).optional()
+  });
+  TextResourceContentsSchema = ResourceContentsSchema.extend({
+    text: string2()
+  });
+  Base64Schema = string2().refine((val) => {
+    try {
+      atob(val);
+      return true;
+    } catch {
+      return false;
+    }
+  }, { message: "Invalid Base64 string" });
+  BlobResourceContentsSchema = ResourceContentsSchema.extend({
+    blob: Base64Schema
+  });
+  RoleSchema = _enum(["user", "assistant"]);
+  AnnotationsSchema = object2({
+    audience: array(RoleSchema).optional(),
+    priority: number2().min(0).max(1).optional(),
+    lastModified: datetime2({ offset: true }).optional()
+  });
+  ResourceSchema = object2({
+    ...BaseMetadataSchema.shape,
+    ...IconsSchema.shape,
+    uri: string2(),
+    description: optional(string2()),
+    mimeType: optional(string2()),
+    size: optional(number2()),
+    annotations: AnnotationsSchema.optional(),
+    _meta: optional(looseObject({}))
+  });
+  ResourceTemplateSchema = object2({
+    ...BaseMetadataSchema.shape,
+    ...IconsSchema.shape,
+    uriTemplate: string2(),
+    description: optional(string2()),
+    mimeType: optional(string2()),
+    annotations: AnnotationsSchema.optional(),
+    _meta: optional(looseObject({}))
+  });
+  ListResourcesRequestSchema = PaginatedRequestSchema.extend({
+    method: literal("resources/list")
+  });
+  ListResourcesResultSchema = PaginatedResultSchema.extend({
+    resources: array(ResourceSchema)
+  });
+  ListResourceTemplatesRequestSchema = PaginatedRequestSchema.extend({
+    method: literal("resources/templates/list")
+  });
+  ListResourceTemplatesResultSchema = PaginatedResultSchema.extend({
+    resourceTemplates: array(ResourceTemplateSchema)
+  });
+  ResourceRequestParamsSchema = BaseRequestParamsSchema.extend({
+    uri: string2()
+  });
+  ReadResourceRequestParamsSchema = ResourceRequestParamsSchema;
+  ReadResourceRequestSchema = RequestSchema.extend({
+    method: literal("resources/read"),
+    params: ReadResourceRequestParamsSchema
+  });
+  ReadResourceResultSchema = ResultSchema.extend({
+    contents: array(union([TextResourceContentsSchema, BlobResourceContentsSchema]))
+  });
+  ResourceListChangedNotificationSchema = NotificationSchema.extend({
+    method: literal("notifications/resources/list_changed"),
+    params: NotificationsParamsSchema.optional()
+  });
+  SubscribeRequestParamsSchema = ResourceRequestParamsSchema;
+  SubscribeRequestSchema = RequestSchema.extend({
+    method: literal("resources/subscribe"),
+    params: SubscribeRequestParamsSchema
+  });
+  UnsubscribeRequestParamsSchema = ResourceRequestParamsSchema;
+  UnsubscribeRequestSchema = RequestSchema.extend({
+    method: literal("resources/unsubscribe"),
+    params: UnsubscribeRequestParamsSchema
+  });
+  ResourceUpdatedNotificationParamsSchema = NotificationsParamsSchema.extend({
+    uri: string2()
+  });
+  ResourceUpdatedNotificationSchema = NotificationSchema.extend({
+    method: literal("notifications/resources/updated"),
+    params: ResourceUpdatedNotificationParamsSchema
+  });
+  PromptArgumentSchema = object2({
+    name: string2(),
+    description: optional(string2()),
+    required: optional(boolean2())
+  });
+  PromptSchema = object2({
+    ...BaseMetadataSchema.shape,
+    ...IconsSchema.shape,
+    description: optional(string2()),
+    arguments: optional(array(PromptArgumentSchema)),
+    _meta: optional(looseObject({}))
+  });
+  ListPromptsRequestSchema = PaginatedRequestSchema.extend({
+    method: literal("prompts/list")
+  });
+  ListPromptsResultSchema = PaginatedResultSchema.extend({
+    prompts: array(PromptSchema)
+  });
+  GetPromptRequestParamsSchema = BaseRequestParamsSchema.extend({
+    name: string2(),
+    arguments: record(string2(), string2()).optional()
+  });
+  GetPromptRequestSchema = RequestSchema.extend({
+    method: literal("prompts/get"),
+    params: GetPromptRequestParamsSchema
+  });
+  TextContentSchema = object2({
+    type: literal("text"),
+    text: string2(),
+    annotations: AnnotationsSchema.optional(),
+    _meta: record(string2(), unknown()).optional()
+  });
+  ImageContentSchema = object2({
+    type: literal("image"),
+    data: Base64Schema,
+    mimeType: string2(),
+    annotations: AnnotationsSchema.optional(),
+    _meta: record(string2(), unknown()).optional()
+  });
+  AudioContentSchema = object2({
+    type: literal("audio"),
+    data: Base64Schema,
+    mimeType: string2(),
+    annotations: AnnotationsSchema.optional(),
+    _meta: record(string2(), unknown()).optional()
+  });
+  ToolUseContentSchema = object2({
+    type: literal("tool_use"),
+    name: string2(),
+    id: string2(),
+    input: record(string2(), unknown()),
+    _meta: record(string2(), unknown()).optional()
+  });
+  EmbeddedResourceSchema = object2({
+    type: literal("resource"),
+    resource: union([TextResourceContentsSchema, BlobResourceContentsSchema]),
+    annotations: AnnotationsSchema.optional(),
+    _meta: record(string2(), unknown()).optional()
+  });
+  ResourceLinkSchema = ResourceSchema.extend({
+    type: literal("resource_link")
+  });
+  ContentBlockSchema = union([
+    TextContentSchema,
+    ImageContentSchema,
+    AudioContentSchema,
+    ResourceLinkSchema,
+    EmbeddedResourceSchema
+  ]);
+  PromptMessageSchema = object2({
+    role: RoleSchema,
+    content: ContentBlockSchema
+  });
+  GetPromptResultSchema = ResultSchema.extend({
+    description: string2().optional(),
+    messages: array(PromptMessageSchema)
+  });
+  PromptListChangedNotificationSchema = NotificationSchema.extend({
+    method: literal("notifications/prompts/list_changed"),
+    params: NotificationsParamsSchema.optional()
+  });
+  ToolAnnotationsSchema = object2({
+    title: string2().optional(),
+    readOnlyHint: boolean2().optional(),
+    destructiveHint: boolean2().optional(),
+    idempotentHint: boolean2().optional(),
+    openWorldHint: boolean2().optional()
+  });
+  ToolExecutionSchema = object2({
+    taskSupport: _enum(["required", "optional", "forbidden"]).optional()
+  });
+  ToolSchema = object2({
+    ...BaseMetadataSchema.shape,
+    ...IconsSchema.shape,
+    description: string2().optional(),
+    inputSchema: object2({
+      type: literal("object"),
+      properties: record(string2(), AssertObjectSchema).optional(),
+      required: array(string2()).optional()
+    }).catchall(unknown()),
+    outputSchema: object2({
+      type: literal("object"),
+      properties: record(string2(), AssertObjectSchema).optional(),
+      required: array(string2()).optional()
+    }).catchall(unknown()).optional(),
+    annotations: ToolAnnotationsSchema.optional(),
+    execution: ToolExecutionSchema.optional(),
+    _meta: record(string2(), unknown()).optional()
+  });
+  ListToolsRequestSchema = PaginatedRequestSchema.extend({
+    method: literal("tools/list")
+  });
+  ListToolsResultSchema = PaginatedResultSchema.extend({
+    tools: array(ToolSchema)
+  });
+  CallToolResultSchema = ResultSchema.extend({
+    content: array(ContentBlockSchema).default([]),
+    structuredContent: record(string2(), unknown()).optional(),
+    isError: boolean2().optional()
+  });
+  CompatibilityCallToolResultSchema = CallToolResultSchema.or(ResultSchema.extend({
+    toolResult: unknown()
+  }));
+  CallToolRequestParamsSchema = TaskAugmentedRequestParamsSchema.extend({
+    name: string2(),
+    arguments: record(string2(), unknown()).optional()
+  });
+  CallToolRequestSchema = RequestSchema.extend({
+    method: literal("tools/call"),
+    params: CallToolRequestParamsSchema
+  });
+  ToolListChangedNotificationSchema = NotificationSchema.extend({
+    method: literal("notifications/tools/list_changed"),
+    params: NotificationsParamsSchema.optional()
+  });
+  ListChangedOptionsBaseSchema = object2({
+    autoRefresh: boolean2().default(true),
+    debounceMs: number2().int().nonnegative().default(300)
+  });
+  LoggingLevelSchema = _enum(["debug", "info", "notice", "warning", "error", "critical", "alert", "emergency"]);
+  SetLevelRequestParamsSchema = BaseRequestParamsSchema.extend({
+    level: LoggingLevelSchema
+  });
+  SetLevelRequestSchema = RequestSchema.extend({
+    method: literal("logging/setLevel"),
+    params: SetLevelRequestParamsSchema
+  });
+  LoggingMessageNotificationParamsSchema = NotificationsParamsSchema.extend({
+    level: LoggingLevelSchema,
+    logger: string2().optional(),
+    data: unknown()
+  });
+  LoggingMessageNotificationSchema = NotificationSchema.extend({
+    method: literal("notifications/message"),
+    params: LoggingMessageNotificationParamsSchema
+  });
+  ModelHintSchema = object2({
+    name: string2().optional()
+  });
+  ModelPreferencesSchema = object2({
+    hints: array(ModelHintSchema).optional(),
+    costPriority: number2().min(0).max(1).optional(),
+    speedPriority: number2().min(0).max(1).optional(),
+    intelligencePriority: number2().min(0).max(1).optional()
+  });
+  ToolChoiceSchema = object2({
+    mode: _enum(["auto", "required", "none"]).optional()
+  });
+  ToolResultContentSchema = object2({
+    type: literal("tool_result"),
+    toolUseId: string2().describe("The unique identifier for the corresponding tool call."),
+    content: array(ContentBlockSchema).default([]),
+    structuredContent: object2({}).loose().optional(),
+    isError: boolean2().optional(),
+    _meta: record(string2(), unknown()).optional()
+  });
+  SamplingContentSchema = discriminatedUnion("type", [TextContentSchema, ImageContentSchema, AudioContentSchema]);
+  SamplingMessageContentBlockSchema = discriminatedUnion("type", [
+    TextContentSchema,
+    ImageContentSchema,
+    AudioContentSchema,
+    ToolUseContentSchema,
+    ToolResultContentSchema
+  ]);
+  SamplingMessageSchema = object2({
+    role: RoleSchema,
+    content: union([SamplingMessageContentBlockSchema, array(SamplingMessageContentBlockSchema)]),
+    _meta: record(string2(), unknown()).optional()
+  });
+  CreateMessageRequestParamsSchema = TaskAugmentedRequestParamsSchema.extend({
+    messages: array(SamplingMessageSchema),
+    modelPreferences: ModelPreferencesSchema.optional(),
+    systemPrompt: string2().optional(),
+    includeContext: _enum(["none", "thisServer", "allServers"]).optional(),
+    temperature: number2().optional(),
+    maxTokens: number2().int(),
+    stopSequences: array(string2()).optional(),
+    metadata: AssertObjectSchema.optional(),
+    tools: array(ToolSchema).optional(),
+    toolChoice: ToolChoiceSchema.optional()
+  });
+  CreateMessageRequestSchema = RequestSchema.extend({
+    method: literal("sampling/createMessage"),
+    params: CreateMessageRequestParamsSchema
+  });
+  CreateMessageResultSchema = ResultSchema.extend({
+    model: string2(),
+    stopReason: optional(_enum(["endTurn", "stopSequence", "maxTokens"]).or(string2())),
+    role: RoleSchema,
+    content: SamplingContentSchema
+  });
+  CreateMessageResultWithToolsSchema = ResultSchema.extend({
+    model: string2(),
+    stopReason: optional(_enum(["endTurn", "stopSequence", "maxTokens", "toolUse"]).or(string2())),
+    role: RoleSchema,
+    content: union([SamplingMessageContentBlockSchema, array(SamplingMessageContentBlockSchema)])
+  });
+  BooleanSchemaSchema = object2({
+    type: literal("boolean"),
+    title: string2().optional(),
+    description: string2().optional(),
+    default: boolean2().optional()
+  });
+  StringSchemaSchema = object2({
+    type: literal("string"),
+    title: string2().optional(),
+    description: string2().optional(),
+    minLength: number2().optional(),
+    maxLength: number2().optional(),
+    format: _enum(["email", "uri", "date", "date-time"]).optional(),
+    default: string2().optional()
+  });
+  NumberSchemaSchema = object2({
+    type: _enum(["number", "integer"]),
+    title: string2().optional(),
+    description: string2().optional(),
+    minimum: number2().optional(),
+    maximum: number2().optional(),
+    default: number2().optional()
+  });
+  UntitledSingleSelectEnumSchemaSchema = object2({
+    type: literal("string"),
+    title: string2().optional(),
+    description: string2().optional(),
+    enum: array(string2()),
+    default: string2().optional()
+  });
+  TitledSingleSelectEnumSchemaSchema = object2({
+    type: literal("string"),
+    title: string2().optional(),
+    description: string2().optional(),
+    oneOf: array(object2({
+      const: string2(),
+      title: string2()
+    })),
+    default: string2().optional()
+  });
+  LegacyTitledEnumSchemaSchema = object2({
+    type: literal("string"),
+    title: string2().optional(),
+    description: string2().optional(),
+    enum: array(string2()),
+    enumNames: array(string2()).optional(),
+    default: string2().optional()
+  });
+  SingleSelectEnumSchemaSchema = union([UntitledSingleSelectEnumSchemaSchema, TitledSingleSelectEnumSchemaSchema]);
+  UntitledMultiSelectEnumSchemaSchema = object2({
+    type: literal("array"),
+    title: string2().optional(),
+    description: string2().optional(),
+    minItems: number2().optional(),
+    maxItems: number2().optional(),
+    items: object2({
+      type: literal("string"),
+      enum: array(string2())
+    }),
+    default: array(string2()).optional()
+  });
+  TitledMultiSelectEnumSchemaSchema = object2({
+    type: literal("array"),
+    title: string2().optional(),
+    description: string2().optional(),
+    minItems: number2().optional(),
+    maxItems: number2().optional(),
+    items: object2({
+      anyOf: array(object2({
+        const: string2(),
+        title: string2()
+      }))
+    }),
+    default: array(string2()).optional()
+  });
+  MultiSelectEnumSchemaSchema = union([UntitledMultiSelectEnumSchemaSchema, TitledMultiSelectEnumSchemaSchema]);
+  EnumSchemaSchema = union([LegacyTitledEnumSchemaSchema, SingleSelectEnumSchemaSchema, MultiSelectEnumSchemaSchema]);
+  PrimitiveSchemaDefinitionSchema = union([EnumSchemaSchema, BooleanSchemaSchema, StringSchemaSchema, NumberSchemaSchema]);
+  ElicitRequestFormParamsSchema = TaskAugmentedRequestParamsSchema.extend({
+    mode: literal("form").optional(),
+    message: string2(),
+    requestedSchema: object2({
+      type: literal("object"),
+      properties: record(string2(), PrimitiveSchemaDefinitionSchema),
+      required: array(string2()).optional()
+    })
+  });
+  ElicitRequestURLParamsSchema = TaskAugmentedRequestParamsSchema.extend({
+    mode: literal("url"),
+    message: string2(),
+    elicitationId: string2(),
+    url: string2().url()
+  });
+  ElicitRequestParamsSchema = union([ElicitRequestFormParamsSchema, ElicitRequestURLParamsSchema]);
+  ElicitRequestSchema = RequestSchema.extend({
+    method: literal("elicitation/create"),
+    params: ElicitRequestParamsSchema
+  });
+  ElicitationCompleteNotificationParamsSchema = NotificationsParamsSchema.extend({
+    elicitationId: string2()
+  });
+  ElicitationCompleteNotificationSchema = NotificationSchema.extend({
+    method: literal("notifications/elicitation/complete"),
+    params: ElicitationCompleteNotificationParamsSchema
+  });
+  ElicitResultSchema = ResultSchema.extend({
+    action: _enum(["accept", "decline", "cancel"]),
+    content: preprocess((val) => val === null ? undefined : val, record(string2(), union([string2(), number2(), boolean2(), array(string2())])).optional())
+  });
+  ResourceTemplateReferenceSchema = object2({
+    type: literal("ref/resource"),
+    uri: string2()
+  });
+  PromptReferenceSchema = object2({
+    type: literal("ref/prompt"),
+    name: string2()
+  });
+  CompleteRequestParamsSchema = BaseRequestParamsSchema.extend({
+    ref: union([PromptReferenceSchema, ResourceTemplateReferenceSchema]),
+    argument: object2({
+      name: string2(),
+      value: string2()
+    }),
+    context: object2({
+      arguments: record(string2(), string2()).optional()
+    }).optional()
+  });
+  CompleteRequestSchema = RequestSchema.extend({
+    method: literal("completion/complete"),
+    params: CompleteRequestParamsSchema
+  });
+  CompleteResultSchema = ResultSchema.extend({
+    completion: looseObject({
+      values: array(string2()).max(100),
+      total: optional(number2().int()),
+      hasMore: optional(boolean2())
+    })
+  });
+  RootSchema = object2({
+    uri: string2().startsWith("file://"),
+    name: string2().optional(),
+    _meta: record(string2(), unknown()).optional()
+  });
+  ListRootsRequestSchema = RequestSchema.extend({
+    method: literal("roots/list"),
+    params: BaseRequestParamsSchema.optional()
+  });
+  ListRootsResultSchema = ResultSchema.extend({
+    roots: array(RootSchema)
+  });
+  RootsListChangedNotificationSchema = NotificationSchema.extend({
+    method: literal("notifications/roots/list_changed"),
+    params: NotificationsParamsSchema.optional()
+  });
+  ClientRequestSchema = union([
+    PingRequestSchema,
+    InitializeRequestSchema,
+    CompleteRequestSchema,
+    SetLevelRequestSchema,
+    GetPromptRequestSchema,
+    ListPromptsRequestSchema,
+    ListResourcesRequestSchema,
+    ListResourceTemplatesRequestSchema,
+    ReadResourceRequestSchema,
+    SubscribeRequestSchema,
+    UnsubscribeRequestSchema,
+    CallToolRequestSchema,
+    ListToolsRequestSchema,
+    GetTaskRequestSchema,
+    GetTaskPayloadRequestSchema,
+    ListTasksRequestSchema,
+    CancelTaskRequestSchema
+  ]);
+  ClientNotificationSchema = union([
+    CancelledNotificationSchema,
+    ProgressNotificationSchema,
+    InitializedNotificationSchema,
+    RootsListChangedNotificationSchema,
+    TaskStatusNotificationSchema
+  ]);
+  ClientResultSchema = union([
+    EmptyResultSchema,
+    CreateMessageResultSchema,
+    CreateMessageResultWithToolsSchema,
+    ElicitResultSchema,
+    ListRootsResultSchema,
+    GetTaskResultSchema,
+    ListTasksResultSchema,
+    CreateTaskResultSchema
+  ]);
+  ServerRequestSchema = union([
+    PingRequestSchema,
+    CreateMessageRequestSchema,
+    ElicitRequestSchema,
+    ListRootsRequestSchema,
+    GetTaskRequestSchema,
+    GetTaskPayloadRequestSchema,
+    ListTasksRequestSchema,
+    CancelTaskRequestSchema
+  ]);
+  ServerNotificationSchema = union([
+    CancelledNotificationSchema,
+    ProgressNotificationSchema,
+    LoggingMessageNotificationSchema,
+    ResourceUpdatedNotificationSchema,
+    ResourceListChangedNotificationSchema,
+    ToolListChangedNotificationSchema,
+    PromptListChangedNotificationSchema,
+    TaskStatusNotificationSchema,
+    ElicitationCompleteNotificationSchema
+  ]);
+  ServerResultSchema = union([
+    EmptyResultSchema,
+    InitializeResultSchema,
+    CompleteResultSchema,
+    GetPromptResultSchema,
+    ListPromptsResultSchema,
+    ListResourcesResultSchema,
+    ListResourceTemplatesResultSchema,
+    ReadResourceResultSchema,
+    CallToolResultSchema,
+    ListToolsResultSchema,
+    GetTaskResultSchema,
+    ListTasksResultSchema,
+    CreateTaskResultSchema
+  ]);
+  McpError = class McpError extends Error {
+    constructor(code, message, data) {
+      super(`MCP error ${code}: ${message}`);
+      this.code = code;
+      this.data = data;
+      this.name = "McpError";
+    }
+    static fromError(code, message, data) {
+      if (code === ErrorCode.UrlElicitationRequired && data) {
+        const errorData = data;
+        if (errorData.elicitations) {
+          return new UrlElicitationRequiredError(errorData.elicitations, message);
+        }
+      }
+      return new McpError(code, message, data);
+    }
+  };
+  UrlElicitationRequiredError = class UrlElicitationRequiredError extends McpError {
+    constructor(elicitations, message = `URL elicitation${elicitations.length > 1 ? "s" : ""} required`) {
+      super(ErrorCode.UrlElicitationRequired, message, {
+        elicitations
+      });
+    }
+    get elicitations() {
+      return this.data?.elicitations ?? [];
+    }
+  };
+});
+
+// node_modules/@modelcontextprotocol/sdk/dist/esm/experimental/tasks/interfaces.js
+function isTerminal(status) {
+  return status === "completed" || status === "failed" || status === "cancelled";
+}
+
+// node_modules/zod-to-json-schema/dist/esm/Options.js
+var ignoreOverride;
+var init_Options = __esm(() => {
+  ignoreOverride = Symbol("Let zodToJsonSchema decide on which parser to use");
+});
+
+// node_modules/zod-to-json-schema/dist/esm/Refs.js
+var init_Refs = __esm(() => {
+  init_Options();
+});
+// node_modules/zod-to-json-schema/dist/esm/parsers/any.js
+var init_any = () => {};
+
+// node_modules/zod-to-json-schema/dist/esm/parsers/array.js
+var init_array = __esm(() => {
+  init_parseDef();
+});
+
+// node_modules/zod-to-json-schema/dist/esm/parsers/bigint.js
+var init_bigint = () => {};
+// node_modules/zod-to-json-schema/dist/esm/parsers/branded.js
+var init_branded = __esm(() => {
+  init_parseDef();
+});
+
+// node_modules/zod-to-json-schema/dist/esm/parsers/catch.js
+var init_catch = __esm(() => {
+  init_parseDef();
+});
+
+// node_modules/zod-to-json-schema/dist/esm/parsers/date.js
+var init_date = () => {};
+
+// node_modules/zod-to-json-schema/dist/esm/parsers/default.js
+var init_default = __esm(() => {
+  init_parseDef();
+});
+
+// node_modules/zod-to-json-schema/dist/esm/parsers/effects.js
+var init_effects = __esm(() => {
+  init_parseDef();
+  init_any();
+});
+// node_modules/zod-to-json-schema/dist/esm/parsers/intersection.js
+var init_intersection = __esm(() => {
+  init_parseDef();
+});
+// node_modules/zod-to-json-schema/dist/esm/parsers/string.js
+var ALPHA_NUMERIC;
+var init_string = __esm(() => {
+  ALPHA_NUMERIC = new Set("ABCDEFGHIJKLMNOPQRSTUVXYZabcdefghijklmnopqrstuvxyz0123456789");
+});
+
+// node_modules/zod-to-json-schema/dist/esm/parsers/record.js
+var init_record = __esm(() => {
+  init_parseDef();
+  init_string();
+  init_branded();
+  init_any();
+});
+
+// node_modules/zod-to-json-schema/dist/esm/parsers/map.js
+var init_map = __esm(() => {
+  init_parseDef();
+  init_record();
+  init_any();
+});
+// node_modules/zod-to-json-schema/dist/esm/parsers/never.js
+var init_never = __esm(() => {
+  init_any();
+});
+// node_modules/zod-to-json-schema/dist/esm/parsers/union.js
+var init_union = __esm(() => {
+  init_parseDef();
+});
+
+// node_modules/zod-to-json-schema/dist/esm/parsers/nullable.js
+var init_nullable = __esm(() => {
+  init_parseDef();
+  init_union();
+});
+
+// node_modules/zod-to-json-schema/dist/esm/parsers/number.js
+var init_number = () => {};
+
+// node_modules/zod-to-json-schema/dist/esm/parsers/object.js
+var init_object = __esm(() => {
+  init_parseDef();
+});
+
+// node_modules/zod-to-json-schema/dist/esm/parsers/optional.js
+var init_optional = __esm(() => {
+  init_parseDef();
+  init_any();
+});
+
+// node_modules/zod-to-json-schema/dist/esm/parsers/pipeline.js
+var init_pipeline = __esm(() => {
+  init_parseDef();
+});
+
+// node_modules/zod-to-json-schema/dist/esm/parsers/promise.js
+var init_promise = __esm(() => {
+  init_parseDef();
+});
+
+// node_modules/zod-to-json-schema/dist/esm/parsers/set.js
+var init_set = __esm(() => {
+  init_parseDef();
+});
+
+// node_modules/zod-to-json-schema/dist/esm/parsers/tuple.js
+var init_tuple = __esm(() => {
+  init_parseDef();
+});
+
+// node_modules/zod-to-json-schema/dist/esm/parsers/undefined.js
+var init_undefined = __esm(() => {
+  init_any();
+});
+
+// node_modules/zod-to-json-schema/dist/esm/parsers/unknown.js
+var init_unknown = __esm(() => {
+  init_any();
+});
+
+// node_modules/zod-to-json-schema/dist/esm/parsers/readonly.js
+var init_readonly = __esm(() => {
+  init_parseDef();
+});
+
+// node_modules/zod-to-json-schema/dist/esm/selectParser.js
+var init_selectParser = __esm(() => {
+  init_any();
+  init_array();
+  init_bigint();
+  init_branded();
+  init_catch();
+  init_date();
+  init_default();
+  init_effects();
+  init_intersection();
+  init_map();
+  init_never();
+  init_nullable();
+  init_number();
+  init_object();
+  init_optional();
+  init_pipeline();
+  init_promise();
+  init_record();
+  init_set();
+  init_string();
+  init_tuple();
+  init_undefined();
+  init_union();
+  init_unknown();
+  init_readonly();
+});
+
+// node_modules/zod-to-json-schema/dist/esm/parseDef.js
+var init_parseDef = __esm(() => {
+  init_Options();
+  init_selectParser();
+  init_any();
+});
+
+// node_modules/zod-to-json-schema/dist/esm/parseTypes.js
+var init_parseTypes = () => {};
+
+// node_modules/zod-to-json-schema/dist/esm/zodToJsonSchema.js
+var init_zodToJsonSchema = __esm(() => {
+  init_parseDef();
+  init_Refs();
+  init_any();
+});
+
+// node_modules/zod-to-json-schema/dist/esm/index.js
+var init_esm = __esm(() => {
+  init_zodToJsonSchema();
+  init_Options();
+  init_Refs();
+  init_parseDef();
+  init_parseTypes();
+  init_any();
+  init_array();
+  init_bigint();
+  init_branded();
+  init_catch();
+  init_date();
+  init_default();
+  init_effects();
+  init_intersection();
+  init_map();
+  init_never();
+  init_nullable();
+  init_number();
+  init_object();
+  init_optional();
+  init_pipeline();
+  init_promise();
+  init_readonly();
+  init_record();
+  init_set();
+  init_string();
+  init_tuple();
+  init_undefined();
+  init_union();
+  init_unknown();
+  init_selectParser();
+  init_zodToJsonSchema();
+});
+
+// node_modules/@modelcontextprotocol/sdk/dist/esm/server/zod-json-schema-compat.js
+function getMethodLiteral(schema) {
+  const shape = getObjectShape(schema);
+  const methodSchema = shape?.method;
+  if (!methodSchema) {
+    throw new Error("Schema is missing a method literal");
+  }
+  const value = getLiteralValue(methodSchema);
+  if (typeof value !== "string") {
+    throw new Error("Schema method literal must be a string");
+  }
+  return value;
+}
+function parseWithCompat(schema, data) {
+  const result = safeParse2(schema, data);
+  if (!result.success) {
+    throw result.error;
+  }
+  return result.data;
+}
+var init_zod_json_schema_compat = __esm(() => {
+  init_zod_compat();
+  init_esm();
+});
+
+// node_modules/@modelcontextprotocol/sdk/dist/esm/shared/protocol.js
+class Protocol {
+  constructor(_options) {
+    this._options = _options;
+    this._requestMessageId = 0;
+    this._requestHandlers = new Map;
+    this._requestHandlerAbortControllers = new Map;
+    this._notificationHandlers = new Map;
+    this._responseHandlers = new Map;
+    this._progressHandlers = new Map;
+    this._timeoutInfo = new Map;
+    this._pendingDebouncedNotifications = new Set;
+    this._taskProgressTokens = new Map;
+    this._requestResolvers = new Map;
+    this.setNotificationHandler(CancelledNotificationSchema, (notification) => {
+      this._oncancel(notification);
+    });
+    this.setNotificationHandler(ProgressNotificationSchema, (notification) => {
+      this._onprogress(notification);
+    });
+    this.setRequestHandler(PingRequestSchema, (_request) => ({}));
+    this._taskStore = _options?.taskStore;
+    this._taskMessageQueue = _options?.taskMessageQueue;
+    if (this._taskStore) {
+      this.setRequestHandler(GetTaskRequestSchema, async (request, extra) => {
+        const task = await this._taskStore.getTask(request.params.taskId, extra.sessionId);
+        if (!task) {
+          throw new McpError(ErrorCode.InvalidParams, "Failed to retrieve task: Task not found");
+        }
+        return {
+          ...task
+        };
+      });
+      this.setRequestHandler(GetTaskPayloadRequestSchema, async (request, extra) => {
+        const handleTaskResult = async () => {
+          const taskId = request.params.taskId;
+          if (this._taskMessageQueue) {
+            let queuedMessage;
+            while (queuedMessage = await this._taskMessageQueue.dequeue(taskId, extra.sessionId)) {
+              if (queuedMessage.type === "response" || queuedMessage.type === "error") {
+                const message = queuedMessage.message;
+                const requestId = message.id;
+                const resolver = this._requestResolvers.get(requestId);
+                if (resolver) {
+                  this._requestResolvers.delete(requestId);
+                  if (queuedMessage.type === "response") {
+                    resolver(message);
+                  } else {
+                    const errorMessage = message;
+                    const error = new McpError(errorMessage.error.code, errorMessage.error.message, errorMessage.error.data);
+                    resolver(error);
+                  }
+                } else {
+                  const messageType = queuedMessage.type === "response" ? "Response" : "Error";
+                  this._onerror(new Error(`${messageType} handler missing for request ${requestId}`));
+                }
+                continue;
+              }
+              await this._transport?.send(queuedMessage.message, { relatedRequestId: extra.requestId });
+            }
+          }
+          const task = await this._taskStore.getTask(taskId, extra.sessionId);
+          if (!task) {
+            throw new McpError(ErrorCode.InvalidParams, `Task not found: ${taskId}`);
+          }
+          if (!isTerminal(task.status)) {
+            await this._waitForTaskUpdate(taskId, extra.signal);
+            return await handleTaskResult();
+          }
+          if (isTerminal(task.status)) {
+            const result = await this._taskStore.getTaskResult(taskId, extra.sessionId);
+            this._clearTaskQueue(taskId);
+            return {
+              ...result,
+              _meta: {
+                ...result._meta,
+                [RELATED_TASK_META_KEY]: {
+                  taskId
+                }
+              }
+            };
+          }
+          return await handleTaskResult();
+        };
+        return await handleTaskResult();
+      });
+      this.setRequestHandler(ListTasksRequestSchema, async (request, extra) => {
+        try {
+          const { tasks, nextCursor } = await this._taskStore.listTasks(request.params?.cursor, extra.sessionId);
+          return {
+            tasks,
+            nextCursor,
+            _meta: {}
+          };
+        } catch (error) {
+          throw new McpError(ErrorCode.InvalidParams, `Failed to list tasks: ${error instanceof Error ? error.message : String(error)}`);
+        }
+      });
+      this.setRequestHandler(CancelTaskRequestSchema, async (request, extra) => {
+        try {
+          const task = await this._taskStore.getTask(request.params.taskId, extra.sessionId);
+          if (!task) {
+            throw new McpError(ErrorCode.InvalidParams, `Task not found: ${request.params.taskId}`);
+          }
+          if (isTerminal(task.status)) {
+            throw new McpError(ErrorCode.InvalidParams, `Cannot cancel task in terminal status: ${task.status}`);
+          }
+          await this._taskStore.updateTaskStatus(request.params.taskId, "cancelled", "Client cancelled task execution.", extra.sessionId);
+          this._clearTaskQueue(request.params.taskId);
+          const cancelledTask = await this._taskStore.getTask(request.params.taskId, extra.sessionId);
+          if (!cancelledTask) {
+            throw new McpError(ErrorCode.InvalidParams, `Task not found after cancellation: ${request.params.taskId}`);
+          }
+          return {
+            _meta: {},
+            ...cancelledTask
+          };
+        } catch (error) {
+          if (error instanceof McpError) {
+            throw error;
+          }
+          throw new McpError(ErrorCode.InvalidRequest, `Failed to cancel task: ${error instanceof Error ? error.message : String(error)}`);
+        }
+      });
+    }
+  }
+  async _oncancel(notification) {
+    if (!notification.params.requestId) {
+      return;
+    }
+    const controller = this._requestHandlerAbortControllers.get(notification.params.requestId);
+    controller?.abort(notification.params.reason);
+  }
+  _setupTimeout(messageId, timeout, maxTotalTimeout, onTimeout, resetTimeoutOnProgress = false) {
+    this._timeoutInfo.set(messageId, {
+      timeoutId: setTimeout(onTimeout, timeout),
+      startTime: Date.now(),
+      timeout,
+      maxTotalTimeout,
+      resetTimeoutOnProgress,
+      onTimeout
+    });
+  }
+  _resetTimeout(messageId) {
+    const info = this._timeoutInfo.get(messageId);
+    if (!info)
+      return false;
+    const totalElapsed = Date.now() - info.startTime;
+    if (info.maxTotalTimeout && totalElapsed >= info.maxTotalTimeout) {
+      this._timeoutInfo.delete(messageId);
+      throw McpError.fromError(ErrorCode.RequestTimeout, "Maximum total timeout exceeded", {
+        maxTotalTimeout: info.maxTotalTimeout,
+        totalElapsed
+      });
+    }
+    clearTimeout(info.timeoutId);
+    info.timeoutId = setTimeout(info.onTimeout, info.timeout);
+    return true;
+  }
+  _cleanupTimeout(messageId) {
+    const info = this._timeoutInfo.get(messageId);
+    if (info) {
+      clearTimeout(info.timeoutId);
+      this._timeoutInfo.delete(messageId);
+    }
+  }
+  async connect(transport) {
+    if (this._transport) {
+      throw new Error("Already connected to a transport. Call close() before connecting to a new transport, or use a separate Protocol instance per connection.");
+    }
+    this._transport = transport;
+    const _onclose = this.transport?.onclose;
+    this._transport.onclose = () => {
+      _onclose?.();
+      this._onclose();
+    };
+    const _onerror = this.transport?.onerror;
+    this._transport.onerror = (error) => {
+      _onerror?.(error);
+      this._onerror(error);
+    };
+    const _onmessage = this._transport?.onmessage;
+    this._transport.onmessage = (message, extra) => {
+      _onmessage?.(message, extra);
+      if (isJSONRPCResultResponse(message) || isJSONRPCErrorResponse(message)) {
+        this._onresponse(message);
+      } else if (isJSONRPCRequest(message)) {
+        this._onrequest(message, extra);
+      } else if (isJSONRPCNotification(message)) {
+        this._onnotification(message);
+      } else {
+        this._onerror(new Error(`Unknown message type: ${JSON.stringify(message)}`));
+      }
+    };
+    await this._transport.start();
+  }
+  _onclose() {
+    const responseHandlers = this._responseHandlers;
+    this._responseHandlers = new Map;
+    this._progressHandlers.clear();
+    this._taskProgressTokens.clear();
+    this._pendingDebouncedNotifications.clear();
+    for (const info of this._timeoutInfo.values()) {
+      clearTimeout(info.timeoutId);
+    }
+    this._timeoutInfo.clear();
+    for (const controller of this._requestHandlerAbortControllers.values()) {
+      controller.abort();
+    }
+    this._requestHandlerAbortControllers.clear();
+    const error = McpError.fromError(ErrorCode.ConnectionClosed, "Connection closed");
+    this._transport = undefined;
+    this.onclose?.();
+    for (const handler of responseHandlers.values()) {
+      handler(error);
+    }
+  }
+  _onerror(error) {
+    this.onerror?.(error);
+  }
+  _onnotification(notification) {
+    const handler = this._notificationHandlers.get(notification.method) ?? this.fallbackNotificationHandler;
+    if (handler === undefined) {
+      return;
+    }
+    Promise.resolve().then(() => handler(notification)).catch((error) => this._onerror(new Error(`Uncaught error in notification handler: ${error}`)));
+  }
+  _onrequest(request, extra) {
+    const handler = this._requestHandlers.get(request.method) ?? this.fallbackRequestHandler;
+    const capturedTransport = this._transport;
+    const relatedTaskId = request.params?._meta?.[RELATED_TASK_META_KEY]?.taskId;
+    if (handler === undefined) {
+      const errorResponse = {
+        jsonrpc: "2.0",
+        id: request.id,
+        error: {
+          code: ErrorCode.MethodNotFound,
+          message: "Method not found"
+        }
+      };
+      if (relatedTaskId && this._taskMessageQueue) {
+        this._enqueueTaskMessage(relatedTaskId, {
+          type: "error",
+          message: errorResponse,
+          timestamp: Date.now()
+        }, capturedTransport?.sessionId).catch((error) => this._onerror(new Error(`Failed to enqueue error response: ${error}`)));
+      } else {
+        capturedTransport?.send(errorResponse).catch((error) => this._onerror(new Error(`Failed to send an error response: ${error}`)));
+      }
+      return;
+    }
+    const abortController = new AbortController;
+    this._requestHandlerAbortControllers.set(request.id, abortController);
+    const taskCreationParams = isTaskAugmentedRequestParams(request.params) ? request.params.task : undefined;
+    const taskStore = this._taskStore ? this.requestTaskStore(request, capturedTransport?.sessionId) : undefined;
+    const fullExtra = {
+      signal: abortController.signal,
+      sessionId: capturedTransport?.sessionId,
+      _meta: request.params?._meta,
+      sendNotification: async (notification) => {
+        if (abortController.signal.aborted)
+          return;
+        const notificationOptions = { relatedRequestId: request.id };
+        if (relatedTaskId) {
+          notificationOptions.relatedTask = { taskId: relatedTaskId };
+        }
+        await this.notification(notification, notificationOptions);
+      },
+      sendRequest: async (r, resultSchema, options) => {
+        if (abortController.signal.aborted) {
+          throw new McpError(ErrorCode.ConnectionClosed, "Request was cancelled");
+        }
+        const requestOptions = { ...options, relatedRequestId: request.id };
+        if (relatedTaskId && !requestOptions.relatedTask) {
+          requestOptions.relatedTask = { taskId: relatedTaskId };
+        }
+        const effectiveTaskId = requestOptions.relatedTask?.taskId ?? relatedTaskId;
+        if (effectiveTaskId && taskStore) {
+          await taskStore.updateTaskStatus(effectiveTaskId, "input_required");
+        }
+        return await this.request(r, resultSchema, requestOptions);
+      },
+      authInfo: extra?.authInfo,
+      requestId: request.id,
+      requestInfo: extra?.requestInfo,
+      taskId: relatedTaskId,
+      taskStore,
+      taskRequestedTtl: taskCreationParams?.ttl,
+      closeSSEStream: extra?.closeSSEStream,
+      closeStandaloneSSEStream: extra?.closeStandaloneSSEStream
+    };
+    Promise.resolve().then(() => {
+      if (taskCreationParams) {
+        this.assertTaskHandlerCapability(request.method);
+      }
+    }).then(() => handler(request, fullExtra)).then(async (result) => {
+      if (abortController.signal.aborted) {
+        return;
+      }
+      const response = {
+        result,
+        jsonrpc: "2.0",
+        id: request.id
+      };
+      if (relatedTaskId && this._taskMessageQueue) {
+        await this._enqueueTaskMessage(relatedTaskId, {
+          type: "response",
+          message: response,
+          timestamp: Date.now()
+        }, capturedTransport?.sessionId);
+      } else {
+        await capturedTransport?.send(response);
+      }
+    }, async (error) => {
+      if (abortController.signal.aborted) {
+        return;
+      }
+      const errorResponse = {
+        jsonrpc: "2.0",
+        id: request.id,
+        error: {
+          code: Number.isSafeInteger(error["code"]) ? error["code"] : ErrorCode.InternalError,
+          message: error.message ?? "Internal error",
+          ...error["data"] !== undefined && { data: error["data"] }
+        }
+      };
+      if (relatedTaskId && this._taskMessageQueue) {
+        await this._enqueueTaskMessage(relatedTaskId, {
+          type: "error",
+          message: errorResponse,
+          timestamp: Date.now()
+        }, capturedTransport?.sessionId);
+      } else {
+        await capturedTransport?.send(errorResponse);
+      }
+    }).catch((error) => this._onerror(new Error(`Failed to send response: ${error}`))).finally(() => {
+      if (this._requestHandlerAbortControllers.get(request.id) === abortController) {
+        this._requestHandlerAbortControllers.delete(request.id);
+      }
+    });
+  }
+  _onprogress(notification) {
+    const { progressToken, ...params } = notification.params;
+    const messageId = Number(progressToken);
+    const handler = this._progressHandlers.get(messageId);
+    if (!handler) {
+      this._onerror(new Error(`Received a progress notification for an unknown token: ${JSON.stringify(notification)}`));
+      return;
+    }
+    const responseHandler = this._responseHandlers.get(messageId);
+    const timeoutInfo = this._timeoutInfo.get(messageId);
+    if (timeoutInfo && responseHandler && timeoutInfo.resetTimeoutOnProgress) {
+      try {
+        this._resetTimeout(messageId);
+      } catch (error) {
+        this._responseHandlers.delete(messageId);
+        this._progressHandlers.delete(messageId);
+        this._cleanupTimeout(messageId);
+        responseHandler(error);
+        return;
+      }
+    }
+    handler(params);
+  }
+  _onresponse(response) {
+    const messageId = Number(response.id);
+    const resolver = this._requestResolvers.get(messageId);
+    if (resolver) {
+      this._requestResolvers.delete(messageId);
+      if (isJSONRPCResultResponse(response)) {
+        resolver(response);
+      } else {
+        const error = new McpError(response.error.code, response.error.message, response.error.data);
+        resolver(error);
+      }
+      return;
+    }
+    const handler = this._responseHandlers.get(messageId);
+    if (handler === undefined) {
+      this._onerror(new Error(`Received a response for an unknown message ID: ${JSON.stringify(response)}`));
+      return;
+    }
+    this._responseHandlers.delete(messageId);
+    this._cleanupTimeout(messageId);
+    let isTaskResponse = false;
+    if (isJSONRPCResultResponse(response) && response.result && typeof response.result === "object") {
+      const result = response.result;
+      if (result.task && typeof result.task === "object") {
+        const task = result.task;
+        if (typeof task.taskId === "string") {
+          isTaskResponse = true;
+          this._taskProgressTokens.set(task.taskId, messageId);
+        }
+      }
+    }
+    if (!isTaskResponse) {
+      this._progressHandlers.delete(messageId);
+    }
+    if (isJSONRPCResultResponse(response)) {
+      handler(response);
+    } else {
+      const error = McpError.fromError(response.error.code, response.error.message, response.error.data);
+      handler(error);
+    }
+  }
+  get transport() {
+    return this._transport;
+  }
+  async close() {
+    await this._transport?.close();
+  }
+  async* requestStream(request, resultSchema, options) {
+    const { task } = options ?? {};
+    if (!task) {
+      try {
+        const result = await this.request(request, resultSchema, options);
+        yield { type: "result", result };
+      } catch (error) {
+        yield {
+          type: "error",
+          error: error instanceof McpError ? error : new McpError(ErrorCode.InternalError, String(error))
+        };
+      }
+      return;
+    }
+    let taskId;
+    try {
+      const createResult = await this.request(request, CreateTaskResultSchema, options);
+      if (createResult.task) {
+        taskId = createResult.task.taskId;
+        yield { type: "taskCreated", task: createResult.task };
+      } else {
+        throw new McpError(ErrorCode.InternalError, "Task creation did not return a task");
+      }
+      while (true) {
+        const task = await this.getTask({ taskId }, options);
+        yield { type: "taskStatus", task };
+        if (isTerminal(task.status)) {
+          if (task.status === "completed") {
+            const result = await this.getTaskResult({ taskId }, resultSchema, options);
+            yield { type: "result", result };
+          } else if (task.status === "failed") {
+            yield {
+              type: "error",
+              error: new McpError(ErrorCode.InternalError, `Task ${taskId} failed`)
+            };
+          } else if (task.status === "cancelled") {
+            yield {
+              type: "error",
+              error: new McpError(ErrorCode.InternalError, `Task ${taskId} was cancelled`)
+            };
+          }
+          return;
+        }
+        if (task.status === "input_required") {
+          const result = await this.getTaskResult({ taskId }, resultSchema, options);
+          yield { type: "result", result };
+          return;
+        }
+        const pollInterval = task.pollInterval ?? this._options?.defaultTaskPollInterval ?? 1000;
+        await new Promise((resolve) => setTimeout(resolve, pollInterval));
+        options?.signal?.throwIfAborted();
+      }
+    } catch (error) {
+      yield {
+        type: "error",
+        error: error instanceof McpError ? error : new McpError(ErrorCode.InternalError, String(error))
+      };
+    }
+  }
+  request(request, resultSchema, options) {
+    const { relatedRequestId, resumptionToken, onresumptiontoken, task, relatedTask } = options ?? {};
+    return new Promise((resolve, reject) => {
+      const earlyReject = (error) => {
+        reject(error);
+      };
+      if (!this._transport) {
+        earlyReject(new Error("Not connected"));
+        return;
+      }
+      if (this._options?.enforceStrictCapabilities === true) {
+        try {
+          this.assertCapabilityForMethod(request.method);
+          if (task) {
+            this.assertTaskCapability(request.method);
+          }
+        } catch (e) {
+          earlyReject(e);
+          return;
+        }
+      }
+      options?.signal?.throwIfAborted();
+      const messageId = this._requestMessageId++;
+      const jsonrpcRequest = {
+        ...request,
+        jsonrpc: "2.0",
+        id: messageId
+      };
+      if (options?.onprogress) {
+        this._progressHandlers.set(messageId, options.onprogress);
+        jsonrpcRequest.params = {
+          ...request.params,
+          _meta: {
+            ...request.params?._meta || {},
+            progressToken: messageId
+          }
+        };
+      }
+      if (task) {
+        jsonrpcRequest.params = {
+          ...jsonrpcRequest.params,
+          task
+        };
+      }
+      if (relatedTask) {
+        jsonrpcRequest.params = {
+          ...jsonrpcRequest.params,
+          _meta: {
+            ...jsonrpcRequest.params?._meta || {},
+            [RELATED_TASK_META_KEY]: relatedTask
+          }
+        };
+      }
+      const cancel = (reason) => {
+        this._responseHandlers.delete(messageId);
+        this._progressHandlers.delete(messageId);
+        this._cleanupTimeout(messageId);
+        this._transport?.send({
+          jsonrpc: "2.0",
+          method: "notifications/cancelled",
+          params: {
+            requestId: messageId,
+            reason: String(reason)
+          }
+        }, { relatedRequestId, resumptionToken, onresumptiontoken }).catch((error) => this._onerror(new Error(`Failed to send cancellation: ${error}`)));
+        const error = reason instanceof McpError ? reason : new McpError(ErrorCode.RequestTimeout, String(reason));
+        reject(error);
+      };
+      this._responseHandlers.set(messageId, (response) => {
+        if (options?.signal?.aborted) {
+          return;
+        }
+        if (response instanceof Error) {
+          return reject(response);
+        }
+        try {
+          const parseResult = safeParse2(resultSchema, response.result);
+          if (!parseResult.success) {
+            reject(parseResult.error);
+          } else {
+            resolve(parseResult.data);
+          }
+        } catch (error) {
+          reject(error);
+        }
+      });
+      options?.signal?.addEventListener("abort", () => {
+        cancel(options?.signal?.reason);
+      });
+      const timeout = options?.timeout ?? DEFAULT_REQUEST_TIMEOUT_MSEC;
+      const timeoutHandler = () => cancel(McpError.fromError(ErrorCode.RequestTimeout, "Request timed out", { timeout }));
+      this._setupTimeout(messageId, timeout, options?.maxTotalTimeout, timeoutHandler, options?.resetTimeoutOnProgress ?? false);
+      const relatedTaskId = relatedTask?.taskId;
+      if (relatedTaskId) {
+        const responseResolver = (response) => {
+          const handler = this._responseHandlers.get(messageId);
+          if (handler) {
+            handler(response);
+          } else {
+            this._onerror(new Error(`Response handler missing for side-channeled request ${messageId}`));
+          }
+        };
+        this._requestResolvers.set(messageId, responseResolver);
+        this._enqueueTaskMessage(relatedTaskId, {
+          type: "request",
+          message: jsonrpcRequest,
+          timestamp: Date.now()
+        }).catch((error) => {
+          this._cleanupTimeout(messageId);
+          reject(error);
+        });
+      } else {
+        this._transport.send(jsonrpcRequest, { relatedRequestId, resumptionToken, onresumptiontoken }).catch((error) => {
+          this._cleanupTimeout(messageId);
+          reject(error);
+        });
+      }
+    });
+  }
+  async getTask(params, options) {
+    return this.request({ method: "tasks/get", params }, GetTaskResultSchema, options);
+  }
+  async getTaskResult(params, resultSchema, options) {
+    return this.request({ method: "tasks/result", params }, resultSchema, options);
+  }
+  async listTasks(params, options) {
+    return this.request({ method: "tasks/list", params }, ListTasksResultSchema, options);
+  }
+  async cancelTask(params, options) {
+    return this.request({ method: "tasks/cancel", params }, CancelTaskResultSchema, options);
+  }
+  async notification(notification, options) {
+    if (!this._transport) {
+      throw new Error("Not connected");
+    }
+    this.assertNotificationCapability(notification.method);
+    const relatedTaskId = options?.relatedTask?.taskId;
+    if (relatedTaskId) {
+      const jsonrpcNotification = {
+        ...notification,
+        jsonrpc: "2.0",
+        params: {
+          ...notification.params,
+          _meta: {
+            ...notification.params?._meta || {},
+            [RELATED_TASK_META_KEY]: options.relatedTask
+          }
+        }
+      };
+      await this._enqueueTaskMessage(relatedTaskId, {
+        type: "notification",
+        message: jsonrpcNotification,
+        timestamp: Date.now()
+      });
+      return;
+    }
+    const debouncedMethods = this._options?.debouncedNotificationMethods ?? [];
+    const canDebounce = debouncedMethods.includes(notification.method) && !notification.params && !options?.relatedRequestId && !options?.relatedTask;
+    if (canDebounce) {
+      if (this._pendingDebouncedNotifications.has(notification.method)) {
+        return;
+      }
+      this._pendingDebouncedNotifications.add(notification.method);
+      Promise.resolve().then(() => {
+        this._pendingDebouncedNotifications.delete(notification.method);
+        if (!this._transport) {
+          return;
+        }
+        let jsonrpcNotification = {
+          ...notification,
+          jsonrpc: "2.0"
+        };
+        if (options?.relatedTask) {
+          jsonrpcNotification = {
+            ...jsonrpcNotification,
+            params: {
+              ...jsonrpcNotification.params,
+              _meta: {
+                ...jsonrpcNotification.params?._meta || {},
+                [RELATED_TASK_META_KEY]: options.relatedTask
+              }
+            }
+          };
+        }
+        this._transport?.send(jsonrpcNotification, options).catch((error) => this._onerror(error));
+      });
+      return;
+    }
+    let jsonrpcNotification = {
+      ...notification,
+      jsonrpc: "2.0"
+    };
+    if (options?.relatedTask) {
+      jsonrpcNotification = {
+        ...jsonrpcNotification,
+        params: {
+          ...jsonrpcNotification.params,
+          _meta: {
+            ...jsonrpcNotification.params?._meta || {},
+            [RELATED_TASK_META_KEY]: options.relatedTask
+          }
+        }
+      };
+    }
+    await this._transport.send(jsonrpcNotification, options);
+  }
+  setRequestHandler(requestSchema, handler) {
+    const method = getMethodLiteral(requestSchema);
+    this.assertRequestHandlerCapability(method);
+    this._requestHandlers.set(method, (request, extra) => {
+      const parsed = parseWithCompat(requestSchema, request);
+      return Promise.resolve(handler(parsed, extra));
+    });
+  }
+  removeRequestHandler(method) {
+    this._requestHandlers.delete(method);
+  }
+  assertCanSetRequestHandler(method) {
+    if (this._requestHandlers.has(method)) {
+      throw new Error(`A request handler for ${method} already exists, which would be overridden`);
+    }
+  }
+  setNotificationHandler(notificationSchema, handler) {
+    const method = getMethodLiteral(notificationSchema);
+    this._notificationHandlers.set(method, (notification) => {
+      const parsed = parseWithCompat(notificationSchema, notification);
+      return Promise.resolve(handler(parsed));
+    });
+  }
+  removeNotificationHandler(method) {
+    this._notificationHandlers.delete(method);
+  }
+  _cleanupTaskProgressHandler(taskId) {
+    const progressToken = this._taskProgressTokens.get(taskId);
+    if (progressToken !== undefined) {
+      this._progressHandlers.delete(progressToken);
+      this._taskProgressTokens.delete(taskId);
+    }
+  }
+  async _enqueueTaskMessage(taskId, message, sessionId) {
+    if (!this._taskStore || !this._taskMessageQueue) {
+      throw new Error("Cannot enqueue task message: taskStore and taskMessageQueue are not configured");
+    }
+    const maxQueueSize = this._options?.maxTaskQueueSize;
+    await this._taskMessageQueue.enqueue(taskId, message, sessionId, maxQueueSize);
+  }
+  async _clearTaskQueue(taskId, sessionId) {
+    if (this._taskMessageQueue) {
+      const messages = await this._taskMessageQueue.dequeueAll(taskId, sessionId);
+      for (const message of messages) {
+        if (message.type === "request" && isJSONRPCRequest(message.message)) {
+          const requestId = message.message.id;
+          const resolver = this._requestResolvers.get(requestId);
+          if (resolver) {
+            resolver(new McpError(ErrorCode.InternalError, "Task cancelled or completed"));
+            this._requestResolvers.delete(requestId);
+          } else {
+            this._onerror(new Error(`Resolver missing for request ${requestId} during task ${taskId} cleanup`));
+          }
+        }
+      }
+    }
+  }
+  async _waitForTaskUpdate(taskId, signal) {
+    let interval = this._options?.defaultTaskPollInterval ?? 1000;
+    try {
+      const task = await this._taskStore?.getTask(taskId);
+      if (task?.pollInterval) {
+        interval = task.pollInterval;
+      }
+    } catch {}
+    return new Promise((resolve, reject) => {
+      if (signal.aborted) {
+        reject(new McpError(ErrorCode.InvalidRequest, "Request cancelled"));
+        return;
+      }
+      const timeoutId = setTimeout(resolve, interval);
+      signal.addEventListener("abort", () => {
+        clearTimeout(timeoutId);
+        reject(new McpError(ErrorCode.InvalidRequest, "Request cancelled"));
+      }, { once: true });
+    });
+  }
+  requestTaskStore(request, sessionId) {
+    const taskStore = this._taskStore;
+    if (!taskStore) {
+      throw new Error("No task store configured");
+    }
+    return {
+      createTask: async (taskParams) => {
+        if (!request) {
+          throw new Error("No request provided");
+        }
+        return await taskStore.createTask(taskParams, request.id, {
+          method: request.method,
+          params: request.params
+        }, sessionId);
+      },
+      getTask: async (taskId) => {
+        const task = await taskStore.getTask(taskId, sessionId);
+        if (!task) {
+          throw new McpError(ErrorCode.InvalidParams, "Failed to retrieve task: Task not found");
+        }
+        return task;
+      },
+      storeTaskResult: async (taskId, status, result) => {
+        await taskStore.storeTaskResult(taskId, status, result, sessionId);
+        const task = await taskStore.getTask(taskId, sessionId);
+        if (task) {
+          const notification = TaskStatusNotificationSchema.parse({
+            method: "notifications/tasks/status",
+            params: task
+          });
+          await this.notification(notification);
+          if (isTerminal(task.status)) {
+            this._cleanupTaskProgressHandler(taskId);
+          }
+        }
+      },
+      getTaskResult: (taskId) => {
+        return taskStore.getTaskResult(taskId, sessionId);
+      },
+      updateTaskStatus: async (taskId, status, statusMessage) => {
+        const task = await taskStore.getTask(taskId, sessionId);
+        if (!task) {
+          throw new McpError(ErrorCode.InvalidParams, `Task "${taskId}" not found - it may have been cleaned up`);
+        }
+        if (isTerminal(task.status)) {
+          throw new McpError(ErrorCode.InvalidParams, `Cannot update task "${taskId}" from terminal status "${task.status}" to "${status}". Terminal states (completed, failed, cancelled) cannot transition to other states.`);
+        }
+        await taskStore.updateTaskStatus(taskId, status, statusMessage, sessionId);
+        const updatedTask = await taskStore.getTask(taskId, sessionId);
+        if (updatedTask) {
+          const notification = TaskStatusNotificationSchema.parse({
+            method: "notifications/tasks/status",
+            params: updatedTask
+          });
+          await this.notification(notification);
+          if (isTerminal(updatedTask.status)) {
+            this._cleanupTaskProgressHandler(taskId);
+          }
+        }
+      },
+      listTasks: (cursor) => {
+        return taskStore.listTasks(cursor, sessionId);
+      }
+    };
+  }
+}
+function isPlainObject2(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+function mergeCapabilities(base, additional) {
+  const result = { ...base };
+  for (const key in additional) {
+    const k = key;
+    const addValue = additional[k];
+    if (addValue === undefined)
+      continue;
+    const baseValue = result[k];
+    if (isPlainObject2(baseValue) && isPlainObject2(addValue)) {
+      result[k] = { ...baseValue, ...addValue };
+    } else {
+      result[k] = addValue;
+    }
+  }
+  return result;
+}
+var DEFAULT_REQUEST_TIMEOUT_MSEC = 60000;
+var init_protocol = __esm(() => {
+  init_zod_compat();
+  init_types();
+  init_zod_json_schema_compat();
 });
 
 // node_modules/ajv/dist/compile/codegen/code.js
@@ -13667,6 +22343,618 @@ var require_dist2 = __commonJS(function(exports, module) {
   exports.default = formatsPlugin;
 });
 
+// node_modules/@modelcontextprotocol/sdk/dist/esm/validation/ajv-provider.js
+function createDefaultAjvInstance() {
+  const ajv = new import_ajv.default({
+    strict: false,
+    validateFormats: true,
+    validateSchema: false,
+    allErrors: true
+  });
+  const addFormats = import_ajv_formats.default;
+  addFormats(ajv);
+  return ajv;
+}
+
+class AjvJsonSchemaValidator {
+  constructor(ajv) {
+    this._ajv = ajv ?? createDefaultAjvInstance();
+  }
+  getValidator(schema) {
+    const ajvValidator = "$id" in schema && typeof schema.$id === "string" ? this._ajv.getSchema(schema.$id) ?? this._ajv.compile(schema) : this._ajv.compile(schema);
+    return (input) => {
+      const valid = ajvValidator(input);
+      if (valid) {
+        return {
+          valid: true,
+          data: input,
+          errorMessage: undefined
+        };
+      } else {
+        return {
+          valid: false,
+          data: undefined,
+          errorMessage: this._ajv.errorsText(ajvValidator.errors)
+        };
+      }
+    };
+  }
+}
+var import_ajv, import_ajv_formats;
+var init_ajv_provider = __esm(() => {
+  import_ajv = __toESM(require_ajv(), 1);
+  import_ajv_formats = __toESM(require_dist2(), 1);
+});
+
+// node_modules/@modelcontextprotocol/sdk/dist/esm/experimental/tasks/client.js
+class ExperimentalClientTasks {
+  constructor(_client) {
+    this._client = _client;
+  }
+  async* callToolStream(params, resultSchema = CallToolResultSchema, options) {
+    const clientInternal = this._client;
+    const optionsWithTask = {
+      ...options,
+      task: options?.task ?? (clientInternal.isToolTask(params.name) ? {} : undefined)
+    };
+    const stream = clientInternal.requestStream({ method: "tools/call", params }, resultSchema, optionsWithTask);
+    const validator = clientInternal.getToolOutputValidator(params.name);
+    for await (const message of stream) {
+      if (message.type === "result" && validator) {
+        const result = message.result;
+        if (!result.structuredContent && !result.isError) {
+          yield {
+            type: "error",
+            error: new McpError(ErrorCode.InvalidRequest, `Tool ${params.name} has an output schema but did not return structured content`)
+          };
+          return;
+        }
+        if (result.structuredContent) {
+          try {
+            const validationResult = validator(result.structuredContent);
+            if (!validationResult.valid) {
+              yield {
+                type: "error",
+                error: new McpError(ErrorCode.InvalidParams, `Structured content does not match the tool's output schema: ${validationResult.errorMessage}`)
+              };
+              return;
+            }
+          } catch (error) {
+            if (error instanceof McpError) {
+              yield { type: "error", error };
+              return;
+            }
+            yield {
+              type: "error",
+              error: new McpError(ErrorCode.InvalidParams, `Failed to validate structured content: ${error instanceof Error ? error.message : String(error)}`)
+            };
+            return;
+          }
+        }
+      }
+      yield message;
+    }
+  }
+  async getTask(taskId, options) {
+    return this._client.getTask({ taskId }, options);
+  }
+  async getTaskResult(taskId, resultSchema, options) {
+    return this._client.getTaskResult({ taskId }, resultSchema, options);
+  }
+  async listTasks(cursor, options) {
+    return this._client.listTasks(cursor ? { cursor } : undefined, options);
+  }
+  async cancelTask(taskId, options) {
+    return this._client.cancelTask({ taskId }, options);
+  }
+  requestStream(request, resultSchema, options) {
+    return this._client.requestStream(request, resultSchema, options);
+  }
+}
+var init_client = __esm(() => {
+  init_types();
+});
+
+// node_modules/@modelcontextprotocol/sdk/dist/esm/experimental/tasks/helpers.js
+function assertToolsCallTaskCapability(requests, method, entityName) {
+  if (!requests) {
+    throw new Error(`${entityName} does not support task creation (required for ${method})`);
+  }
+  switch (method) {
+    case "tools/call":
+      if (!requests.tools?.call) {
+        throw new Error(`${entityName} does not support task creation for tools/call (required for ${method})`);
+      }
+      break;
+    default:
+      break;
+  }
+}
+function assertClientRequestTaskCapability(requests, method, entityName) {
+  if (!requests) {
+    throw new Error(`${entityName} does not support task creation (required for ${method})`);
+  }
+  switch (method) {
+    case "sampling/createMessage":
+      if (!requests.sampling?.createMessage) {
+        throw new Error(`${entityName} does not support task creation for sampling/createMessage (required for ${method})`);
+      }
+      break;
+    case "elicitation/create":
+      if (!requests.elicitation?.create) {
+        throw new Error(`${entityName} does not support task creation for elicitation/create (required for ${method})`);
+      }
+      break;
+    default:
+      break;
+  }
+}
+
+// node_modules/@modelcontextprotocol/sdk/dist/esm/client/index.js
+function applyElicitationDefaults(schema, data) {
+  if (!schema || data === null || typeof data !== "object")
+    return;
+  if (schema.type === "object" && schema.properties && typeof schema.properties === "object") {
+    const obj = data;
+    const props = schema.properties;
+    for (const key of Object.keys(props)) {
+      const propSchema = props[key];
+      if (obj[key] === undefined && Object.prototype.hasOwnProperty.call(propSchema, "default")) {
+        obj[key] = propSchema.default;
+      }
+      if (obj[key] !== undefined) {
+        applyElicitationDefaults(propSchema, obj[key]);
+      }
+    }
+  }
+  if (Array.isArray(schema.anyOf)) {
+    for (const sub of schema.anyOf) {
+      if (typeof sub !== "boolean") {
+        applyElicitationDefaults(sub, data);
+      }
+    }
+  }
+  if (Array.isArray(schema.oneOf)) {
+    for (const sub of schema.oneOf) {
+      if (typeof sub !== "boolean") {
+        applyElicitationDefaults(sub, data);
+      }
+    }
+  }
+}
+function getSupportedElicitationModes(capabilities) {
+  if (!capabilities) {
+    return { supportsFormMode: false, supportsUrlMode: false };
+  }
+  const hasFormCapability = capabilities.form !== undefined;
+  const hasUrlCapability = capabilities.url !== undefined;
+  const supportsFormMode = hasFormCapability || !hasFormCapability && !hasUrlCapability;
+  const supportsUrlMode = hasUrlCapability;
+  return { supportsFormMode, supportsUrlMode };
+}
+var Client;
+var init_client2 = __esm(() => {
+  init_protocol();
+  init_types();
+  init_ajv_provider();
+  init_zod_compat();
+  init_client();
+  Client = class Client extends Protocol {
+    constructor(_clientInfo, options) {
+      super(options);
+      this._clientInfo = _clientInfo;
+      this._cachedToolOutputValidators = new Map;
+      this._cachedKnownTaskTools = new Set;
+      this._cachedRequiredTaskTools = new Set;
+      this._listChangedDebounceTimers = new Map;
+      this._capabilities = options?.capabilities ?? {};
+      this._jsonSchemaValidator = options?.jsonSchemaValidator ?? new AjvJsonSchemaValidator;
+      if (options?.listChanged) {
+        this._pendingListChangedConfig = options.listChanged;
+      }
+    }
+    _setupListChangedHandlers(config) {
+      if (config.tools && this._serverCapabilities?.tools?.listChanged) {
+        this._setupListChangedHandler("tools", ToolListChangedNotificationSchema, config.tools, async () => {
+          const result = await this.listTools();
+          return result.tools;
+        });
+      }
+      if (config.prompts && this._serverCapabilities?.prompts?.listChanged) {
+        this._setupListChangedHandler("prompts", PromptListChangedNotificationSchema, config.prompts, async () => {
+          const result = await this.listPrompts();
+          return result.prompts;
+        });
+      }
+      if (config.resources && this._serverCapabilities?.resources?.listChanged) {
+        this._setupListChangedHandler("resources", ResourceListChangedNotificationSchema, config.resources, async () => {
+          const result = await this.listResources();
+          return result.resources;
+        });
+      }
+    }
+    get experimental() {
+      if (!this._experimental) {
+        this._experimental = {
+          tasks: new ExperimentalClientTasks(this)
+        };
+      }
+      return this._experimental;
+    }
+    registerCapabilities(capabilities) {
+      if (this.transport) {
+        throw new Error("Cannot register capabilities after connecting to transport");
+      }
+      this._capabilities = mergeCapabilities(this._capabilities, capabilities);
+    }
+    setRequestHandler(requestSchema, handler) {
+      const shape = getObjectShape(requestSchema);
+      const methodSchema = shape?.method;
+      if (!methodSchema) {
+        throw new Error("Schema is missing a method literal");
+      }
+      const methodValue = getLiteralValue(methodSchema);
+      if (typeof methodValue !== "string") {
+        throw new Error("Schema method literal must be a string");
+      }
+      const method = methodValue;
+      if (method === "elicitation/create") {
+        const wrappedHandler = async (request, extra) => {
+          const validatedRequest = safeParse2(ElicitRequestSchema, request);
+          if (!validatedRequest.success) {
+            const errorMessage = validatedRequest.error instanceof Error ? validatedRequest.error.message : String(validatedRequest.error);
+            throw new McpError(ErrorCode.InvalidParams, `Invalid elicitation request: ${errorMessage}`);
+          }
+          const { params } = validatedRequest.data;
+          params.mode = params.mode ?? "form";
+          const { supportsFormMode, supportsUrlMode } = getSupportedElicitationModes(this._capabilities.elicitation);
+          if (params.mode === "form" && !supportsFormMode) {
+            throw new McpError(ErrorCode.InvalidParams, "Client does not support form-mode elicitation requests");
+          }
+          if (params.mode === "url" && !supportsUrlMode) {
+            throw new McpError(ErrorCode.InvalidParams, "Client does not support URL-mode elicitation requests");
+          }
+          const result = await Promise.resolve(handler(request, extra));
+          if (params.task) {
+            const taskValidationResult = safeParse2(CreateTaskResultSchema, result);
+            if (!taskValidationResult.success) {
+              const errorMessage = taskValidationResult.error instanceof Error ? taskValidationResult.error.message : String(taskValidationResult.error);
+              throw new McpError(ErrorCode.InvalidParams, `Invalid task creation result: ${errorMessage}`);
+            }
+            return taskValidationResult.data;
+          }
+          const validationResult = safeParse2(ElicitResultSchema, result);
+          if (!validationResult.success) {
+            const errorMessage = validationResult.error instanceof Error ? validationResult.error.message : String(validationResult.error);
+            throw new McpError(ErrorCode.InvalidParams, `Invalid elicitation result: ${errorMessage}`);
+          }
+          const validatedResult = validationResult.data;
+          const requestedSchema = params.mode === "form" ? params.requestedSchema : undefined;
+          if (params.mode === "form" && validatedResult.action === "accept" && validatedResult.content && requestedSchema) {
+            if (this._capabilities.elicitation?.form?.applyDefaults) {
+              try {
+                applyElicitationDefaults(requestedSchema, validatedResult.content);
+              } catch {}
+            }
+          }
+          return validatedResult;
+        };
+        return super.setRequestHandler(requestSchema, wrappedHandler);
+      }
+      if (method === "sampling/createMessage") {
+        const wrappedHandler = async (request, extra) => {
+          const validatedRequest = safeParse2(CreateMessageRequestSchema, request);
+          if (!validatedRequest.success) {
+            const errorMessage = validatedRequest.error instanceof Error ? validatedRequest.error.message : String(validatedRequest.error);
+            throw new McpError(ErrorCode.InvalidParams, `Invalid sampling request: ${errorMessage}`);
+          }
+          const { params } = validatedRequest.data;
+          const result = await Promise.resolve(handler(request, extra));
+          if (params.task) {
+            const taskValidationResult = safeParse2(CreateTaskResultSchema, result);
+            if (!taskValidationResult.success) {
+              const errorMessage = taskValidationResult.error instanceof Error ? taskValidationResult.error.message : String(taskValidationResult.error);
+              throw new McpError(ErrorCode.InvalidParams, `Invalid task creation result: ${errorMessage}`);
+            }
+            return taskValidationResult.data;
+          }
+          const hasTools = params.tools || params.toolChoice;
+          const resultSchema = hasTools ? CreateMessageResultWithToolsSchema : CreateMessageResultSchema;
+          const validationResult = safeParse2(resultSchema, result);
+          if (!validationResult.success) {
+            const errorMessage = validationResult.error instanceof Error ? validationResult.error.message : String(validationResult.error);
+            throw new McpError(ErrorCode.InvalidParams, `Invalid sampling result: ${errorMessage}`);
+          }
+          return validationResult.data;
+        };
+        return super.setRequestHandler(requestSchema, wrappedHandler);
+      }
+      return super.setRequestHandler(requestSchema, handler);
+    }
+    assertCapability(capability, method) {
+      if (!this._serverCapabilities?.[capability]) {
+        throw new Error(`Server does not support ${capability} (required for ${method})`);
+      }
+    }
+    async connect(transport, options) {
+      await super.connect(transport);
+      if (transport.sessionId !== undefined) {
+        return;
+      }
+      try {
+        const result = await this.request({
+          method: "initialize",
+          params: {
+            protocolVersion: LATEST_PROTOCOL_VERSION,
+            capabilities: this._capabilities,
+            clientInfo: this._clientInfo
+          }
+        }, InitializeResultSchema, options);
+        if (result === undefined) {
+          throw new Error(`Server sent invalid initialize result: ${result}`);
+        }
+        if (!SUPPORTED_PROTOCOL_VERSIONS.includes(result.protocolVersion)) {
+          throw new Error(`Server's protocol version is not supported: ${result.protocolVersion}`);
+        }
+        this._serverCapabilities = result.capabilities;
+        this._serverVersion = result.serverInfo;
+        if (transport.setProtocolVersion) {
+          transport.setProtocolVersion(result.protocolVersion);
+        }
+        this._instructions = result.instructions;
+        await this.notification({
+          method: "notifications/initialized"
+        });
+        if (this._pendingListChangedConfig) {
+          this._setupListChangedHandlers(this._pendingListChangedConfig);
+          this._pendingListChangedConfig = undefined;
+        }
+      } catch (error) {
+        this.close();
+        throw error;
+      }
+    }
+    getServerCapabilities() {
+      return this._serverCapabilities;
+    }
+    getServerVersion() {
+      return this._serverVersion;
+    }
+    getInstructions() {
+      return this._instructions;
+    }
+    assertCapabilityForMethod(method) {
+      switch (method) {
+        case "logging/setLevel":
+          if (!this._serverCapabilities?.logging) {
+            throw new Error(`Server does not support logging (required for ${method})`);
+          }
+          break;
+        case "prompts/get":
+        case "prompts/list":
+          if (!this._serverCapabilities?.prompts) {
+            throw new Error(`Server does not support prompts (required for ${method})`);
+          }
+          break;
+        case "resources/list":
+        case "resources/templates/list":
+        case "resources/read":
+        case "resources/subscribe":
+        case "resources/unsubscribe":
+          if (!this._serverCapabilities?.resources) {
+            throw new Error(`Server does not support resources (required for ${method})`);
+          }
+          if (method === "resources/subscribe" && !this._serverCapabilities.resources.subscribe) {
+            throw new Error(`Server does not support resource subscriptions (required for ${method})`);
+          }
+          break;
+        case "tools/call":
+        case "tools/list":
+          if (!this._serverCapabilities?.tools) {
+            throw new Error(`Server does not support tools (required for ${method})`);
+          }
+          break;
+        case "completion/complete":
+          if (!this._serverCapabilities?.completions) {
+            throw new Error(`Server does not support completions (required for ${method})`);
+          }
+          break;
+        case "initialize":
+          break;
+        case "ping":
+          break;
+      }
+    }
+    assertNotificationCapability(method) {
+      switch (method) {
+        case "notifications/roots/list_changed":
+          if (!this._capabilities.roots?.listChanged) {
+            throw new Error(`Client does not support roots list changed notifications (required for ${method})`);
+          }
+          break;
+        case "notifications/initialized":
+          break;
+        case "notifications/cancelled":
+          break;
+        case "notifications/progress":
+          break;
+      }
+    }
+    assertRequestHandlerCapability(method) {
+      if (!this._capabilities) {
+        return;
+      }
+      switch (method) {
+        case "sampling/createMessage":
+          if (!this._capabilities.sampling) {
+            throw new Error(`Client does not support sampling capability (required for ${method})`);
+          }
+          break;
+        case "elicitation/create":
+          if (!this._capabilities.elicitation) {
+            throw new Error(`Client does not support elicitation capability (required for ${method})`);
+          }
+          break;
+        case "roots/list":
+          if (!this._capabilities.roots) {
+            throw new Error(`Client does not support roots capability (required for ${method})`);
+          }
+          break;
+        case "tasks/get":
+        case "tasks/list":
+        case "tasks/result":
+        case "tasks/cancel":
+          if (!this._capabilities.tasks) {
+            throw new Error(`Client does not support tasks capability (required for ${method})`);
+          }
+          break;
+        case "ping":
+          break;
+      }
+    }
+    assertTaskCapability(method) {
+      assertToolsCallTaskCapability(this._serverCapabilities?.tasks?.requests, method, "Server");
+    }
+    assertTaskHandlerCapability(method) {
+      if (!this._capabilities) {
+        return;
+      }
+      assertClientRequestTaskCapability(this._capabilities.tasks?.requests, method, "Client");
+    }
+    async ping(options) {
+      return this.request({ method: "ping" }, EmptyResultSchema, options);
+    }
+    async complete(params, options) {
+      return this.request({ method: "completion/complete", params }, CompleteResultSchema, options);
+    }
+    async setLoggingLevel(level, options) {
+      return this.request({ method: "logging/setLevel", params: { level } }, EmptyResultSchema, options);
+    }
+    async getPrompt(params, options) {
+      return this.request({ method: "prompts/get", params }, GetPromptResultSchema, options);
+    }
+    async listPrompts(params, options) {
+      return this.request({ method: "prompts/list", params }, ListPromptsResultSchema, options);
+    }
+    async listResources(params, options) {
+      return this.request({ method: "resources/list", params }, ListResourcesResultSchema, options);
+    }
+    async listResourceTemplates(params, options) {
+      return this.request({ method: "resources/templates/list", params }, ListResourceTemplatesResultSchema, options);
+    }
+    async readResource(params, options) {
+      return this.request({ method: "resources/read", params }, ReadResourceResultSchema, options);
+    }
+    async subscribeResource(params, options) {
+      return this.request({ method: "resources/subscribe", params }, EmptyResultSchema, options);
+    }
+    async unsubscribeResource(params, options) {
+      return this.request({ method: "resources/unsubscribe", params }, EmptyResultSchema, options);
+    }
+    async callTool(params, resultSchema = CallToolResultSchema, options) {
+      if (this.isToolTaskRequired(params.name)) {
+        throw new McpError(ErrorCode.InvalidRequest, `Tool "${params.name}" requires task-based execution. Use client.experimental.tasks.callToolStream() instead.`);
+      }
+      const result = await this.request({ method: "tools/call", params }, resultSchema, options);
+      const validator = this.getToolOutputValidator(params.name);
+      if (validator) {
+        if (!result.structuredContent && !result.isError) {
+          throw new McpError(ErrorCode.InvalidRequest, `Tool ${params.name} has an output schema but did not return structured content`);
+        }
+        if (result.structuredContent) {
+          try {
+            const validationResult = validator(result.structuredContent);
+            if (!validationResult.valid) {
+              throw new McpError(ErrorCode.InvalidParams, `Structured content does not match the tool's output schema: ${validationResult.errorMessage}`);
+            }
+          } catch (error) {
+            if (error instanceof McpError) {
+              throw error;
+            }
+            throw new McpError(ErrorCode.InvalidParams, `Failed to validate structured content: ${error instanceof Error ? error.message : String(error)}`);
+          }
+        }
+      }
+      return result;
+    }
+    isToolTask(toolName) {
+      if (!this._serverCapabilities?.tasks?.requests?.tools?.call) {
+        return false;
+      }
+      return this._cachedKnownTaskTools.has(toolName);
+    }
+    isToolTaskRequired(toolName) {
+      return this._cachedRequiredTaskTools.has(toolName);
+    }
+    cacheToolMetadata(tools) {
+      this._cachedToolOutputValidators.clear();
+      this._cachedKnownTaskTools.clear();
+      this._cachedRequiredTaskTools.clear();
+      for (const tool of tools) {
+        if (tool.outputSchema) {
+          const toolValidator = this._jsonSchemaValidator.getValidator(tool.outputSchema);
+          this._cachedToolOutputValidators.set(tool.name, toolValidator);
+        }
+        const taskSupport = tool.execution?.taskSupport;
+        if (taskSupport === "required" || taskSupport === "optional") {
+          this._cachedKnownTaskTools.add(tool.name);
+        }
+        if (taskSupport === "required") {
+          this._cachedRequiredTaskTools.add(tool.name);
+        }
+      }
+    }
+    getToolOutputValidator(toolName) {
+      return this._cachedToolOutputValidators.get(toolName);
+    }
+    async listTools(params, options) {
+      const result = await this.request({ method: "tools/list", params }, ListToolsResultSchema, options);
+      this.cacheToolMetadata(result.tools);
+      return result;
+    }
+    _setupListChangedHandler(listType, notificationSchema, options, fetcher) {
+      const parseResult = ListChangedOptionsBaseSchema.safeParse(options);
+      if (!parseResult.success) {
+        throw new Error(`Invalid ${listType} listChanged options: ${parseResult.error.message}`);
+      }
+      if (typeof options.onChanged !== "function") {
+        throw new Error(`Invalid ${listType} listChanged options: onChanged must be a function`);
+      }
+      const { autoRefresh, debounceMs } = parseResult.data;
+      const { onChanged } = options;
+      const refresh = async () => {
+        if (!autoRefresh) {
+          onChanged(null, null);
+          return;
+        }
+        try {
+          const items = await fetcher();
+          onChanged(null, items);
+        } catch (e) {
+          const error = e instanceof Error ? e : new Error(String(e));
+          onChanged(error, null);
+        }
+      };
+      const handler = () => {
+        if (debounceMs) {
+          const existingTimer = this._listChangedDebounceTimers.get(listType);
+          if (existingTimer) {
+            clearTimeout(existingTimer);
+          }
+          const timer = setTimeout(refresh, debounceMs);
+          this._listChangedDebounceTimers.set(listType, timer);
+        } else {
+          refresh();
+        }
+      };
+      this.setNotificationHandler(notificationSchema, handler);
+    }
+    async sendRootsListChanged() {
+      return this.notification({ method: "notifications/roots/list_changed" });
+    }
+  };
+});
+
 // node_modules/isexe/windows.js
 var require_windows = __commonJS(function(exports, module) {
   module.exports = isexe;
@@ -14123,8930 +23411,7 @@ var require_cross_spawn = __commonJS(function(exports, module) {
   module.exports._enoent = enoent;
 });
 
-// node_modules/commander/index.js
-var exports_commander = {};
-__exportCjs(exports_commander, {
-  program: () => $program,
-  createCommand: () => $createCommand,
-  createOption: () => $createOption,
-  createArgument: () => $createArgument,
-  Command: () => $Command,
-  Option: () => $Option,
-  Argument: () => $Argument,
-  Help: () => $Help,
-  CommanderError: () => $CommanderError,
-  InvalidArgumentError: () => $InvalidArgumentError,
-  InvalidOptionArgumentError: () => $InvalidOptionArgumentError
-}, {
-  program: (value) => $program = value,
-  createCommand: (value) => $createCommand = value,
-  createOption: (value) => $createOption = value,
-  createArgument: (value) => $createArgument = value,
-  Command: (value) => $Command = value,
-  Option: (value) => $Option = value,
-  Argument: (value) => $Argument = value,
-  Help: (value) => $Help = value,
-  CommanderError: (value) => $CommanderError = value,
-  InvalidArgumentError: (value) => $InvalidArgumentError = value,
-  InvalidOptionArgumentError: (value) => $InvalidOptionArgumentError = value
-});
-var { Argument } = require_argument();
-var { Command } = require_command();
-var { CommanderError, InvalidArgumentError } = require_error();
-var { Help } = require_help();
-var { Option } = require_option();
-var $program = new Command;
-var $createCommand = (name) => new Command(name);
-var $createOption = (flags, description) => new Option(flags, description);
-var $createArgument = (name, description) => new Argument(name, description);
-var $Command = Command;
-var $Option = Option;
-var $Argument = Argument;
-var $Help = Help;
-var $CommanderError = CommanderError;
-var $InvalidArgumentError = InvalidArgumentError;
-var $InvalidOptionArgumentError = InvalidArgumentError;
-
-// node_modules/commander/esm.mjs
-var {
-  program,
-  createCommand,
-  createArgument,
-  createOption,
-  CommanderError: CommanderError2,
-  InvalidArgumentError: InvalidArgumentError2,
-  InvalidOptionArgumentError,
-  Command: Command2,
-  Argument: Argument2,
-  Option: Option2,
-  Help: Help2
-} = exports_commander;
-// package.json
-var package_default = {
-  name: "backlog-jira",
-  version: "0.2.0",
-  description: "Bidirectional sync plugin between Backlog.md and Jira via MCP",
-  type: "module",
-  author: "Emanuel Ciuca <emanuel.ciuca@gmail.com>",
-  license: "MIT",
-  repository: {
-    type: "git",
-    url: "https://github.com/eciuca/Backlog.md-jira-plugin.git"
-  },
-  bugs: {
-    url: "https://github.com/eciuca/Backlog.md-jira-plugin/issues"
-  },
-  homepage: "https://github.com/eciuca/Backlog.md-jira-plugin#readme",
-  keywords: [
-    "backlog",
-    "jira",
-    "plugin",
-    "cli",
-    "sync",
-    "bidirectional",
-    "mcp",
-    "task-management",
-    "atlassian",
-    "project-management"
-  ],
-  bin: {
-    "backlog-jira": "dist/cli.js"
-  },
-  files: ["dist", "README.md", "LICENSE"],
-  scripts: {
-    build: "bun build --target=node --external pino --external pino-pretty src/cli.ts --outdir=dist",
-    dev: "bun run src/cli.ts",
-    test: "bun test",
-    "test:integration": "./tests/integration/test-clean-install.sh",
-    check: "biome check .",
-    "check:types": "tsc --noEmit",
-    "check:dist": "bun run build && git diff --exit-code --stat -- dist",
-    prepublishOnly: "npm run build && npm run check && npm run test"
-  },
-  dependencies: {
-    "@modelcontextprotocol/sdk": "^1.30.1",
-    chalk: "^5.6.2",
-    commander: "^12.1.0",
-    pino: "^8.21.0",
-    "pino-pretty": "^10.3.1",
-    prompts: "^2.4.2"
-  },
-  devDependencies: {
-    "@biomejs/biome": "^1.9.4",
-    "@types/node": "^20.19.43",
-    "@types/prompts": "^2.4.9",
-    "bun-types": "^1.4.2",
-    typescript: "^5.9.3"
-  },
-  engines: {
-    node: ">=20"
-  }
-};
-
-// src/commands/configure.ts
-import { existsSync as existsSync5, mkdirSync as mkdirSync4, readFileSync as readFileSync7, writeFileSync as writeFileSync6 } from "node:fs";
-import { join as join6 } from "node:path";
-
-// node_modules/chalk/source/vendor/ansi-styles/index.js
-var ANSI_BACKGROUND_OFFSET = 10;
-var wrapAnsi16 = (offset = 0) => (code) => `\x1B[${code + offset}m`;
-var wrapAnsi256 = (offset = 0) => (code) => `\x1B[${38 + offset};5;${code}m`;
-var wrapAnsi16m = (offset = 0) => (red, green, blue) => `\x1B[${38 + offset};2;${red};${green};${blue}m`;
-var styles = {
-  modifier: {
-    reset: [0, 0],
-    bold: [1, 22],
-    dim: [2, 22],
-    italic: [3, 23],
-    underline: [4, 24],
-    overline: [53, 55],
-    inverse: [7, 27],
-    hidden: [8, 28],
-    strikethrough: [9, 29]
-  },
-  color: {
-    black: [30, 39],
-    red: [31, 39],
-    green: [32, 39],
-    yellow: [33, 39],
-    blue: [34, 39],
-    magenta: [35, 39],
-    cyan: [36, 39],
-    white: [37, 39],
-    blackBright: [90, 39],
-    gray: [90, 39],
-    grey: [90, 39],
-    redBright: [91, 39],
-    greenBright: [92, 39],
-    yellowBright: [93, 39],
-    blueBright: [94, 39],
-    magentaBright: [95, 39],
-    cyanBright: [96, 39],
-    whiteBright: [97, 39]
-  },
-  bgColor: {
-    bgBlack: [40, 49],
-    bgRed: [41, 49],
-    bgGreen: [42, 49],
-    bgYellow: [43, 49],
-    bgBlue: [44, 49],
-    bgMagenta: [45, 49],
-    bgCyan: [46, 49],
-    bgWhite: [47, 49],
-    bgBlackBright: [100, 49],
-    bgGray: [100, 49],
-    bgGrey: [100, 49],
-    bgRedBright: [101, 49],
-    bgGreenBright: [102, 49],
-    bgYellowBright: [103, 49],
-    bgBlueBright: [104, 49],
-    bgMagentaBright: [105, 49],
-    bgCyanBright: [106, 49],
-    bgWhiteBright: [107, 49]
-  }
-};
-var modifierNames = Object.keys(styles.modifier);
-var foregroundColorNames = Object.keys(styles.color);
-var backgroundColorNames = Object.keys(styles.bgColor);
-var colorNames = [...foregroundColorNames, ...backgroundColorNames];
-function assembleStyles() {
-  const codes = new Map;
-  for (const [groupName, group] of Object.entries(styles)) {
-    for (const [styleName, style] of Object.entries(group)) {
-      styles[styleName] = {
-        open: `\x1B[${style[0]}m`,
-        close: `\x1B[${style[1]}m`
-      };
-      group[styleName] = styles[styleName];
-      codes.set(style[0], style[1]);
-    }
-    Object.defineProperty(styles, groupName, {
-      value: group,
-      enumerable: false
-    });
-  }
-  Object.defineProperty(styles, "codes", {
-    value: codes,
-    enumerable: false
-  });
-  styles.color.close = "\x1B[39m";
-  styles.bgColor.close = "\x1B[49m";
-  styles.color.ansi = wrapAnsi16();
-  styles.color.ansi256 = wrapAnsi256();
-  styles.color.ansi16m = wrapAnsi16m();
-  styles.bgColor.ansi = wrapAnsi16(ANSI_BACKGROUND_OFFSET);
-  styles.bgColor.ansi256 = wrapAnsi256(ANSI_BACKGROUND_OFFSET);
-  styles.bgColor.ansi16m = wrapAnsi16m(ANSI_BACKGROUND_OFFSET);
-  Object.defineProperties(styles, {
-    rgbToAnsi256: {
-      value(red, green, blue) {
-        if (red === green && green === blue) {
-          if (red < 8) {
-            return 16;
-          }
-          if (red > 248) {
-            return 231;
-          }
-          return Math.round((red - 8) / 247 * 24) + 232;
-        }
-        return 16 + 36 * Math.round(red / 255 * 5) + 6 * Math.round(green / 255 * 5) + Math.round(blue / 255 * 5);
-      },
-      enumerable: false
-    },
-    hexToRgb: {
-      value(hex) {
-        const matches = /[a-f\d]{6}|[a-f\d]{3}/i.exec(hex.toString(16));
-        if (!matches) {
-          return [0, 0, 0];
-        }
-        let [colorString] = matches;
-        if (colorString.length === 3) {
-          colorString = [...colorString].map((character) => character + character).join("");
-        }
-        const integer = Number.parseInt(colorString, 16);
-        return [
-          integer >> 16 & 255,
-          integer >> 8 & 255,
-          integer & 255
-        ];
-      },
-      enumerable: false
-    },
-    hexToAnsi256: {
-      value: (hex) => styles.rgbToAnsi256(...styles.hexToRgb(hex)),
-      enumerable: false
-    },
-    ansi256ToAnsi: {
-      value(code) {
-        if (code < 8) {
-          return 30 + code;
-        }
-        if (code < 16) {
-          return 90 + (code - 8);
-        }
-        let red;
-        let green;
-        let blue;
-        if (code >= 232) {
-          red = ((code - 232) * 10 + 8) / 255;
-          green = red;
-          blue = red;
-        } else {
-          code -= 16;
-          const remainder = code % 36;
-          red = Math.floor(code / 36) / 5;
-          green = Math.floor(remainder / 6) / 5;
-          blue = remainder % 6 / 5;
-        }
-        const value = Math.max(red, green, blue) * 2;
-        if (value === 0) {
-          return 30;
-        }
-        let result = 30 + (Math.round(blue) << 2 | Math.round(green) << 1 | Math.round(red));
-        if (value === 2) {
-          result += 60;
-        }
-        return result;
-      },
-      enumerable: false
-    },
-    rgbToAnsi: {
-      value: (red, green, blue) => styles.ansi256ToAnsi(styles.rgbToAnsi256(red, green, blue)),
-      enumerable: false
-    },
-    hexToAnsi: {
-      value: (hex) => styles.ansi256ToAnsi(styles.hexToAnsi256(hex)),
-      enumerable: false
-    }
-  });
-  return styles;
-}
-var ansiStyles = assembleStyles();
-var ansi_styles_default = ansiStyles;
-
-// node_modules/chalk/source/vendor/supports-color/index.js
-import process2 from "node:process";
-import os from "node:os";
-import tty from "node:tty";
-function hasFlag(flag, argv = globalThis.Deno ? globalThis.Deno.args : process2.argv) {
-  const prefix = flag.startsWith("-") ? "" : flag.length === 1 ? "-" : "--";
-  const position = argv.indexOf(prefix + flag);
-  const terminatorPosition = argv.indexOf("--");
-  return position !== -1 && (terminatorPosition === -1 || position < terminatorPosition);
-}
-var { env } = process2;
-var flagForceColor;
-if (hasFlag("no-color") || hasFlag("no-colors") || hasFlag("color=false") || hasFlag("color=never")) {
-  flagForceColor = 0;
-} else if (hasFlag("color") || hasFlag("colors") || hasFlag("color=true") || hasFlag("color=always")) {
-  flagForceColor = 1;
-}
-function envForceColor() {
-  if ("FORCE_COLOR" in env) {
-    if (env.FORCE_COLOR === "true") {
-      return 1;
-    }
-    if (env.FORCE_COLOR === "false") {
-      return 0;
-    }
-    return env.FORCE_COLOR.length === 0 ? 1 : Math.min(Number.parseInt(env.FORCE_COLOR, 10), 3);
-  }
-}
-function translateLevel(level) {
-  if (level === 0) {
-    return false;
-  }
-  return {
-    level,
-    hasBasic: true,
-    has256: level >= 2,
-    has16m: level >= 3
-  };
-}
-function _supportsColor(haveStream, { streamIsTTY, sniffFlags = true } = {}) {
-  const noFlagForceColor = envForceColor();
-  if (noFlagForceColor !== undefined) {
-    flagForceColor = noFlagForceColor;
-  }
-  const forceColor = sniffFlags ? flagForceColor : noFlagForceColor;
-  if (forceColor === 0) {
-    return 0;
-  }
-  if (sniffFlags) {
-    if (hasFlag("color=16m") || hasFlag("color=full") || hasFlag("color=truecolor")) {
-      return 3;
-    }
-    if (hasFlag("color=256")) {
-      return 2;
-    }
-  }
-  if ("TF_BUILD" in env && "AGENT_NAME" in env) {
-    return 1;
-  }
-  if (haveStream && !streamIsTTY && forceColor === undefined) {
-    return 0;
-  }
-  const min = forceColor || 0;
-  if (env.TERM === "dumb") {
-    return min;
-  }
-  if (process2.platform === "win32") {
-    const osRelease = os.release().split(".");
-    if (Number(osRelease[0]) >= 10 && Number(osRelease[2]) >= 10586) {
-      return Number(osRelease[2]) >= 14931 ? 3 : 2;
-    }
-    return 1;
-  }
-  if ("CI" in env) {
-    if (["GITHUB_ACTIONS", "GITEA_ACTIONS", "CIRCLECI"].some((key) => (key in env))) {
-      return 3;
-    }
-    if (["TRAVIS", "APPVEYOR", "GITLAB_CI", "BUILDKITE", "DRONE"].some((sign) => (sign in env)) || env.CI_NAME === "codeship") {
-      return 1;
-    }
-    return min;
-  }
-  if ("TEAMCITY_VERSION" in env) {
-    return /^(9\.(0*[1-9]\d*)\.|\d{2,}\.)/.test(env.TEAMCITY_VERSION) ? 1 : 0;
-  }
-  if (env.COLORTERM === "truecolor") {
-    return 3;
-  }
-  if (env.TERM === "xterm-kitty") {
-    return 3;
-  }
-  if (env.TERM === "xterm-ghostty") {
-    return 3;
-  }
-  if (env.TERM === "wezterm") {
-    return 3;
-  }
-  if ("TERM_PROGRAM" in env) {
-    const version = Number.parseInt((env.TERM_PROGRAM_VERSION || "").split(".")[0], 10);
-    switch (env.TERM_PROGRAM) {
-      case "iTerm.app": {
-        return version >= 3 ? 3 : 2;
-      }
-      case "Apple_Terminal": {
-        return 2;
-      }
-    }
-  }
-  if (/-256(color)?$/i.test(env.TERM)) {
-    return 2;
-  }
-  if (/^screen|^xterm|^vt100|^vt220|^rxvt|color|ansi|cygwin|linux/i.test(env.TERM)) {
-    return 1;
-  }
-  if ("COLORTERM" in env) {
-    return 1;
-  }
-  return min;
-}
-function createSupportsColor(stream, options = {}) {
-  const level = _supportsColor(stream, {
-    streamIsTTY: stream && stream.isTTY,
-    ...options
-  });
-  return translateLevel(level);
-}
-var supportsColor = {
-  stdout: createSupportsColor({ isTTY: tty.isatty(1) }),
-  stderr: createSupportsColor({ isTTY: tty.isatty(2) })
-};
-var supports_color_default = supportsColor;
-
-// node_modules/chalk/source/utilities.js
-function stringReplaceAll(string, substring, replacer) {
-  let index = string.indexOf(substring);
-  if (index === -1) {
-    return string;
-  }
-  const substringLength = substring.length;
-  let endIndex = 0;
-  let returnValue = "";
-  do {
-    returnValue += string.slice(endIndex, index) + substring + replacer;
-    endIndex = index + substringLength;
-    index = string.indexOf(substring, endIndex);
-  } while (index !== -1);
-  returnValue += string.slice(endIndex);
-  return returnValue;
-}
-function stringEncaseCRLFWithFirstIndex(string, prefix, postfix, index) {
-  let endIndex = 0;
-  let returnValue = "";
-  do {
-    const gotCR = string[index - 1] === "\r";
-    returnValue += string.slice(endIndex, gotCR ? index - 1 : index) + prefix + (gotCR ? `\r
-` : `
-`) + postfix;
-    endIndex = index + 1;
-    index = string.indexOf(`
-`, endIndex);
-  } while (index !== -1);
-  returnValue += string.slice(endIndex);
-  return returnValue;
-}
-
-// node_modules/chalk/source/index.js
-var { stdout: stdoutColor, stderr: stderrColor } = supports_color_default;
-var GENERATOR = Symbol("GENERATOR");
-var STYLER = Symbol("STYLER");
-var IS_EMPTY = Symbol("IS_EMPTY");
-var levelMapping = [
-  "ansi",
-  "ansi",
-  "ansi256",
-  "ansi16m"
-];
-var styles2 = Object.create(null);
-var applyOptions = (object, options = {}) => {
-  if (options.level && !(Number.isInteger(options.level) && options.level >= 0 && options.level <= 3)) {
-    throw new Error("The `level` option should be an integer from 0 to 3");
-  }
-  const colorLevel = stdoutColor ? stdoutColor.level : 0;
-  object.level = options.level === undefined ? colorLevel : options.level;
-};
-var chalkFactory = (options) => {
-  const chalk = (...strings) => strings.join(" ");
-  applyOptions(chalk, options);
-  Object.setPrototypeOf(chalk, createChalk.prototype);
-  return chalk;
-};
-function createChalk(options) {
-  return chalkFactory(options);
-}
-Object.setPrototypeOf(createChalk.prototype, Function.prototype);
-for (const [styleName, style] of Object.entries(ansi_styles_default)) {
-  styles2[styleName] = {
-    get() {
-      const builder = createBuilder(this, createStyler(style.open, style.close, this[STYLER]), this[IS_EMPTY]);
-      Object.defineProperty(this, styleName, { value: builder });
-      return builder;
-    }
-  };
-}
-styles2.visible = {
-  get() {
-    const builder = createBuilder(this, this[STYLER], true);
-    Object.defineProperty(this, "visible", { value: builder });
-    return builder;
-  }
-};
-var getModelAnsi = (model, level, type, ...arguments_) => {
-  if (model === "rgb") {
-    if (level === "ansi16m") {
-      return ansi_styles_default[type].ansi16m(...arguments_);
-    }
-    if (level === "ansi256") {
-      return ansi_styles_default[type].ansi256(ansi_styles_default.rgbToAnsi256(...arguments_));
-    }
-    return ansi_styles_default[type].ansi(ansi_styles_default.rgbToAnsi(...arguments_));
-  }
-  if (model === "hex") {
-    return getModelAnsi("rgb", level, type, ...ansi_styles_default.hexToRgb(...arguments_));
-  }
-  return ansi_styles_default[type][model](...arguments_);
-};
-var usedModels = ["rgb", "hex", "ansi256"];
-for (const model of usedModels) {
-  styles2[model] = {
-    get() {
-      const { level } = this;
-      return function(...arguments_) {
-        const styler = createStyler(getModelAnsi(model, levelMapping[level], "color", ...arguments_), ansi_styles_default.color.close, this[STYLER]);
-        return createBuilder(this, styler, this[IS_EMPTY]);
-      };
-    }
-  };
-  const bgModel = "bg" + model[0].toUpperCase() + model.slice(1);
-  styles2[bgModel] = {
-    get() {
-      const { level } = this;
-      return function(...arguments_) {
-        const styler = createStyler(getModelAnsi(model, levelMapping[level], "bgColor", ...arguments_), ansi_styles_default.bgColor.close, this[STYLER]);
-        return createBuilder(this, styler, this[IS_EMPTY]);
-      };
-    }
-  };
-}
-var proto = Object.defineProperties(() => {}, {
-  ...styles2,
-  level: {
-    enumerable: true,
-    get() {
-      return this[GENERATOR].level;
-    },
-    set(level) {
-      this[GENERATOR].level = level;
-    }
-  }
-});
-var createStyler = (open, close, parent) => {
-  let openAll;
-  let closeAll;
-  if (parent === undefined) {
-    openAll = open;
-    closeAll = close;
-  } else {
-    openAll = parent.openAll + open;
-    closeAll = close + parent.closeAll;
-  }
-  return {
-    open,
-    close,
-    openAll,
-    closeAll,
-    parent
-  };
-};
-var createBuilder = (self, _styler, _isEmpty) => {
-  const builder = (...arguments_) => applyStyle(builder, arguments_.length === 1 ? "" + arguments_[0] : arguments_.join(" "));
-  Object.setPrototypeOf(builder, proto);
-  builder[GENERATOR] = self;
-  builder[STYLER] = _styler;
-  builder[IS_EMPTY] = _isEmpty;
-  return builder;
-};
-var applyStyle = (self, string) => {
-  if (self.level <= 0 || !string) {
-    return self[IS_EMPTY] ? "" : string;
-  }
-  let styler = self[STYLER];
-  if (styler === undefined) {
-    return string;
-  }
-  const { openAll, closeAll } = styler;
-  if (string.includes("\x1B")) {
-    while (styler !== undefined) {
-      string = stringReplaceAll(string, styler.close, styler.open);
-      styler = styler.parent;
-    }
-  }
-  const lfIndex = string.indexOf(`
-`);
-  if (lfIndex !== -1) {
-    string = stringEncaseCRLFWithFirstIndex(string, closeAll, openAll, lfIndex);
-  }
-  return openAll + string + closeAll;
-};
-Object.defineProperties(createChalk.prototype, styles2);
-var chalk = createChalk();
-var chalkStderr = createChalk({ level: stderrColor ? stderrColor.level : 0 });
-var source_default = chalk;
-
-// src/commands/configure.ts
-var import_prompts = __toESM(require_prompts3(), 1);
-
-// node_modules/zod/v4/core/util.js
-function getEnumValues(entries) {
-  const numericValues = Object.values(entries).filter((v) => typeof v === "number");
-  const values = Object.entries(entries).filter(([k, _]) => numericValues.indexOf(+k) === -1).map(([_, v]) => v);
-  return values;
-}
-function joinValues(array, separator = "|") {
-  return array.map((val) => stringifyPrimitive(val)).join(separator);
-}
-function jsonStringifyReplacer(_, value) {
-  if (typeof value === "bigint")
-    return value.toString();
-  return value;
-}
-
-class Cached {
-  constructor(getter) {
-    this._getter = getter;
-    this._value = undefined;
-  }
-  get value() {
-    const getter = this._getter;
-    if (getter !== undefined) {
-      this._value = getter();
-      this._getter = undefined;
-    }
-    return this._value;
-  }
-}
-function cached(getter) {
-  return new Cached(getter);
-}
-function nullish(input) {
-  return input === null || input === undefined;
-}
-function cleanRegex(source) {
-  const start = source.startsWith("^") ? 1 : 0;
-  const end = source.endsWith("$") ? source.length - 1 : source.length;
-  return source.slice(start, end);
-}
-function floatSafeRemainder(val, step) {
-  const ratio = val / step;
-  const roundedRatio = Math.round(ratio);
-  const tolerance = 4 * Number.EPSILON * Math.max(Math.abs(ratio), 1);
-  if (Math.abs(ratio - roundedRatio) < tolerance)
-    return 0;
-  return ratio - roundedRatio;
-}
-function assignProp(target, prop, value) {
-  Object.defineProperty(target, prop, {
-    value,
-    writable: true,
-    enumerable: true,
-    configurable: true
-  });
-}
-function rawShape(def) {
-  const desc = Object.getOwnPropertyDescriptor(def, "shape");
-  return desc?.get ? desc.get.raw : desc?.value;
-}
-function sourceShape(schema) {
-  return rawShape(schema._zod.def) ?? schema._zod.def.shape;
-}
-function deferProp(target, key, getter) {
-  Object.defineProperty(target, key, {
-    get() {
-      const value = getter();
-      assignProp(this, key, value);
-      return value;
-    },
-    enumerable: true,
-    configurable: true
-  });
-}
-function putProp(target, key, value) {
-  if (key in target)
-    assignProp(target, key, value);
-  else
-    target[key] = value;
-}
-function mirrorShape(target, source, keys, wrap) {
-  const raw = sourceShape(source);
-  for (const key of keys) {
-    const desc = Object.getOwnPropertyDescriptor(raw, key);
-    if (!desc.enumerable)
-      continue;
-    if (desc.get) {
-      deferProp(target, key, () => {
-        const value = source._zod.def.shape[key];
-        return wrap ? wrap(value, key) : value;
-      });
-    } else
-      putProp(target, key, wrap ? wrap(desc.value, key) : desc.value);
-  }
-}
-function mirrorProps(target, source) {
-  for (const key of Reflect.ownKeys(source)) {
-    const desc = Object.getOwnPropertyDescriptor(source, key);
-    if (!desc.enumerable)
-      continue;
-    if (desc.get)
-      deferProp(target, key, () => source[key]);
-    else
-      putProp(target, key, desc.value);
-  }
-}
-function mergeDefs(...defs) {
-  const mergedDescriptors = {};
-  for (const def of defs) {
-    const descriptors = Object.getOwnPropertyDescriptors(def);
-    Object.assign(mergedDescriptors, descriptors);
-  }
-  return Object.defineProperties({}, mergedDescriptors);
-}
-function esc(str) {
-  return JSON.stringify(str);
-}
-function slugify(input) {
-  return input.toLowerCase().trim().replace(/[^\w\s-]/g, "").replace(/[\s_-]+/g, "-").replace(/^-+|-+$/g, "");
-}
-var captureStackTrace = "captureStackTrace" in Error ? Error.captureStackTrace : (..._args) => {};
-function isObject(data) {
-  return typeof data === "object" && data !== null && !Array.isArray(data);
-}
-var allowsEval = /* @__PURE__ */ cached(() => {
-  if (globalConfig.jitless) {
-    return false;
-  }
-  if (typeof navigator !== "undefined" && navigator?.userAgent?.includes("Cloudflare")) {
-    return false;
-  }
-  try {
-    const F = Function;
-    new F("");
-    return true;
-  } catch (_) {
-    return false;
-  }
-});
-function isPlainObject(o) {
-  if (isObject(o) === false)
-    return false;
-  const ctor = o.constructor;
-  if (ctor === undefined)
-    return true;
-  if (typeof ctor !== "function")
-    return true;
-  const prot = ctor.prototype;
-  if (isObject(prot) === false)
-    return false;
-  if (Object.prototype.hasOwnProperty.call(prot, "isPrototypeOf") === false) {
-    return false;
-  }
-  return true;
-}
-function shallowClone(o) {
-  if (isPlainObject(o))
-    return { ...o };
-  if (Array.isArray(o))
-    return [...o];
-  if (o instanceof Map)
-    return new Map(o);
-  if (o instanceof Set)
-    return new Set(o);
-  return o;
-}
-var propertyKeyTypes = /* @__PURE__ */ new Set(["string", "number", "symbol"]);
-function escapeRegex(str) {
-  return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-function clone(inst, def, params) {
-  const cl = new inst._zod.constr(def ?? inst._zod.def);
-  if (!def || params?.parent)
-    cl._zod.parent = inst;
-  return cl;
-}
-function normalizeParams(_params) {
-  const params = _params;
-  if (!params)
-    return {};
-  if (typeof params === "string")
-    return { error: () => params };
-  if (params?.message !== undefined) {
-    if (params?.error !== undefined)
-      throw new Error("Cannot specify both `message` and `error` params");
-    params.error = params.message;
-  }
-  delete params.message;
-  if (typeof params.error === "string")
-    return { ...params, error: () => params.error };
-  return params;
-}
-function stringifyPrimitive(value) {
-  if (typeof value === "bigint")
-    return value.toString() + "n";
-  if (typeof value === "string")
-    return `"${value}"`;
-  return `${value}`;
-}
-function optionalKeys(shape) {
-  return Object.keys(shape).filter((k) => {
-    return shape[k]._zod.optin !== undefined && shape[k]._zod.optout === "optional";
-  });
-}
-var NUMBER_FORMAT_RANGES = /* @__PURE__ */ (() => ({
-  safeint: [Number.MIN_SAFE_INTEGER, Number.MAX_SAFE_INTEGER],
-  int32: [-2147483648, 2147483647],
-  uint32: [0, 4294967295],
-  float32: [-340282346638528860000000000000000000000, 340282346638528860000000000000000000000],
-  float64: [-Number.MAX_VALUE, Number.MAX_VALUE]
-}))();
-var BIGINT_FORMAT_RANGES = {
-  int64: [/* @__PURE__ */ BigInt("-9223372036854775808"), /* @__PURE__ */ BigInt("9223372036854775807")],
-  uint64: [/* @__PURE__ */ BigInt(0), /* @__PURE__ */ BigInt("18446744073709551615")]
-};
-function pick(schema, mask) {
-  const currDef = schema._zod.def;
-  const checks = currDef.checks;
-  const hasChecks = checks && checks.length > 0;
-  if (hasChecks) {
-    throw new Error(".pick() cannot be used on object schemas containing refinements");
-  }
-  const newShape = {};
-  mirrorShape(newShape, schema, maskedKeys(schema, mask));
-  return clone(schema, mergeDefs(currDef, { shape: newShape, checks: [] }));
-}
-function maskedKeys(schema, mask) {
-  const raw = sourceShape(schema);
-  const keys = [];
-  for (const key of Reflect.ownKeys(mask)) {
-    if (!Object.getOwnPropertyDescriptor(raw, key)?.enumerable) {
-      throw new Error(`Unrecognized key: "${String(key)}"`);
-    }
-    if (mask[key])
-      keys.push(key);
-  }
-  return keys;
-}
-function omit(schema, mask) {
-  const currDef = schema._zod.def;
-  const checks = currDef.checks;
-  const hasChecks = checks && checks.length > 0;
-  if (hasChecks) {
-    throw new Error(".omit() cannot be used on object schemas containing refinements");
-  }
-  const omitted = new Set(maskedKeys(schema, mask));
-  const newShape = {};
-  mirrorShape(newShape, schema, Reflect.ownKeys(sourceShape(schema)).filter((key) => !omitted.has(key)));
-  return clone(schema, mergeDefs(currDef, { shape: newShape, checks: [] }));
-}
-function extend(schema, shape) {
-  if (!isPlainObject(shape)) {
-    throw new Error("Invalid input to extend: expected a plain object");
-  }
-  const checks = schema._zod.def.checks;
-  const hasChecks = checks && checks.length > 0;
-  if (hasChecks) {
-    const existingShape = sourceShape(schema);
-    for (const key of Reflect.ownKeys(shape)) {
-      if (Object.getOwnPropertyDescriptor(existingShape, key) !== undefined) {
-        throw new Error("Cannot overwrite keys on object schemas containing refinements. Use `.safeExtend()` instead.");
-      }
-    }
-  }
-  return clone(schema, mergeDefs(schema._zod.def, { shape: extended(schema, shape) }));
-}
-function extended(schema, shape) {
-  const newShape = {};
-  mirrorShape(newShape, schema, Reflect.ownKeys(sourceShape(schema)));
-  mirrorProps(newShape, shape);
-  return newShape;
-}
-function safeExtend(schema, shape) {
-  if (!isPlainObject(shape)) {
-    throw new Error("Invalid input to safeExtend: expected a plain object");
-  }
-  return clone(schema, mergeDefs(schema._zod.def, { shape: extended(schema, shape) }));
-}
-function merge(a, b) {
-  if (!b?._zod?.def) {
-    throw new Error("Invalid input to merge: expected an object schema. To merge a plain shape, use `.extend()`.");
-  }
-  if (a._zod.def.checks?.length) {
-    throw new Error(".merge() cannot be used on object schemas containing refinements. Use .safeExtend() instead.");
-  }
-  const newShape = {};
-  mirrorShape(newShape, a, Reflect.ownKeys(sourceShape(a)));
-  mirrorShape(newShape, b, Reflect.ownKeys(sourceShape(b)));
-  const def = mergeDefs(a._zod.def, {
-    shape: newShape,
-    get catchall() {
-      return b._zod.def.catchall;
-    },
-    checks: b._zod.def.checks ?? []
-  });
-  return clone(a, def);
-}
-function partial(Class, schema, mask, name = "partial") {
-  const currDef = schema._zod.def;
-  const checks = currDef.checks;
-  const hasChecks = checks && checks.length > 0;
-  if (hasChecks) {
-    throw new Error(`.${name}() cannot be used on object schemas containing refinements`);
-  }
-  const selected = mask ? new Set(maskedKeys(schema, mask)) : undefined;
-  const newShape = {};
-  mirrorShape(newShape, schema, Reflect.ownKeys(sourceShape(schema)), Class && ((value, key) => selected && !selected.has(key) ? value : new Class({ type: "optional", innerType: value })));
-  return clone(schema, mergeDefs(schema._zod.def, { shape: newShape, checks: [] }));
-}
-function required(Class, schema, mask) {
-  const selected = mask ? new Set(maskedKeys(schema, mask)) : undefined;
-  const newShape = {};
-  mirrorShape(newShape, schema, Reflect.ownKeys(sourceShape(schema)), (value, key) => selected && !selected.has(key) ? value : new Class({ type: "nonoptional", innerType: value }));
-  return clone(schema, mergeDefs(schema._zod.def, { shape: newShape }));
-}
-function aborted(x, startIndex = 0) {
-  if (x.aborted === true)
-    return true;
-  for (let i = startIndex;i < x.issues.length; i++) {
-    if (x.issues[i]?.continue !== true) {
-      return true;
-    }
-  }
-  return false;
-}
-function explicitlyAborted(x, startIndex = 0) {
-  if (x.aborted === true)
-    return true;
-  for (let i = startIndex;i < x.issues.length; i++) {
-    if (x.issues[i]?.continue === false) {
-      return true;
-    }
-  }
-  return false;
-}
-function prefixIssues(path, issues) {
-  return issues.map((iss) => {
-    var _a;
-    (_a = iss).path ?? (_a.path = []);
-    iss.path.unshift(path);
-    return iss;
-  });
-}
-function unwrapMessage(message) {
-  return typeof message === "string" ? message : message?.message;
-}
-function attachSchema(issues, start, inst) {
-  var _a;
-  for (let i = start;i < issues.length; i++) {
-    (_a = issues[i]).schema ?? (_a.schema = inst);
-  }
-}
-function finalizeIssue(iss, ctx, config) {
-  var _a;
-  const traits = iss.inst?._zod?.traits;
-  if (traits?.has("$ZodType")) {
-    if (traits.has("$ZodCheck"))
-      (_a = iss).schema ?? (_a.schema = iss.inst);
-    else
-      iss.schema = iss.inst;
-  }
-  const schemaError = iss.schema !== iss.inst ? iss.schema?._zod.def?.error : undefined;
-  const message = iss.message ? iss.message : unwrapMessage(iss.inst?._zod.def?.error?.(iss)) ?? unwrapMessage(schemaError?.(iss)) ?? unwrapMessage(ctx?.error?.(iss)) ?? unwrapMessage(config.customError?.(iss)) ?? unwrapMessage(config.localeError?.(iss)) ?? "Invalid input";
-  const full = {};
-  for (const k of Object.keys(iss)) {
-    if (k === "inst" || k === "schema" || k === "continue" || k === "input" || k === "__proto__")
-      continue;
-    full[k] = iss[k];
-  }
-  full.path ?? (full.path = []);
-  full.message = message;
-  if (ctx?.reportInput) {
-    full.input = iss.input;
-  }
-  return full;
-}
-var highSurrogate = /[\uD800-\uDBFF]/;
-function codePointLength(str) {
-  const units = str.length;
-  if (!highSurrogate.test(str))
-    return units;
-  let count = units;
-  for (let i = 0;i < units - 1; i++) {
-    if ((str.charCodeAt(i) & 64512) === 55296 && (str.charCodeAt(i + 1) & 64512) === 56320) {
-      count--;
-      i++;
-    }
-  }
-  return count;
-}
-function getLengthableOrigin(input) {
-  if (Array.isArray(input))
-    return "array";
-  if (typeof input === "string")
-    return "string";
-  return "unknown";
-}
-function parsedType(data) {
-  const t = typeof data;
-  switch (t) {
-    case "number": {
-      return Number.isNaN(data) ? "nan" : "number";
-    }
-    case "object": {
-      if (data === null) {
-        return "null";
-      }
-      if (Array.isArray(data)) {
-        return "array";
-      }
-      const obj = data;
-      if (obj && Object.getPrototypeOf(obj) !== Object.prototype && "constructor" in obj && obj.constructor) {
-        return obj.constructor.name;
-      }
-    }
-  }
-  return t;
-}
-function issue(...args) {
-  const [iss, input, inst] = args;
-  if (typeof iss === "string") {
-    return {
-      message: iss,
-      code: "custom",
-      input,
-      inst
-    };
-  }
-  return { ...iss };
-}
-function members(proto, table) {
-  for (const key in table) {
-    const desc = Object.getOwnPropertyDescriptor(table, key);
-    if (desc.get)
-      Object.defineProperty(proto, key, { ...desc, enumerable: false });
-    else
-      defineBound(proto, key, desc.value);
-  }
-}
-function own(inst, key, value, enumerable = true) {
-  Object.defineProperty(inst, key, { configurable: true, writable: true, enumerable, value });
-  return value;
-}
-function hide(inst, key, value) {
-  return own(inst, key, value, false);
-}
-function derived(computes, table) {
-  for (const key in computes) {
-    const compute = computes[key];
-    Object.defineProperty(table, key, {
-      configurable: true,
-      enumerable: true,
-      get() {
-        return own(this, key, compute(this));
-      },
-      set(value) {
-        own(this, key, value);
-      }
-    });
-  }
-  return table;
-}
-function defineBound(proto, key, fn) {
-  Object.defineProperty(proto, key, {
-    configurable: true,
-    get() {
-      return this == null ? fn : own(this, key, fn.bind(this));
-    },
-    set(value) {
-      own(this, key, value);
-    }
-  });
-}
-function claim(inst, sentinel) {
-  const proto = Object.getPrototypeOf(inst);
-  return sentinel in proto ? undefined : proto;
-}
-var installing;
-var broke = false;
-var breaker = {
-  configurable: true,
-  get() {
-    broke = true;
-    return;
-  }
-};
-function defineLazyInternal(inst, key, compute) {
-  const proto = Object.getPrototypeOf(inst._zod);
-  if (key in proto && installing !== inst._zod) {
-    installing = undefined;
-    return;
-  }
-  installing = inst._zod;
-  Object.defineProperty(proto, key, {
-    configurable: true,
-    get() {
-      Object.defineProperty(this, key, breaker);
-      const outer = broke;
-      broke = false;
-      try {
-        const value = compute(this);
-        if (broke)
-          delete this[key];
-        else
-          Object.defineProperty(this, key, { configurable: true, writable: true, value });
-        broke = broke || outer;
-        return value;
-      } catch (err) {
-        delete this[key];
-        broke = broke || outer;
-        throw err;
-      }
-    },
-    set(value) {
-      Object.defineProperty(this, key, { configurable: true, writable: true, value });
-    }
-  });
-}
-function installLazyProp(inst, key, make, enumerable) {
-  const proto = claim(inst, key);
-  if (!proto)
-    return;
-  Object.defineProperty(proto, key, {
-    configurable: true,
-    get() {
-      const desc = { configurable: true, writable: true, enumerable, value: undefined };
-      Object.defineProperty(this, key, desc);
-      desc.value = make(this);
-      Object.defineProperty(this, key, desc);
-      return desc.value;
-    },
-    set(value) {
-      Object.defineProperty(this, key, { configurable: true, writable: true, enumerable, value });
-    }
-  });
-}
-var CONSTANT_CATCH = "~constantCatch";
-function constantCatch(value) {
-  const fn = () => value;
-  fn[CONSTANT_CATCH] = true;
-  return fn;
-}
-
-// node_modules/zod/v4/core/core.js
-var _a;
-var _zodDesc = { value: undefined, enumerable: false };
-var _E = "captureStackTrace" in Error ? Error : null;
-function newError(Definition) {
-  const E = _E;
-  if (E) {
-    const saved = E.stackTraceLimit;
-    if (typeof saved === "number") {
-      try {
-        E.stackTraceLimit = 0;
-      } catch {
-        _E = null;
-        return new Definition;
-      }
-      try {
-        return new Definition;
-      } finally {
-        E.stackTraceLimit = saved;
-      }
-    }
-  }
-  return new Definition;
-}
-function $constructor(name, initializer, proto, params) {
-  const zodProto = {};
-  function Internals(def) {
-    this.def = def;
-    this.constr = _;
-    this.traits = new Set;
-  }
-  Internals.prototype = zodProto;
-  const protoMembers = proto;
-  const initialized = protoMembers && new WeakSet;
-  function init(inst, def) {
-    if (!inst._zod) {
-      _zodDesc.value = new Internals(def);
-      try {
-        Object.defineProperty(inst, "_zod", _zodDesc);
-      } finally {
-        _zodDesc.value = undefined;
-      }
-    } else if (inst._zod.traits.has(name)) {
-      return;
-    }
-    inst._zod.traits.add(name);
-    initializer(inst, def);
-    if (initialized) {
-      const own = Object.getPrototypeOf(inst);
-      const ctorProto = inst._zod.constr.prototype;
-      let up = own;
-      while (up && up !== ctorProto)
-        up = Object.getPrototypeOf(up);
-      const target = up ?? own;
-      if (!initialized.has(target)) {
-        initialized.add(target);
-        members(target, protoMembers);
-      }
-    }
-    const proto = _.prototype;
-    for (const k in proto) {
-      if (!Object.prototype.hasOwnProperty.call(proto, k))
-        continue;
-      if (!(k in inst)) {
-        inst[k] = proto[k].bind(inst);
-      }
-    }
-  }
-  const Parent = params?.Parent ?? Object;
-
-  class Definition extends Parent {
-  }
-  Object.defineProperty(Definition, "name", { value: name });
-  function _(def) {
-    const inst = params?.Parent ? newError(Definition) : this;
-    init(inst, def);
-    const deferred = inst._zod.deferred;
-    if (deferred) {
-      for (const fn of deferred) {
-        fn();
-      }
-      inst._zod.deferred = undefined;
-    }
-    const pp = globalThis.__zod_globalConfig?.postProcessor;
-    if (pp)
-      pp(inst);
-    return inst;
-  }
-  Object.defineProperty(_, "init", { value: init });
-  Object.defineProperty(_, Symbol.hasInstance, {
-    value: (inst) => {
-      if (params?.Parent && inst instanceof params.Parent)
-        return true;
-      return inst?._zod?.traits?.has(name);
-    }
-  });
-  Object.defineProperty(_, "name", { value: name });
-  return _;
-}
-class $ZodAsyncError extends Error {
-  constructor() {
-    super(`Encountered Promise during synchronous parse. Use .parseAsync() instead.`);
-  }
-}
-
-class $ZodEncodeError extends Error {
-  constructor(name) {
-    super(`Encountered unidirectional transform during encode: ${name}`);
-    this.name = "ZodEncodeError";
-  }
-}
-(_a = globalThis).__zod_globalConfig ?? (_a.__zod_globalConfig = {});
-var globalConfig = globalThis.__zod_globalConfig;
-function config(newConfig) {
-  if (newConfig)
-    Object.assign(globalConfig, newConfig);
-  return globalConfig;
-}
-// node_modules/zod/v4/core/errors.js
-function _getMessage() {
-  const internals = this._zod;
-  internals.message ?? (internals.message = JSON.stringify(internals.def, jsonStringifyReplacer, 2));
-  return internals.message;
-}
-function _setMessage(value) {
-  this._zod.message = value;
-}
-var _messageDesc = {
-  get: _getMessage,
-  set: _setMessage,
-  enumerable: true,
-  configurable: true
-};
-var _issuesDesc = { value: undefined, enumerable: false };
-var _installedToString = /* @__PURE__ */ new WeakSet([Object.prototype, Error.prototype]);
-var initializer = (inst, def) => {
-  inst.name = "$ZodError";
-  _issuesDesc.value = def;
-  Object.defineProperty(inst, "issues", _issuesDesc);
-  _issuesDesc.value = undefined;
-  Object.defineProperty(inst, "message", _messageDesc);
-  const proto = Object.getPrototypeOf(inst);
-  if (!_installedToString.has(proto)) {
-    _installedToString.add(proto);
-    Object.defineProperty(proto, "toString", {
-      configurable: true,
-      enumerable: false,
-      get() {
-        const value = () => this.message;
-        Object.defineProperty(this, "toString", { value, configurable: true, writable: true });
-        return value;
-      },
-      set(value) {
-        Object.defineProperty(this, "toString", { value, configurable: true, writable: true });
-      }
-    });
-  }
-};
-var $ZodError = $constructor("$ZodError", initializer);
-var $ZodRealError = $constructor("$ZodError", initializer, undefined, {
-  Parent: Error
-});
-function node(obj, key, make) {
-  if (!Object.prototype.hasOwnProperty.call(obj, key)) {
-    if (key === "__proto__") {
-      Object.defineProperty(obj, key, { value: make(), writable: true, enumerable: true, configurable: true });
-    } else {
-      obj[key] = make();
-    }
-  }
-  return obj[key];
-}
-function flattenError(error, mapper = (issue) => issue.message) {
-  const fieldErrors = {};
-  const formErrors = [];
-  for (const sub of error.issues) {
-    if (sub.path.length > 0) {
-      node(fieldErrors, sub.path[0], () => []).push(mapper(sub));
-    } else {
-      formErrors.push(mapper(sub));
-    }
-  }
-  return { formErrors, fieldErrors };
-}
-function formatError(error, mapper = (issue) => issue.message) {
-  const fieldErrors = { _errors: [] };
-  const processError = (error, path = []) => {
-    for (const issue of error.issues) {
-      if (issue.code === "invalid_union" && issue.errors.length) {
-        issue.errors.map((issues) => processError({ issues }, [...path, ...issue.path]));
-      } else if (issue.code === "invalid_key") {
-        processError({ issues: issue.issues }, [...path, ...issue.path]);
-      } else if (issue.code === "invalid_element") {
-        processError({ issues: issue.issues }, [...path, ...issue.path]);
-      } else {
-        const fullpath = [...path, ...issue.path];
-        if (fullpath.length === 0) {
-          fieldErrors._errors.push(mapper(issue));
-        } else {
-          let curr = fieldErrors;
-          let i = 0;
-          while (i < fullpath.length) {
-            const el = fullpath[i];
-            const terminal = i === fullpath.length - 1;
-            if (el === "_errors") {
-              if (terminal)
-                curr._errors.push(mapper(issue));
-              i++;
-              continue;
-            }
-            if (!Object.prototype.hasOwnProperty.call(curr, el)) {
-              Object.defineProperty(curr, el, {
-                value: { _errors: [] },
-                enumerable: true,
-                writable: true,
-                configurable: true
-              });
-            }
-            const node = curr[el];
-            if (terminal) {
-              node._errors.push(mapper(issue));
-            }
-            curr = node;
-            i++;
-          }
-        }
-      }
-    }
-  };
-  processError(error);
-  return fieldErrors;
-}
-
-// node_modules/zod/v4/core/parse.js
-function finalizeParams(callee, params) {
-  return { callee: params?.callee ?? callee, Err: params?.Err };
-}
-var _parse = (_Err) => {
-  const fn = (schema, value, _ctx, _params) => {
-    const ctx = _ctx ? { ..._ctx, async: false } : { async: false };
-    const result = schema._zod.run({ value, issues: [] }, ctx);
-    if (result instanceof Promise) {
-      throw new $ZodAsyncError;
-    }
-    if (result.issues.length) {
-      const e = new (_params?.Err ?? _Err)(result.issues.map((iss) => finalizeIssue(iss, ctx, config())));
-      captureStackTrace(e, _params?.callee ?? fn);
-      throw e;
-    }
-    return result.value;
-  };
-  return fn;
-};
-var _parseAsync = (_Err) => {
-  const fn = async (schema, value, _ctx, params) => {
-    const ctx = _ctx ? { ..._ctx, async: true } : { async: true };
-    let result = schema._zod.run({ value, issues: [] }, ctx);
-    if (result instanceof Promise)
-      result = await result;
-    if (result.issues.length) {
-      const e = new (params?.Err ?? _Err)(result.issues.map((iss) => finalizeIssue(iss, ctx, config())));
-      captureStackTrace(e, params?.callee ?? fn);
-      throw e;
-    }
-    return result.value;
-  };
-  return fn;
-};
-var _safeParse = (_Err) => (schema, value, _ctx) => {
-  const ctx = _ctx ? { ..._ctx, async: false } : { async: false };
-  const result = schema._zod.run({ value, issues: [] }, ctx);
-  if (result instanceof Promise) {
-    throw new $ZodAsyncError;
-  }
-  return result.issues.length ? failure(_Err, result.issues, ctx) : { success: true, data: result.value };
-};
-var safeParse = /* @__PURE__ */ _safeParse($ZodRealError);
-function failure(Err, issues, ctx) {
-  let error;
-  return {
-    success: false,
-    get error() {
-      if (!error) {
-        error = new Err(issues.map((iss) => finalizeIssue(iss, ctx, config())));
-        issues = undefined;
-        ctx = undefined;
-      }
-      return error;
-    },
-    set error(e) {
-      error = e;
-      issues = undefined;
-      ctx = undefined;
-    }
-  };
-}
-var _safeParseAsync = (_Err) => async (schema, value, _ctx) => {
-  const ctx = _ctx ? { ..._ctx, async: true } : { async: true };
-  let result = schema._zod.run({ value, issues: [] }, ctx);
-  if (result instanceof Promise)
-    result = await result;
-  return result.issues.length ? failure(_Err, result.issues, ctx) : { success: true, data: result.value };
-};
-var COMPILE_INVALID = /* @__PURE__ */ Symbol.for("zod.compile.invalid");
-var COMPILE_FALLBACK = /* @__PURE__ */ Symbol.for("zod.compile.fallback");
-var validate = (schema, value, _ctx) => {
-  const validator = schema._zod.bag.validator;
-  if (validator !== undefined) {
-    if (validator(value) !== COMPILE_INVALID)
-      return true;
-    if (validator.definite === true && _ctx === undefined)
-      return false;
-  }
-  return validateFallback(schema, value, _ctx);
-};
-function validateFallback(schema, value, _ctx) {
-  const ctx = _ctx ? { ..._ctx, async: false, abortEarly: true } : { async: false, abortEarly: true };
-  const fallbackRun = schema._zod.bag.fallbackRun;
-  let result;
-  if (fallbackRun) {
-    ctx[COMPILE_FALLBACK] = true;
-    result = fallbackRun({ value, issues: [] }, ctx);
-  } else {
-    result = schema._zod.run({ value, issues: [] }, ctx);
-  }
-  if (result instanceof Promise) {
-    throw new $ZodAsyncError;
-  }
-  return result.issues.length === 0;
-}
-var validateAsync = async (schema, value, _ctx) => {
-  const ctx = _ctx ? { ..._ctx, async: true, abortEarly: true } : { async: true, abortEarly: true };
-  let result = schema._zod.run({ value, issues: [] }, ctx);
-  if (result instanceof Promise)
-    result = await result;
-  return result.issues.length === 0;
-};
-var _encode = (_Err) => {
-  const parse = _parse(_Err);
-  const fn = (schema, value, _ctx, _params) => {
-    const ctx = _ctx ? { ..._ctx, direction: "backward" } : { direction: "backward" };
-    return parse(schema, value, ctx, finalizeParams(fn, _params));
-  };
-  return fn;
-};
-var _decode = (_Err) => {
-  const parse = _parse(_Err);
-  const fn = (schema, value, _ctx, _params) => {
-    return parse(schema, value, _ctx, finalizeParams(fn, _params));
-  };
-  return fn;
-};
-var _encodeAsync = (_Err) => {
-  const parseAsync = _parseAsync(_Err);
-  const fn = async (schema, value, _ctx, _params) => {
-    const ctx = _ctx ? { ..._ctx, direction: "backward" } : { direction: "backward" };
-    return await parseAsync(schema, value, ctx, finalizeParams(fn, _params));
-  };
-  return fn;
-};
-var _decodeAsync = (_Err) => {
-  const parseAsync = _parseAsync(_Err);
-  const fn = async (schema, value, _ctx, _params) => {
-    return await parseAsync(schema, value, _ctx, finalizeParams(fn, _params));
-  };
-  return fn;
-};
-var _safeEncode = (_Err) => (schema, value, _ctx) => {
-  const ctx = _ctx ? { ..._ctx, direction: "backward" } : { direction: "backward" };
-  return _safeParse(_Err)(schema, value, ctx);
-};
-var _safeDecode = (_Err) => (schema, value, _ctx) => {
-  return _safeParse(_Err)(schema, value, _ctx);
-};
-var _safeEncodeAsync = (_Err) => async (schema, value, _ctx) => {
-  const ctx = _ctx ? { ..._ctx, direction: "backward" } : { direction: "backward" };
-  return _safeParseAsync(_Err)(schema, value, ctx);
-};
-var _safeDecodeAsync = (_Err) => async (schema, value, _ctx) => {
-  return _safeParseAsync(_Err)(schema, value, _ctx);
-};
-// node_modules/zod/v4/core/regexes.js
-var cuid = /^[cC][0-9a-z]{6,}$/;
-var cuid2 = /^[0-9a-z]+$/;
-var ulid = /^[0-7][0-9A-HJKMNP-TV-Za-hjkmnp-tv-z]{25}$/;
-var xid = /^[0-9a-vA-V]{20}$/;
-var ksuid = /^[A-Za-z0-9]{27}$/;
-var nanoid = /^[a-zA-Z0-9_-]{21}$/;
-function nanoidOfLength(length) {
-  return new RegExp(`^[a-zA-Z0-9_-]{${length}}$`);
-}
-var duration = /^P(?:(\d+W)|(?!.*W)(?=\d|T\d)(\d+Y)?(\d+M)?(\d+D)?(T(?=\d)(\d+H)?(\d+M)?(\d+([.,]\d+)?S)?)?)$/;
-var guid = /^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$/;
-var uuid = (version) => {
-  if (!version)
-    return /^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$/;
-  return new RegExp(`^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-${version}[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$`);
-};
-var email = /^(?:[A-Za-z0-9_'+\-]+\.)*[A-Za-z0-9_'+\-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9\-]*\.)+[A-Za-z]{2,}$/;
-var _emoji = `^(?=[\\s\\S]*[\\p{Extended_Pictographic}\\p{Regional_Indicator}\\u20E3])[\\p{Extended_Pictographic}\\p{Emoji_Component}]+$`;
-function emoji() {
-  return new RegExp(_emoji, "u");
-}
-var ipv4 = /^(?:(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\.){3}(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])$/;
-var ipv6 = /^(([0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,7}:|([0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,5}(:[0-9a-fA-F]{1,4}){1,2}|([0-9a-fA-F]{1,4}:){1,4}(:[0-9a-fA-F]{1,4}){1,3}|([0-9a-fA-F]{1,4}:){1,3}(:[0-9a-fA-F]{1,4}){1,4}|([0-9a-fA-F]{1,4}:){1,2}(:[0-9a-fA-F]{1,4}){1,5}|[0-9a-fA-F]{1,4}:((:[0-9a-fA-F]{1,4}){1,6})|:((:[0-9a-fA-F]{1,4}){1,7}|:))$/;
-var cidrv4 = /^((25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\.){3}(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\/([0-9]|[1-2][0-9]|3[0-2])$/;
-var cidrv6 = /^(([0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,7}:|([0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,5}(:[0-9a-fA-F]{1,4}){1,2}|([0-9a-fA-F]{1,4}:){1,4}(:[0-9a-fA-F]{1,4}){1,3}|([0-9a-fA-F]{1,4}:){1,3}(:[0-9a-fA-F]{1,4}){1,4}|([0-9a-fA-F]{1,4}:){1,2}(:[0-9a-fA-F]{1,4}){1,5}|[0-9a-fA-F]{1,4}:((:[0-9a-fA-F]{1,4}){1,6})|:((:[0-9a-fA-F]{1,4}){1,7}|:))\/(12[0-8]|1[01][0-9]|[1-9]?[0-9])$/;
-var base64 = /^$|^(?:[0-9a-zA-Z+/]{4})*(?:(?:[0-9a-zA-Z+/]{2}==)|(?:[0-9a-zA-Z+/]{3}=))?$/;
-var base64url = /^(?:[A-Za-z0-9_-]{4})*(?:[A-Za-z0-9_-]{2,3})?$/;
-var httpProtocol = /^https?$/;
-var e164 = /^\+[1-9]\d{6,14}$/;
-var dateSource = `(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))`;
-function anchor(source) {
-  return new RegExp(`^${source}$`);
-}
-var date = /* @__PURE__ */ anchor(dateSource);
-function timeSource(args) {
-  const hhmm = `(?:[01]\\d|2[0-3]):[0-5]\\d`;
-  const regex = typeof args.precision === "number" ? args.precision === -1 ? `${hhmm}` : args.precision === 0 ? `${hhmm}:[0-5]\\d` : `${hhmm}:[0-5]\\d\\.\\d{${args.precision}}` : args.seconds ? `${hhmm}:[0-5]\\d(?:\\.\\d+)?` : `${hhmm}(?::[0-5]\\d(?:\\.\\d+)?)?`;
-  return regex;
-}
-function time(args) {
-  return new RegExp(`^${timeSource(args)}$`);
-}
-function datetime(args) {
-  const opts = ["Z"];
-  if (args.offset)
-    opts.push(`([+-](?:[01]\\d|2[0-3]):[0-5]\\d)`);
-  const qualified = `${timeSource({ precision: args.precision, seconds: true })}(?:${opts.join("|")})`;
-  const timeRegex = args.local ? `${qualified}|${timeSource({ precision: args.precision })}` : qualified;
-  return new RegExp(`^${dateSource}T(?:${timeRegex})$`);
-}
-var anyString = /^[\s\S]{0,}$/;
-var integer = /^-?\d+$/;
-var number = /^-?\d+(?:\.\d+)?$/;
-var boolean = /^(?:true|false)$/i;
-var _null = /^null$/i;
-var lowercase = /^[^A-Z]*$/;
-var uppercase = /^[^a-z]*$/;
-
-// node_modules/zod/v4/core/checks.js
-var $ZodCheck = /* @__PURE__ */ $constructor("$ZodCheck", (inst, def) => {
-  var _a;
-  inst._zod ?? (inst._zod = {});
-  inst._zod.def = def;
-  (_a = inst._zod).onattach ?? (_a.onattach = []);
-});
-var _whenHasLength = (payload) => {
-  const val = payload.value;
-  return !nullish(val) && val.length !== undefined;
-};
-var numericOriginMap = {
-  number: "number",
-  bigint: "bigint",
-  object: "date"
-};
-var $ZodCheckLessThan = /* @__PURE__ */ $constructor("$ZodCheckLessThan", (inst, def) => {
-  $ZodCheck.init(inst, def);
-  const origin = numericOriginMap[typeof def.value];
-  inst._zod.check = (payload) => {
-    if (def.inclusive ? payload.value <= def.value : payload.value < def.value) {
-      return;
-    }
-    payload.issues.push({
-      origin: numericOriginMap[typeof payload.value] ?? origin,
-      code: "too_big",
-      maximum: typeof def.value === "object" ? def.value.getTime() : def.value,
-      input: payload.value,
-      inclusive: def.inclusive,
-      inst,
-      continue: !def.abort
-    });
-  };
-});
-var $ZodCheckGreaterThan = /* @__PURE__ */ $constructor("$ZodCheckGreaterThan", (inst, def) => {
-  $ZodCheck.init(inst, def);
-  const origin = numericOriginMap[typeof def.value];
-  inst._zod.check = (payload) => {
-    if (def.inclusive ? payload.value >= def.value : payload.value > def.value) {
-      return;
-    }
-    payload.issues.push({
-      origin: numericOriginMap[typeof payload.value] ?? origin,
-      code: "too_small",
-      minimum: typeof def.value === "object" ? def.value.getTime() : def.value,
-      input: payload.value,
-      inclusive: def.inclusive,
-      inst,
-      continue: !def.abort
-    });
-  };
-});
-var $ZodCheckMultipleOf = /* @__PURE__ */ $constructor("$ZodCheckMultipleOf", (inst, def) => {
-  $ZodCheck.init(inst, def);
-  inst._zod.check = (payload) => {
-    if (typeof payload.value !== typeof def.value)
-      throw new Error("Cannot mix number and bigint in multiple_of check.");
-    const isMultiple = typeof payload.value === "bigint" ? def.value !== BigInt(0) && payload.value % def.value === BigInt(0) : floatSafeRemainder(payload.value, def.value) === 0;
-    if (isMultiple)
-      return;
-    payload.issues.push({
-      origin: typeof payload.value,
-      code: "not_multiple_of",
-      divisor: def.value,
-      input: payload.value,
-      inst,
-      continue: !def.abort
-    });
-  };
-});
-var $ZodCheckNumberFormat = /* @__PURE__ */ $constructor("$ZodCheckNumberFormat", (inst, def) => {
-  $ZodCheck.init(inst, def);
-  def.format = def.format || "float64";
-  const isInt = def.format?.includes("int");
-  const origin = isInt ? "int" : "number";
-  const [minimum, maximum] = NUMBER_FORMAT_RANGES[def.format];
-  inst._zod.check = (payload) => {
-    const input = payload.value;
-    if (isInt) {
-      if (!Number.isInteger(input)) {
-        payload.issues.push({
-          expected: origin,
-          format: def.format,
-          code: "invalid_type",
-          continue: false,
-          input,
-          inst
-        });
-        return;
-      }
-      if (!Number.isSafeInteger(input)) {
-        if (input > 0) {
-          payload.issues.push({
-            input,
-            code: "too_big",
-            maximum: Number.MAX_SAFE_INTEGER,
-            note: "Integers must be within the safe integer range.",
-            inst,
-            origin,
-            inclusive: true,
-            continue: !def.abort
-          });
-        } else {
-          payload.issues.push({
-            input,
-            code: "too_small",
-            minimum: Number.MIN_SAFE_INTEGER,
-            note: "Integers must be within the safe integer range.",
-            inst,
-            origin,
-            inclusive: true,
-            continue: !def.abort
-          });
-        }
-        return;
-      }
-    }
-    if (input < minimum) {
-      payload.issues.push({
-        origin: "number",
-        input,
-        code: "too_small",
-        minimum,
-        inclusive: true,
-        inst,
-        continue: !def.abort
-      });
-    }
-    if (input > maximum) {
-      payload.issues.push({
-        origin: "number",
-        input,
-        code: "too_big",
-        maximum,
-        inclusive: true,
-        inst,
-        continue: !def.abort
-      });
-    }
-  };
-});
-var $ZodCheckMaxLength = /* @__PURE__ */ $constructor("$ZodCheckMaxLength", (inst, def) => {
-  var _a;
-  $ZodCheck.init(inst, def);
-  (_a = inst._zod.def).when ?? (_a.when = _whenHasLength);
-  inst._zod.check = (payload) => {
-    const input = payload.value;
-    const units = input.length;
-    const length = typeof input === "string" && units > def.maximum ? codePointLength(input) : units;
-    if (length <= def.maximum)
-      return;
-    const origin = getLengthableOrigin(input);
-    payload.issues.push({
-      origin,
-      code: "too_big",
-      maximum: def.maximum,
-      inclusive: true,
-      input,
-      inst,
-      continue: !def.abort
-    });
-  };
-});
-var $ZodCheckMinLength = /* @__PURE__ */ $constructor("$ZodCheckMinLength", (inst, def) => {
-  var _a;
-  $ZodCheck.init(inst, def);
-  (_a = inst._zod.def).when ?? (_a.when = _whenHasLength);
-  inst._zod.check = (payload) => {
-    const input = payload.value;
-    const units = input.length;
-    const length = typeof input === "string" && units >= def.minimum && units < def.minimum * 2 ? codePointLength(input) : units;
-    if (length >= def.minimum)
-      return;
-    const origin = getLengthableOrigin(input);
-    payload.issues.push({
-      origin,
-      code: "too_small",
-      minimum: def.minimum,
-      inclusive: true,
-      input,
-      inst,
-      continue: !def.abort
-    });
-  };
-});
-var $ZodCheckLengthEquals = /* @__PURE__ */ $constructor("$ZodCheckLengthEquals", (inst, def) => {
-  var _a;
-  $ZodCheck.init(inst, def);
-  (_a = inst._zod.def).when ?? (_a.when = _whenHasLength);
-  inst._zod.check = (payload) => {
-    const input = payload.value;
-    const units = input.length;
-    const length = typeof input === "string" && units >= def.length && units <= def.length * 2 ? codePointLength(input) : units;
-    if (length === def.length)
-      return;
-    const origin = getLengthableOrigin(input);
-    const tooBig = length > def.length;
-    payload.issues.push({
-      origin,
-      ...tooBig ? { code: "too_big", maximum: def.length } : { code: "too_small", minimum: def.length },
-      inclusive: true,
-      exact: true,
-      input: payload.value,
-      inst,
-      continue: !def.abort
-    });
-  };
-});
-var $ZodCheckStringFormat = /* @__PURE__ */ $constructor("$ZodCheckStringFormat", (inst, def) => {
-  var _a, _b;
-  $ZodCheck.init(inst, def);
-  if (def.pattern)
-    (_a = inst._zod).check ?? (_a.check = (payload) => {
-      def.pattern.lastIndex = 0;
-      if (def.pattern.test(payload.value))
-        return;
-      payload.issues.push({
-        origin: "string",
-        code: "invalid_format",
-        format: def.format,
-        input: payload.value,
-        ...def.pattern ? { pattern: def.pattern.toString() } : {},
-        inst,
-        continue: !def.abort
-      });
-    });
-  else
-    (_b = inst._zod).check ?? (_b.check = () => {});
-});
-var $ZodCheckRegex = /* @__PURE__ */ $constructor("$ZodCheckRegex", (inst, def) => {
-  $ZodCheckStringFormat.init(inst, def);
-  inst._zod.check = (payload) => {
-    def.pattern.lastIndex = 0;
-    if (def.pattern.test(payload.value))
-      return;
-    payload.issues.push({
-      origin: "string",
-      code: "invalid_format",
-      format: "regex",
-      input: payload.value,
-      pattern: def.pattern.toString(),
-      inst,
-      continue: !def.abort
-    });
-  };
-});
-var $ZodCheckLowerCase = /* @__PURE__ */ $constructor("$ZodCheckLowerCase", (inst, def) => {
-  def.pattern ?? (def.pattern = lowercase);
-  $ZodCheckStringFormat.init(inst, def);
-});
-var $ZodCheckUpperCase = /* @__PURE__ */ $constructor("$ZodCheckUpperCase", (inst, def) => {
-  def.pattern ?? (def.pattern = uppercase);
-  $ZodCheckStringFormat.init(inst, def);
-});
-var $ZodCheckIncludes = /* @__PURE__ */ $constructor("$ZodCheckIncludes", (inst, def) => {
-  $ZodCheck.init(inst, def);
-  const escapedRegex = escapeRegex(def.includes);
-  const pattern = new RegExp(typeof def.position === "number" ? `^.{${def.position},}${escapedRegex}` : escapedRegex);
-  def.pattern = pattern;
-  inst._zod.check = (payload) => {
-    if (payload.value.includes(def.includes, def.position))
-      return;
-    payload.issues.push({
-      origin: "string",
-      code: "invalid_format",
-      format: "includes",
-      includes: def.includes,
-      input: payload.value,
-      inst,
-      continue: !def.abort
-    });
-  };
-});
-var $ZodCheckStartsWith = /* @__PURE__ */ $constructor("$ZodCheckStartsWith", (inst, def) => {
-  $ZodCheck.init(inst, def);
-  const pattern = new RegExp(`^${escapeRegex(def.prefix)}.*`);
-  def.pattern ?? (def.pattern = pattern);
-  inst._zod.check = (payload) => {
-    if (payload.value.startsWith(def.prefix))
-      return;
-    payload.issues.push({
-      origin: "string",
-      code: "invalid_format",
-      format: "starts_with",
-      prefix: def.prefix,
-      input: payload.value,
-      inst,
-      continue: !def.abort
-    });
-  };
-});
-var $ZodCheckEndsWith = /* @__PURE__ */ $constructor("$ZodCheckEndsWith", (inst, def) => {
-  $ZodCheck.init(inst, def);
-  const pattern = new RegExp(`.*${escapeRegex(def.suffix)}$`);
-  def.pattern ?? (def.pattern = pattern);
-  inst._zod.check = (payload) => {
-    if (payload.value.endsWith(def.suffix))
-      return;
-    payload.issues.push({
-      origin: "string",
-      code: "invalid_format",
-      format: "ends_with",
-      suffix: def.suffix,
-      input: payload.value,
-      inst,
-      continue: !def.abort
-    });
-  };
-});
-var $ZodCheckOverwrite = /* @__PURE__ */ $constructor("$ZodCheckOverwrite", (inst, def) => {
-  $ZodCheck.init(inst, def);
-  inst._zod.check = (payload) => {
-    payload.value = def.tx(payload.value);
-  };
-});
-
-// node_modules/zod/v4/core/doc.js
-class Doc {
-  constructor(args = [], closed = {}) {
-    this.content = [];
-    this.indent = 0;
-    this.args = args;
-    this.closed = closed;
-  }
-  indented(fn) {
-    this.indent += 1;
-    try {
-      fn(this);
-    } finally {
-      this.indent -= 1;
-    }
-  }
-  write(arg) {
-    if (typeof arg === "function") {
-      arg(this, { execution: "sync" });
-      arg(this, { execution: "async" });
-      return;
-    }
-    const content = arg;
-    const lines = content.split(`
-`).filter((x) => x);
-    const minIndent = Math.min(...lines.map((x) => x.length - x.trimStart().length));
-    const dedented = lines.map((x) => x.slice(minIndent)).map((x) => " ".repeat(this.indent * 2) + x);
-    for (const line of dedented) {
-      this.content.push(line);
-    }
-  }
-  compile() {
-    const F = Function;
-    const content = this?.content ?? [``];
-    const factory = new F(...Object.keys(this.closed), `return function (${this.args.join(", ")}) {
-${content.join(`
-`)}
-};`);
-    return factory(...Object.values(this.closed));
-  }
-}
-
-// node_modules/zod/v4/core/versions.js
-var version = {
-  major: 4,
-  minor: 6,
-  patch: 5
-};
-
-// node_modules/zod/v4/core/schemas.js
-var $ZodType = /* @__PURE__ */ $constructor("$ZodType", (inst, def) => {
-  var _a;
-  inst ?? (inst = {});
-  inst._zod.def = def;
-  inst._zod.bag = inst._zod.bag || {};
-  inst._zod.version = version;
-  const defChecks = inst._zod.def.checks;
-  const checks = inst._zod.traits.has("$ZodCheck") ? [inst, ...defChecks ?? []] : defChecks?.length ? [...defChecks] : [];
-  for (const ch of checks) {
-    for (const fn of ch._zod.onattach) {
-      fn(inst);
-    }
-  }
-  if (checks.length === 0) {
-    (_a = inst._zod).deferred ?? (_a.deferred = []);
-    inst._zod.deferred?.push(() => {
-      inst._zod.run = inst._zod.parse;
-    });
-  } else {
-    const runChecks = (payload, checks, ctx) => {
-      if (payload.memo)
-        return payload;
-      let isAborted = aborted(payload);
-      let asyncResult;
-      for (const ch of checks) {
-        if (ch._zod.def.when) {
-          if (explicitlyAborted(payload))
-            continue;
-          const shouldRun = ch._zod.def.when(payload);
-          if (!shouldRun)
-            continue;
-        } else if (isAborted) {
-          continue;
-        }
-        const currLen = payload.issues.length;
-        const _ = ch._zod.check(payload);
-        if (_ instanceof Promise && ctx?.async === false) {
-          throw new $ZodAsyncError;
-        }
-        if (asyncResult || _ instanceof Promise) {
-          asyncResult = (asyncResult ?? Promise.resolve()).then(async () => {
-            await _;
-            const nextLen = payload.issues.length;
-            if (nextLen === currLen)
-              return;
-            attachSchema(payload.issues, currLen, inst);
-            if (!isAborted)
-              isAborted = aborted(payload, currLen);
-          });
-        } else {
-          const nextLen = payload.issues.length;
-          if (nextLen === currLen)
-            continue;
-          attachSchema(payload.issues, currLen, inst);
-          if (!isAborted)
-            isAborted = aborted(payload, currLen);
-        }
-      }
-      if (asyncResult) {
-        return asyncResult.then(() => {
-          return payload;
-        });
-      }
-      return payload;
-    };
-    const handleCanaryResult = (canary, payload, ctx) => {
-      if (aborted(canary)) {
-        canary.aborted = true;
-        return canary;
-      }
-      const checkResult = runChecks(payload, checks, ctx);
-      if (checkResult instanceof Promise) {
-        if (ctx.async === false)
-          throw new $ZodAsyncError;
-        return checkResult.then((checkResult) => inst._zod.parse(checkResult, ctx));
-      }
-      return inst._zod.parse(checkResult, ctx);
-    };
-    inst._zod.run = (payload, ctx) => {
-      if (ctx.skipChecks) {
-        return inst._zod.parse(payload, ctx);
-      }
-      if (ctx.direction === "backward") {
-        const canary = inst._zod.parse({ value: payload.value, issues: [] }, { ...ctx, skipChecks: true });
-        if (canary instanceof Promise) {
-          return canary.then((canary) => {
-            return handleCanaryResult(canary, payload, ctx);
-          });
-        }
-        return handleCanaryResult(canary, payload, ctx);
-      }
-      const result = inst._zod.parse(payload, ctx);
-      if (result instanceof Promise) {
-        if (ctx.async === false)
-          throw new $ZodAsyncError;
-        return result.then((result) => runChecks(result, checks, ctx));
-      }
-      return runChecks(result, checks, ctx);
-    };
-  }
-}, {
-  get "~standard"() {
-    return hide(this, "~standard", standardProps(this));
-  },
-  set "~standard"(value) {
-    own(this, "~standard", value);
-  }
-});
-var toStandardResult = (r, ctx) => r.issues.length ? { issues: r.issues.map((iss) => finalizeIssue(iss, ctx, config())) } : { value: r.value };
-async function validateAsync2(inst, value) {
-  const ctx = { async: true };
-  return toStandardResult(await inst._zod.run({ value, issues: [] }, ctx), ctx);
-}
-function standardProps(inst) {
-  return {
-    validate: (value) => {
-      const ctx = { async: false };
-      try {
-        const r = inst._zod.run({ value, issues: [] }, ctx);
-        if (!(r instanceof Promise))
-          return toStandardResult(r, ctx);
-      } catch (_) {}
-      return validateAsync2(inst, value);
-    },
-    vendor: "zod",
-    version: 1
-  };
-}
-var $ZodString = /* @__PURE__ */ $constructor("$ZodString", (inst, def) => {
-  $ZodType.init(inst, def);
-  inst._zod.pattern = def.pattern ?? anyString;
-  inst._zod.parse = (payload, _) => {
-    if (def.coerce)
-      try {
-        payload.value = String(payload.value);
-      } catch (_) {}
-    if (typeof payload.value === "string")
-      return payload;
-    payload.issues.push({
-      expected: "string",
-      code: "invalid_type",
-      input: payload.value,
-      inst
-    });
-    return payload;
-  };
-});
-var $ZodStringFormat = /* @__PURE__ */ $constructor("$ZodStringFormat", (inst, def) => {
-  $ZodCheckStringFormat.init(inst, def);
-  $ZodString.init(inst, def);
-});
-var $ZodGUID = /* @__PURE__ */ $constructor("$ZodGUID", (inst, def) => {
-  def.pattern ?? (def.pattern = guid);
-  $ZodStringFormat.init(inst, def);
-});
-var $ZodUUID = /* @__PURE__ */ $constructor("$ZodUUID", (inst, def) => {
-  if (def.version) {
-    const versionMap = {
-      v1: 1,
-      v2: 2,
-      v3: 3,
-      v4: 4,
-      v5: 5,
-      v6: 6,
-      v7: 7,
-      v8: 8
-    };
-    const v = versionMap[def.version];
-    if (v === undefined)
-      throw new Error(`Invalid UUID version: "${def.version}"`);
-    def.pattern ?? (def.pattern = uuid(v));
-  } else
-    def.pattern ?? (def.pattern = uuid());
-  $ZodStringFormat.init(inst, def);
-});
-var $ZodEmail = /* @__PURE__ */ $constructor("$ZodEmail", (inst, def) => {
-  def.pattern ?? (def.pattern = email);
-  $ZodStringFormat.init(inst, def);
-});
-var URL_BAD_FORMAT = 1;
-var URL_UNPARSEABLE = 2;
-function canParseURL(input) {
-  try {
-    if (typeof URL !== "undefined" && typeof URL.canParse === "function")
-      return URL.canParse(input);
-    new URL(input);
-    return true;
-  } catch {
-    return false;
-  }
-}
-function validateURL(trimmed, def) {
-  if (!("normalize" in def) && !("hostname" in def) && !("protocol" in def)) {
-    return canParseURL(trimmed) || URL_UNPARSEABLE;
-  }
-  return parseURLObject(trimmed, def);
-}
-function parseURLObject(trimmed, def) {
-  if (!def.normalize && def.protocol?.source === httpProtocol.source && !/^https?:\/\//i.test(trimmed)) {
-    return URL_BAD_FORMAT;
-  }
-  try {
-    if (typeof URL !== "undefined") {
-      const URLStatic = URL;
-      if (typeof URLStatic.parse === "function")
-        return URLStatic.parse(trimmed) ?? URL_UNPARSEABLE;
-    }
-    return new URL(trimmed);
-  } catch {
-    return URL_UNPARSEABLE;
-  }
-}
-var asciiTabOrNewline = /[\t\n\r]/g;
-function stripTabAndNewline(value) {
-  return value.replace(asciiTabOrNewline, "");
-}
-function urlHostnameOk(url, hostname) {
-  hostname.lastIndex = 0;
-  return hostname.test(url.hostname);
-}
-function urlProtocolOk(url, protocol) {
-  protocol.lastIndex = 0;
-  return protocol.test(url.protocol.endsWith(":") ? url.protocol.slice(0, -1) : url.protocol);
-}
-var $ZodURL = /* @__PURE__ */ $constructor("$ZodURL", (inst, def) => {
-  $ZodStringFormat.init(inst, def);
-  inst._zod.check = (payload) => {
-    try {
-      const trimmed = payload.value.trim();
-      const url = validateURL(trimmed, def);
-      if (url === URL_BAD_FORMAT) {
-        payload.issues.push({
-          code: "invalid_format",
-          format: "url",
-          note: "Invalid URL format",
-          input: payload.value,
-          inst,
-          continue: !def.abort
-        });
-        return;
-      }
-      if (url === URL_UNPARSEABLE) {
-        payload.issues.push({
-          code: "invalid_format",
-          format: "url",
-          input: payload.value,
-          inst,
-          continue: !def.abort
-        });
-        return;
-      }
-      if (url === true) {
-        payload.value = stripTabAndNewline(trimmed);
-        return;
-      }
-      if (def.hostname && !urlHostnameOk(url, def.hostname)) {
-        payload.issues.push({
-          code: "invalid_format",
-          format: "url",
-          note: "Invalid hostname",
-          pattern: def.hostname.source,
-          input: payload.value,
-          inst,
-          continue: !def.abort
-        });
-      }
-      if (def.protocol && !urlProtocolOk(url, def.protocol)) {
-        payload.issues.push({
-          code: "invalid_format",
-          format: "url",
-          note: "Invalid protocol",
-          pattern: def.protocol.source,
-          input: payload.value,
-          inst,
-          continue: !def.abort
-        });
-      }
-      payload.value = def.normalize ? url.href : stripTabAndNewline(trimmed);
-      return;
-    } catch (_) {
-      payload.issues.push({
-        code: "invalid_format",
-        format: "url",
-        input: payload.value,
-        inst,
-        continue: !def.abort
-      });
-    }
-  };
-});
-var $ZodEmoji = /* @__PURE__ */ $constructor("$ZodEmoji", (inst, def) => {
-  def.pattern ?? (def.pattern = emoji());
-  $ZodStringFormat.init(inst, def);
-});
-var $ZodNanoID = /* @__PURE__ */ $constructor("$ZodNanoID", (inst, def) => {
-  if (def.length !== undefined && (!Number.isInteger(def.length) || def.length < 1))
-    throw new Error(`Invalid nanoid length: ${def.length}`);
-  def.pattern ?? (def.pattern = def.length === undefined ? nanoid : nanoidOfLength(def.length));
-  $ZodStringFormat.init(inst, def);
-});
-var $ZodCUID = /* @__PURE__ */ $constructor("$ZodCUID", (inst, def) => {
-  def.pattern ?? (def.pattern = cuid);
-  $ZodStringFormat.init(inst, def);
-});
-var $ZodCUID2 = /* @__PURE__ */ $constructor("$ZodCUID2", (inst, def) => {
-  def.pattern ?? (def.pattern = cuid2);
-  $ZodStringFormat.init(inst, def);
-});
-var $ZodULID = /* @__PURE__ */ $constructor("$ZodULID", (inst, def) => {
-  def.pattern ?? (def.pattern = ulid);
-  $ZodStringFormat.init(inst, def);
-});
-var $ZodXID = /* @__PURE__ */ $constructor("$ZodXID", (inst, def) => {
-  def.pattern ?? (def.pattern = xid);
-  $ZodStringFormat.init(inst, def);
-});
-var $ZodKSUID = /* @__PURE__ */ $constructor("$ZodKSUID", (inst, def) => {
-  def.pattern ?? (def.pattern = ksuid);
-  $ZodStringFormat.init(inst, def);
-});
-var $ZodISODateTime = /* @__PURE__ */ $constructor("$ZodISODateTime", (inst, def) => {
-  def.pattern ?? (def.pattern = datetime(def));
-  $ZodStringFormat.init(inst, def);
-});
-var $ZodISODate = /* @__PURE__ */ $constructor("$ZodISODate", (inst, def) => {
-  def.pattern ?? (def.pattern = date);
-  $ZodStringFormat.init(inst, def);
-});
-var $ZodISOTime = /* @__PURE__ */ $constructor("$ZodISOTime", (inst, def) => {
-  def.pattern ?? (def.pattern = time(def));
-  $ZodStringFormat.init(inst, def);
-});
-var $ZodISODuration = /* @__PURE__ */ $constructor("$ZodISODuration", (inst, def) => {
-  def.pattern ?? (def.pattern = duration);
-  $ZodStringFormat.init(inst, def);
-});
-var $ZodIPv4 = /* @__PURE__ */ $constructor("$ZodIPv4", (inst, def) => {
-  def.pattern ?? (def.pattern = ipv4);
-  $ZodStringFormat.init(inst, def);
-});
-var ipv6Alphabet = /^[0-9a-fA-F:.]+$/;
-function isValidIPv6(value) {
-  if (!ipv6Alphabet.test(value))
-    return false;
-  return canParseURL(`http://[${value}]`);
-}
-var $ZodIPv6 = /* @__PURE__ */ $constructor("$ZodIPv6", (inst, def) => {
-  def.pattern ?? (def.pattern = ipv6);
-  $ZodStringFormat.init(inst, def);
-  inst._zod.check = (payload) => {
-    if (!isValidIPv6(payload.value)) {
-      payload.issues.push({
-        code: "invalid_format",
-        format: "ipv6",
-        input: payload.value,
-        inst,
-        continue: !def.abort
-      });
-    }
-  };
-});
-var $ZodCIDRv4 = /* @__PURE__ */ $constructor("$ZodCIDRv4", (inst, def) => {
-  def.pattern ?? (def.pattern = cidrv4);
-  $ZodStringFormat.init(inst, def);
-});
-function isValidCIDRv6(value) {
-  const parts = value.split("/");
-  if (parts.length !== 2)
-    return false;
-  const [address, prefix] = parts;
-  if (!prefix)
-    return false;
-  const prefixNum = Number(prefix);
-  if (`${prefixNum}` !== prefix)
-    return false;
-  if (prefixNum < 0 || prefixNum > 128)
-    return false;
-  return isValidIPv6(address);
-}
-var $ZodCIDRv6 = /* @__PURE__ */ $constructor("$ZodCIDRv6", (inst, def) => {
-  def.pattern ?? (def.pattern = cidrv6);
-  $ZodStringFormat.init(inst, def);
-  inst._zod.check = (payload) => {
-    if (!isValidCIDRv6(payload.value)) {
-      payload.issues.push({
-        code: "invalid_format",
-        format: "cidrv6",
-        input: payload.value,
-        inst,
-        continue: !def.abort
-      });
-    }
-  };
-});
-function isValidBase64(data) {
-  if (data === "")
-    return true;
-  if (/\s/.test(data))
-    return false;
-  if (data.length % 4 !== 0)
-    return false;
-  try {
-    atob(data);
-    return true;
-  } catch {
-    return false;
-  }
-}
-var base64Charset = /^[0-9a-zA-Z+/]*={0,2}$/;
-var $ZodBase64 = /* @__PURE__ */ $constructor("$ZodBase64", (inst, def) => {
-  def.pattern ?? (def.pattern = base64Charset);
-  $ZodStringFormat.init(inst, def);
-  inst._zod.check = (payload) => {
-    if (isValidBase64(payload.value))
-      return;
-    payload.issues.push({
-      code: "invalid_format",
-      format: "base64",
-      input: payload.value,
-      inst,
-      continue: !def.abort
-    });
-  };
-});
-var base64urlCharset = /^[A-Za-z0-9_-]*$/;
-function isValidBase64URL(data) {
-  if (!base64urlCharset.test(data))
-    return false;
-  const base64 = data.replace(/[-_]/g, (c) => c === "-" ? "+" : "/");
-  const padded = base64.padEnd(Math.ceil(base64.length / 4) * 4, "=");
-  return isValidBase64(padded);
-}
-var $ZodBase64URL = /* @__PURE__ */ $constructor("$ZodBase64URL", (inst, def) => {
-  def.pattern ?? (def.pattern = base64urlCharset);
-  $ZodStringFormat.init(inst, def);
-  inst._zod.check = (payload) => {
-    if (isValidBase64URL(payload.value))
-      return;
-    payload.issues.push({
-      code: "invalid_format",
-      format: "base64url",
-      input: payload.value,
-      inst,
-      continue: !def.abort
-    });
-  };
-});
-var $ZodE164 = /* @__PURE__ */ $constructor("$ZodE164", (inst, def) => {
-  def.pattern ?? (def.pattern = e164);
-  $ZodStringFormat.init(inst, def);
-});
-function isValidJWT(token, algorithm = null) {
-  try {
-    const tokensParts = token.split(".");
-    if (tokensParts.length !== 3)
-      return false;
-    const [header] = tokensParts;
-    if (!header)
-      return false;
-    const parsedHeader = JSON.parse(atob(header));
-    if ("typ" in parsedHeader && parsedHeader?.typ !== "JWT")
-      return false;
-    if (!parsedHeader.alg)
-      return false;
-    if (algorithm && (!("alg" in parsedHeader) || parsedHeader.alg !== algorithm))
-      return false;
-    return true;
-  } catch {
-    return false;
-  }
-}
-var $ZodJWT = /* @__PURE__ */ $constructor("$ZodJWT", (inst, def) => {
-  $ZodStringFormat.init(inst, def);
-  inst._zod.check = (payload) => {
-    if (isValidJWT(payload.value, def.alg))
-      return;
-    payload.issues.push({
-      code: "invalid_format",
-      format: "jwt",
-      input: payload.value,
-      inst,
-      continue: !def.abort
-    });
-  };
-});
-var $ZodNumber = /* @__PURE__ */ $constructor("$ZodNumber", (inst, def) => {
-  $ZodType.init(inst, def);
-  inst._zod.pattern = number;
-  inst._zod.parse = (payload, _ctx) => {
-    if (def.coerce)
-      try {
-        payload.value = Number(payload.value);
-      } catch (_) {}
-    const input = payload.value;
-    if (typeof input === "number" && !Number.isNaN(input) && Number.isFinite(input)) {
-      return payload;
-    }
-    const received = typeof input === "number" ? Number.isNaN(input) ? "NaN" : !Number.isFinite(input) ? String(input) : undefined : undefined;
-    payload.issues.push({
-      expected: "number",
-      code: "invalid_type",
-      input,
-      inst,
-      ...received ? { received } : {}
-    });
-    return payload;
-  };
-});
-var $ZodNumberFormat = /* @__PURE__ */ $constructor("$ZodNumberFormat", (inst, def) => {
-  $ZodCheckNumberFormat.init(inst, def);
-  $ZodNumber.init(inst, def);
-});
-var $ZodBoolean = /* @__PURE__ */ $constructor("$ZodBoolean", (inst, def) => {
-  $ZodType.init(inst, def);
-  inst._zod.pattern = boolean;
-  inst._zod.parse = (payload, _ctx) => {
-    if (def.coerce)
-      try {
-        payload.value = Boolean(payload.value);
-      } catch (_) {}
-    const input = payload.value;
-    if (typeof input === "boolean")
-      return payload;
-    payload.issues.push({
-      expected: "boolean",
-      code: "invalid_type",
-      input,
-      inst
-    });
-    return payload;
-  };
-});
-var $ZodNull = /* @__PURE__ */ $constructor("$ZodNull", (inst, def) => {
-  $ZodType.init(inst, def);
-  inst._zod.pattern = _null;
-  inst._zod.values = new Set([null]);
-  inst._zod.parse = (payload, _ctx) => {
-    const input = payload.value;
-    if (input === null)
-      return payload;
-    payload.issues.push({
-      expected: "null",
-      code: "invalid_type",
-      input,
-      inst
-    });
-    return payload;
-  };
-});
-var $ZodUnknown = /* @__PURE__ */ $constructor("$ZodUnknown", (inst, def) => {
-  $ZodType.init(inst, def);
-  inst._zod.parse = (payload) => payload;
-});
-var $ZodNever = /* @__PURE__ */ $constructor("$ZodNever", (inst, def) => {
-  $ZodType.init(inst, def);
-  inst._zod.parse = (payload, _ctx) => {
-    payload.issues.push({
-      expected: "never",
-      code: "invalid_type",
-      input: payload.value,
-      inst
-    });
-    return payload;
-  };
-});
-function handleArrayResult(result, final, index) {
-  if (result.issues.length) {
-    final.issues.push(...prefixIssues(index, result.issues));
-  }
-  final.value[index] = result.value;
-}
-var $ZodArray = /* @__PURE__ */ $constructor("$ZodArray", (inst, def) => {
-  $ZodType.init(inst, def);
-  const memo = globalConfig.memoizer;
-  memo?.attach(inst);
-  inst._zod.parse = (payload, ctx) => {
-    const input = payload.value;
-    if (!Array.isArray(input)) {
-      payload.issues.push({
-        expected: "array",
-        code: "invalid_type",
-        input,
-        inst
-      });
-      return payload;
-    }
-    payload.value = memo ? memo.alloc(inst, payload, Array(input.length), ctx) : Array(input.length);
-    const proms = [];
-    const abortEarly = ctx?.abortEarly;
-    for (let i = 0;i < input.length; i++) {
-      const item = input[i];
-      const result = def.element._zod.run({
-        value: item,
-        issues: []
-      }, ctx);
-      if (result instanceof Promise) {
-        proms.push(result.then((result) => handleArrayResult(result, payload, i)));
-      } else {
-        handleArrayResult(result, payload, i);
-        if (abortEarly && result.issues.length !== 0 && aborted(result))
-          break;
-      }
-    }
-    if (proms.length) {
-      return Promise.all(proms).then(() => payload);
-    }
-    return payload;
-  };
-});
-function handlePropertyResult(result, final, key, input, optin, optout) {
-  const isPresent = key in input;
-  const isOptionalOut = optout === "optional";
-  if (!isPresent && isOptionalOut && optin === "optional") {
-    return;
-  }
-  if (result.issues.length) {
-    if (optin !== undefined && isOptionalOut && !isPresent) {
-      return;
-    }
-    final.issues.push(...prefixIssues(key, result.issues));
-  }
-  if (!isPresent && optin === undefined) {
-    if (!result.issues.length) {
-      final.issues.push({
-        code: "invalid_type",
-        expected: "nonoptional",
-        input: undefined,
-        path: [key]
-      });
-    }
-    return;
-  }
-  if (result.value === undefined) {
-    if (isPresent || optin === "defaulted" && !isOptionalOut) {
-      final.value[key] = undefined;
-    }
-  } else {
-    final.value[key] = result.value;
-  }
-}
-var NO_SYMBOL_KEYS = [];
-function normalizeDef(def) {
-  const keys = Object.keys(def.shape);
-  const ownSymbols = Object.getOwnPropertySymbols(def.shape);
-  const symbolKeys = ownSymbols.length ? ownSymbols : NO_SYMBOL_KEYS;
-  const allKeys = symbolKeys.length ? [...keys, ...symbolKeys] : keys;
-  for (const k of allKeys) {
-    if (!def.shape?.[k]?._zod?.traits?.has("$ZodType")) {
-      throw new Error(`Invalid element at key "${String(k)}": expected a Zod schema`);
-    }
-  }
-  const okeys = optionalKeys(def.shape);
-  return {
-    ...def,
-    allKeys,
-    symbolKeys,
-    keySet: new Set(keys),
-    numKeys: keys.length,
-    optionalKeys: new Set(okeys)
-  };
-}
-function handleCatchall(proms, input, payload, ctx, def, inst, abortEarly) {
-  const unrecognized = [];
-  const keySet = def.keySet;
-  const _catchall = def.catchall._zod;
-  const t = _catchall.def.type;
-  const optin = _catchall.optin;
-  const optout = _catchall.optout;
-  let seen = 0;
-  for (const key in input) {
-    if (abortEarly && payload.issues.length !== seen) {
-      if (aborted(payload, seen))
-        break;
-      seen = payload.issues.length;
-    }
-    if (keySet.has(key))
-      continue;
-    if (key === "__proto__") {
-      if (t === "never")
-        unrecognized.push(key);
-      continue;
-    }
-    if (t === "never") {
-      unrecognized.push(key);
-      continue;
-    }
-    const r = _catchall.run({ value: input[key], issues: [] }, ctx);
-    if (r instanceof Promise) {
-      proms.push(r.then((r) => handlePropertyResult(r, payload, key, input, optin, optout)));
-    } else {
-      handlePropertyResult(r, payload, key, input, optin, optout);
-    }
-  }
-  if (unrecognized.length) {
-    payload.issues.push({
-      code: "unrecognized_keys",
-      keys: unrecognized,
-      input,
-      inst,
-      continue: true
-    });
-  }
-  if (!proms.length)
-    return payload;
-  return Promise.all(proms).then(() => {
-    return payload;
-  });
-}
-var $ZodObject = /* @__PURE__ */ $constructor("$ZodObject", (inst, def) => {
-  $ZodType.init(inst, def);
-  const desc = Object.getOwnPropertyDescriptor(def, "shape");
-  const sh = desc?.get ? desc.get.raw : def.shape ?? {};
-  if (sh) {
-    const get = () => {
-      const newSh = { ...sh };
-      Object.defineProperty(def, "shape", { value: newSh });
-      get.raw = newSh;
-      return newSh;
-    };
-    get.raw = sh;
-    Object.defineProperty(def, "shape", { get });
-  }
-  const _normalized = cached(() => normalizeDef(def));
-  defineLazyInternal(inst, "propValues", (zod) => {
-    const shape = zod.def.shape;
-    const propValues = {};
-    for (const key in shape) {
-      const field = shape[key]._zod;
-      if (field.values) {
-        if (!Object.prototype.hasOwnProperty.call(propValues, key)) {
-          assignProp(propValues, key, new Set);
-        }
-        for (const v of field.values)
-          propValues[key].add(v);
-        if (field.optin !== undefined)
-          propValues[key].add(undefined);
-      }
-    }
-    return propValues;
-  });
-  const isObject2 = isObject;
-  const catchall = def.catchall;
-  let value;
-  const memo = globalConfig.memoizer;
-  memo?.attach(inst);
-  inst._zod.parse = (payload, ctx) => {
-    value ?? (value = _normalized.value);
-    const input = payload.value;
-    if (!isObject2(input)) {
-      payload.issues.push({
-        expected: "object",
-        code: "invalid_type",
-        input,
-        inst
-      });
-      return payload;
-    }
-    payload.value = memo ? memo.alloc(inst, payload, {}, ctx) : {};
-    const proms = [];
-    const shape = value.shape;
-    const abortEarly = ctx?.abortEarly;
-    let seen = payload.issues.length;
-    for (const key of value.allKeys) {
-      if (abortEarly && payload.issues.length !== seen) {
-        if (aborted(payload, seen))
-          break;
-        seen = payload.issues.length;
-      }
-      if (key === "__proto__")
-        continue;
-      const el = shape[key];
-      const optin = el._zod.optin;
-      const optout = el._zod.optout;
-      const r = el._zod.run({ value: input[key], issues: [] }, ctx);
-      if (r instanceof Promise) {
-        proms.push(r.then((r) => handlePropertyResult(r, payload, key, input, optin, optout)));
-      } else {
-        handlePropertyResult(r, payload, key, input, optin, optout);
-      }
-    }
-    if (!catchall) {
-      return proms.length ? Promise.all(proms).then(() => payload) : payload;
-    }
-    return handleCatchall(proms, input, payload, ctx, _normalized.value, inst, abortEarly === true);
-  };
-});
-var $ZodObjectJIT = /* @__PURE__ */ $constructor("$ZodObjectJIT", (inst, def) => {
-  $ZodObject.init(inst, def);
-  const superParse = inst._zod.parse;
-  const _normalized = cached(() => normalizeDef(def));
-  const memo = globalConfig.memoizer;
-  const generateFastpass = (shape) => {
-    const normalized = _normalized.value;
-    const syms = normalized.symbolKeys;
-    const doc = new Doc(["payload", "ctx"], { shape, inst, memo, syms });
-    const parseStr = (k) => `shape[${k}]._zod.run({ value: input[${k}], issues: [] }, ctx)`;
-    const prefixStr = (id, k) => `
-          let ${id}_ab = false;
-          for (let i = 0; i < ${id}.issues.length; i++) {
-            const iss = ${id}.issues[i];
-            iss.path = iss.path ? [${k}, ...iss.path] : [${k}];
-            payload.issues.push(iss);
-            if (iss.continue !== true) ${id}_ab = true;
-          }
-          if (${id}_ab && ctx && ctx.abortEarly) {
-            payload.value = newResult;
-            return payload;
-          }`;
-    doc.write(`const input = payload.value;`);
-    const ids = Object.create(null);
-    let counter = 0;
-    for (const key of normalized.allKeys) {
-      ids[key] = `key_${counter++}`;
-    }
-    doc.write(memo ? `const newResult = memo.alloc(inst, payload, {}, ctx);` : `const newResult = {};`);
-    for (const key of normalized.allKeys) {
-      if (key === "__proto__")
-        continue;
-      const id = ids[key];
-      const k = typeof key === "symbol" ? `syms[${syms.indexOf(key)}]` : esc(key);
-      const isPresent = `${k} in input`;
-      const schema = shape[key];
-      const optin = schema?._zod?.optin;
-      const isOptionalIn = optin !== undefined;
-      const isOptionalOut = schema?._zod?.optout === "optional";
-      doc.write(`const ${id} = ${parseStr(k)};`);
-      if (isOptionalIn && isOptionalOut) {
-        const assign = optin === "optional" ? `${id}_present` : `${id}.value !== undefined || ${id}_present`;
-        doc.write(`
-        const ${id}_present = ${isPresent};
-        if (!${id}.issues.length || ${id}_present) {
-          if (${id}.issues.length) {${prefixStr(id, k)}
-          }
-
-          if (${assign}) {
-            newResult[${k}] = ${id}.value;
-          }
-        }
-
-      `);
-      } else if (!isOptionalIn) {
-        doc.write(`
-        const ${id}_present = ${isPresent};
-        if (${id}.issues.length) {${prefixStr(id, k)}
-        }
-        if (!${id}_present && !${id}.issues.length) {
-          payload.issues.push({
-            code: "invalid_type",
-            expected: "nonoptional",
-            input: undefined,
-            path: [${k}]
-          });
-          if (ctx && ctx.abortEarly) {
-            payload.value = newResult;
-            return payload;
-          }
-        }
-
-        if (${id}_present) {
-          newResult[${k}] = ${id}.value;
-        }
-
-      `);
-      } else {
-        doc.write(`
-        if (${id}.issues.length) {${prefixStr(id, k)}
-        }
-      `);
-        if (optin === "defaulted") {
-          doc.write(`newResult[${k}] = ${id}.value;`);
-        } else {
-          doc.write(`
-        if (${id}.value !== undefined || ${isPresent}) {
-          newResult[${k}] = ${id}.value;
-        }
-      `);
-        }
-      }
-    }
-    doc.write(`payload.value = newResult;`);
-    doc.write(`return payload;`);
-    return doc.compile();
-  };
-  let fastpass;
-  const isObject2 = isObject;
-  const jit = !globalConfig.jitless;
-  const allowsEval2 = allowsEval;
-  const fastEnabled = jit && allowsEval2.value;
-  const catchall = def.catchall;
-  let value;
-  inst._zod.parse = (payload, ctx) => {
-    value ?? (value = _normalized.value);
-    const input = payload.value;
-    if (!isObject2(input)) {
-      payload.issues.push({
-        expected: "object",
-        code: "invalid_type",
-        input,
-        inst
-      });
-      return payload;
-    }
-    if (jit && fastEnabled && ctx?.async === false && ctx.jitless !== true) {
-      if (!fastpass)
-        fastpass = generateFastpass(def.shape);
-      payload = fastpass(payload, ctx);
-      if (!catchall)
-        return payload;
-      return handleCatchall([], input, payload, ctx, value, inst, ctx?.abortEarly === true);
-    }
-    return superParse(payload, ctx);
-  };
-});
-function handleUnionResults(results, final, inst, ctx) {
-  for (const result of results) {
-    if (result.issues.length === 0) {
-      final.value = result.value;
-      return final;
-    }
-  }
-  const nonaborted = results.filter((r) => !aborted(r));
-  if (nonaborted.length === 1) {
-    final.value = nonaborted[0].value;
-    return nonaborted[0];
-  }
-  final.issues.push({
-    code: "invalid_union",
-    input: final.value,
-    inst,
-    errors: results.map((result) => result.issues.map((iss) => finalizeIssue(iss, ctx, config())))
-  });
-  return final;
-}
-var $ZodUnion = /* @__PURE__ */ $constructor("$ZodUnion", (inst, def) => {
-  $ZodType.init(inst, def);
-  defineLazyInternal(inst, "optin", (zod) => zod.def.options.some((o) => o._zod.optin === "defaulted") ? "defaulted" : zod.def.options.some((o) => o._zod.optin !== undefined) ? "optional" : undefined);
-  defineLazyInternal(inst, "optout", (zod) => zod.def.options.some((o) => o._zod.optout === "optional") ? "optional" : undefined);
-  defineLazyInternal(inst, "values", (zod) => {
-    if (zod.def.options.every((o) => o._zod.values)) {
-      return new Set(zod.def.options.flatMap((option) => Array.from(option._zod.values)));
-    }
-    return;
-  });
-  defineLazyInternal(inst, "pattern", (zod) => {
-    if (zod.def.options.every((o) => o._zod.pattern)) {
-      const patterns = zod.def.options.map((o) => o._zod.pattern);
-      return new RegExp(`^(${patterns.map((p) => cleanRegex(p.source)).join("|")})$`);
-    }
-    return;
-  });
-  const first = def.options.length === 1 ? def.options[0]._zod.run : null;
-  inst._zod.parse = (payload, ctx) => {
-    if (first) {
-      return first(payload, ctx);
-    }
-    let async = false;
-    const results = [];
-    for (const option of def.options) {
-      const result = option._zod.run({
-        value: payload.value,
-        issues: []
-      }, ctx);
-      if (result instanceof Promise) {
-        results.push(result);
-        async = true;
-      } else {
-        if (result.issues.length === 0)
-          return result;
-        results.push(result);
-      }
-    }
-    if (!async)
-      return handleUnionResults(results, payload, inst, ctx);
-    return Promise.all(results).then((results) => {
-      return handleUnionResults(results, payload, inst, ctx);
-    });
-  };
-});
-function discriminatorMap(def) {
-  const map = new Map;
-  for (const option of def.options) {
-    const values = option._zod.propValues?.[def.discriminator];
-    if (!values || values.size === 0)
-      throw new Error(`Invalid discriminated union option at index "${def.options.indexOf(option)}"`);
-    for (const value of values) {
-      if (map.has(value)) {
-        if (value !== undefined)
-          throw new Error(`Duplicate discriminator value "${String(value)}"`);
-        map.set(value, null);
-      } else {
-        map.set(value, option);
-      }
-    }
-  }
-  return map;
-}
-var $ZodDiscriminatedUnion = /* @__PURE__ */ $constructor("$ZodDiscriminatedUnion", (inst, def) => {
-  def.inclusive = false;
-  $ZodUnion.init(inst, def);
-  const _super = inst._zod.parse;
-  defineLazyInternal(inst, "propValues", (zod) => {
-    const propValues = {};
-    let undefinedCount = 0;
-    for (const option of zod.def.options) {
-      const pv = option._zod.propValues;
-      if (!pv || Object.keys(pv).length === 0)
-        throw new Error(`Invalid discriminated union option at index "${zod.def.options.indexOf(option)}"`);
-      if (pv[zod.def.discriminator]?.has(undefined))
-        undefinedCount++;
-      for (const [k, v] of Object.entries(pv)) {
-        if (!Object.prototype.hasOwnProperty.call(propValues, k)) {
-          assignProp(propValues, k, new Set);
-        }
-        for (const val of v) {
-          propValues[k].add(val);
-        }
-      }
-    }
-    if (!zod.def.unionFallback && undefinedCount > 1)
-      propValues[zod.def.discriminator]?.delete(undefined);
-    return propValues;
-  });
-  def.options.forEach((option, i) => {
-    const propShape = rawShape(option._zod.def);
-    if (propShape && !Object.prototype.hasOwnProperty.call(propShape, def.discriminator)) {
-      throw new Error(`Invalid discriminated union option at index "${i}"`);
-    }
-  });
-  const disc = cached(() => discriminatorMap(def));
-  inst._zod.parse = (payload, ctx) => {
-    const input = payload.value;
-    if (!isObject(input)) {
-      payload.issues.push({
-        code: "invalid_type",
-        expected: "object",
-        input,
-        inst
-      });
-      return payload;
-    }
-    const value = input?.[def.discriminator];
-    const opt = disc.value.get(value);
-    if (opt && (value !== undefined || ctx.direction !== "backward")) {
-      return opt._zod.run(payload, ctx);
-    }
-    if (def.unionFallback || ctx.direction === "backward") {
-      return _super(payload, ctx);
-    }
-    payload.issues.push({
-      code: "invalid_union",
-      errors: [],
-      note: "No matching discriminator",
-      discriminator: def.discriminator,
-      options: Array.from(disc.value.keys()).filter((value) => disc.value.get(value) !== null),
-      input,
-      path: [def.discriminator],
-      inst
-    });
-    return payload;
-  };
-});
-var $ZodIntersection = /* @__PURE__ */ $constructor("$ZodIntersection", (inst, def) => {
-  $ZodType.init(inst, def);
-  inst._zod.parse = (payload, ctx) => {
-    const input = payload.value;
-    const left = def.left._zod.run({ value: input, issues: [] }, ctx);
-    const right = def.right._zod.run({ value: input, issues: [] }, ctx);
-    const async = left instanceof Promise || right instanceof Promise;
-    if (async) {
-      return Promise.all([left, right]).then(([left, right]) => {
-        return handleIntersectionResults(payload, left, right);
-      });
-    }
-    return handleIntersectionResults(payload, left, right);
-  };
-});
-function mergeValues(a, b) {
-  if (a === b) {
-    return { valid: true, data: a };
-  }
-  if (a instanceof Date && b instanceof Date && +a === +b) {
-    return { valid: true, data: a };
-  }
-  if (isPlainObject(a) && isPlainObject(b)) {
-    const bKeys = Object.keys(b);
-    const sharedKeys = Object.keys(a).filter((key) => bKeys.indexOf(key) !== -1);
-    const newObj = { ...a, ...b };
-    if (Object.prototype.hasOwnProperty.call(newObj, "__proto__"))
-      delete newObj.__proto__;
-    for (const key of sharedKeys) {
-      if (key === "__proto__")
-        continue;
-      const sharedValue = mergeValues(a[key], b[key]);
-      if (!sharedValue.valid) {
-        return {
-          valid: false,
-          mergeErrorPath: [key, ...sharedValue.mergeErrorPath]
-        };
-      }
-      newObj[key] = sharedValue.data;
-    }
-    return { valid: true, data: newObj };
-  }
-  if (Array.isArray(a) && Array.isArray(b)) {
-    if (a.length !== b.length) {
-      return { valid: false, mergeErrorPath: [] };
-    }
-    const newArray = [];
-    for (let index = 0;index < a.length; index++) {
-      const itemA = a[index];
-      const itemB = b[index];
-      const sharedValue = mergeValues(itemA, itemB);
-      if (!sharedValue.valid) {
-        return {
-          valid: false,
-          mergeErrorPath: [index, ...sharedValue.mergeErrorPath]
-        };
-      }
-      newArray.push(sharedValue.data);
-    }
-    return { valid: true, data: newArray };
-  }
-  return { valid: false, mergeErrorPath: [] };
-}
-function handleIntersectionResults(result, left, right) {
-  const unrecKeys = new Map;
-  let unrecIssue;
-  const keyIssues = new Map;
-  const collect = (iss, side) => {
-    let keys;
-    if (iss.code === "unrecognized_keys" && !iss.path?.length) {
-      unrecIssue ?? (unrecIssue = iss);
-      keys = iss.keys;
-    } else if (iss.code === "invalid_key" && iss.origin === "record" && iss.path?.length === 1) {
-      const k = String(iss.path[0]);
-      if (!keyIssues.has(k))
-        keyIssues.set(k, iss);
-      keys = [k];
-    } else {
-      return false;
-    }
-    for (const k of keys) {
-      if (!unrecKeys.has(k))
-        unrecKeys.set(k, {});
-      unrecKeys.get(k)[side] = true;
-    }
-    return true;
-  };
-  for (const iss of left.issues) {
-    if (!collect(iss, "l"))
-      result.issues.push(iss);
-  }
-  for (const iss of right.issues) {
-    if (!collect(iss, "r"))
-      result.issues.push(iss);
-  }
-  const bothKeys = [...unrecKeys].filter(([, f]) => f.l && f.r).map(([k]) => k);
-  if (bothKeys.length) {
-    const aggregated = unrecIssue ? bothKeys.filter((k) => unrecIssue.keys.includes(k)) : [];
-    if (aggregated.length)
-      result.issues.push({ ...unrecIssue, keys: aggregated });
-    for (const k of bothKeys) {
-      if (!aggregated.includes(k) && keyIssues.has(k))
-        result.issues.push(keyIssues.get(k));
-    }
-  }
-  const merged = mergeValues(left.value, right.value);
-  if (!merged.valid) {
-    if (aborted(result))
-      return result;
-    throw new Error(`Unmergable intersection. Error path: ` + `${JSON.stringify(merged.mergeErrorPath)}`);
-  }
-  result.value = merged.data;
-  return result;
-}
-var $ZodRecord = /* @__PURE__ */ $constructor("$ZodRecord", (inst, def) => {
-  $ZodType.init(inst, def);
-  const memo = globalConfig.memoizer;
-  memo?.attach(inst);
-  inst._zod.parse = (payload, ctx) => {
-    const input = payload.value;
-    if (!isPlainObject(input)) {
-      payload.issues.push({
-        expected: "record",
-        code: "invalid_type",
-        input,
-        inst
-      });
-      return payload;
-    }
-    const proms = [];
-    const values = def.keyType._zod.values;
-    if (values && !def.partial) {
-      payload.value = memo ? memo.alloc(inst, payload, {}, ctx) : {};
-      const recordKeys = new Set;
-      for (const key of values) {
-        if (typeof key === "string" || typeof key === "number" || typeof key === "symbol") {
-          recordKeys.add(typeof key === "number" ? key.toString() : key);
-          if (key === "__proto__")
-            continue;
-          const keyResult = def.keyType._zod.run({ value: key, issues: [] }, ctx);
-          if (keyResult instanceof Promise) {
-            throw new Error("Async schemas not supported in object keys currently");
-          }
-          if (keyResult.issues.length) {
-            payload.issues.push({
-              code: "invalid_key",
-              origin: "record",
-              issues: keyResult.issues.map((iss) => finalizeIssue(iss, ctx, config())),
-              input: key,
-              path: [key],
-              inst
-            });
-            continue;
-          }
-          const outKey = keyResult.value;
-          if (outKey === "__proto__")
-            continue;
-          const result = def.valueType._zod.run({ value: input[key], issues: [] }, ctx);
-          if (result instanceof Promise) {
-            proms.push(result.then((result) => {
-              if (result.issues.length) {
-                payload.issues.push(...prefixIssues(key, result.issues));
-              }
-              payload.value[outKey] = result.value;
-            }));
-          } else {
-            if (result.issues.length) {
-              payload.issues.push(...prefixIssues(key, result.issues));
-            }
-            payload.value[outKey] = result.value;
-          }
-        }
-      }
-      let unrecognized;
-      for (const key in input) {
-        if (!recordKeys.has(key)) {
-          if (def.mode === "loose") {
-            if (key === "__proto__")
-              continue;
-            payload.value[key] = input[key];
-          } else {
-            unrecognized = unrecognized ?? [];
-            unrecognized.push(key);
-          }
-        }
-      }
-      if (unrecognized && unrecognized.length > 0) {
-        payload.issues.push({
-          code: "unrecognized_keys",
-          input,
-          inst,
-          keys: unrecognized,
-          continue: true
-        });
-      }
-    } else {
-      payload.value = memo ? memo.alloc(inst, payload, {}, ctx) : {};
-      let unrecognized;
-      for (const key of Reflect.ownKeys(input)) {
-        if (key === "__proto__")
-          continue;
-        if (!Object.prototype.propertyIsEnumerable.call(input, key))
-          continue;
-        let keyResult = def.keyType._zod.run({ value: key, issues: [] }, ctx);
-        if (keyResult instanceof Promise) {
-          throw new Error("Async schemas not supported in object keys currently");
-        }
-        const checkNumericKey = typeof key === "string" && number.test(key) && keyResult.issues.length;
-        if (checkNumericKey) {
-          const retryResult = def.keyType._zod.run({ value: Number(key), issues: [] }, ctx);
-          if (retryResult instanceof Promise) {
-            throw new Error("Async schemas not supported in object keys currently");
-          }
-          if (retryResult.issues.length === 0) {
-            keyResult = retryResult;
-          }
-        }
-        if (keyResult.issues.length) {
-          if (def.mode === "loose") {
-            payload.value[key] = input[key];
-          } else if (values) {
-            unrecognized = unrecognized ?? [];
-            unrecognized.push(key);
-          } else {
-            payload.issues.push({
-              code: "invalid_key",
-              origin: "record",
-              issues: keyResult.issues.map((iss) => finalizeIssue(iss, ctx, config())),
-              input: key,
-              path: [key],
-              inst
-            });
-          }
-          continue;
-        }
-        const outKey = keyResult.value;
-        if (outKey === "__proto__")
-          continue;
-        const result = def.valueType._zod.run({ value: input[key], issues: [] }, ctx);
-        if (result instanceof Promise) {
-          proms.push(result.then((result) => {
-            if (result.issues.length) {
-              payload.issues.push(...prefixIssues(key, result.issues));
-            }
-            payload.value[outKey] = result.value;
-          }));
-        } else {
-          if (result.issues.length) {
-            payload.issues.push(...prefixIssues(key, result.issues));
-          }
-          payload.value[outKey] = result.value;
-        }
-      }
-      if (unrecognized && unrecognized.length > 0) {
-        payload.issues.push({
-          code: "unrecognized_keys",
-          input,
-          inst,
-          keys: unrecognized,
-          continue: true
-        });
-      }
-    }
-    if (proms.length) {
-      return Promise.all(proms).then(() => payload);
-    }
-    return payload;
-  };
-});
-var $ZodEnum = /* @__PURE__ */ $constructor("$ZodEnum", (inst, def) => {
-  $ZodType.init(inst, def);
-  const values = getEnumValues(def.entries);
-  const valuesSet = new Set(values);
-  inst._zod.values = valuesSet;
-  defineLazyInternal(inst, "pattern", (zod) => {
-    const patternValues = getEnumValues(zod.def.entries).filter((k) => propertyKeyTypes.has(typeof k));
-    return new RegExp(patternValues.length ? `^(${patternValues.map((o) => escapeRegex(o.toString())).join("|")})$` : "^[^\\s\\S]$");
-  });
-  inst._zod.parse = (payload, _ctx) => {
-    const input = payload.value;
-    if (valuesSet.has(input)) {
-      return payload;
-    }
-    payload.issues.push({
-      code: "invalid_value",
-      values,
-      input,
-      inst
-    });
-    return payload;
-  };
-});
-var $ZodLiteral = /* @__PURE__ */ $constructor("$ZodLiteral", (inst, def) => {
-  $ZodType.init(inst, def);
-  const values = new Set(def.values);
-  inst._zod.values = values;
-  defineLazyInternal(inst, "pattern", (zod) => {
-    const vals = zod.def.values;
-    return new RegExp(vals.length ? `^(${vals.map((o) => typeof o === "string" ? escapeRegex(o) : o ? escapeRegex(o.toString()) : String(o)).join("|")})$` : "^[^\\s\\S]$");
-  });
-  inst._zod.parse = (payload, _ctx) => {
-    const input = payload.value;
-    if (values.has(input)) {
-      return payload;
-    }
-    payload.issues.push({
-      code: "invalid_value",
-      values: def.values,
-      input,
-      inst
-    });
-    return payload;
-  };
-});
-var $ZodTransform = /* @__PURE__ */ $constructor("$ZodTransform", (inst, def) => {
-  $ZodType.init(inst, def);
-  inst._zod.optin = "optional";
-  globalConfig.memoizer?.guard(inst);
-  inst._zod.parse = (payload, ctx) => {
-    if (ctx.direction === "backward") {
-      throw new $ZodEncodeError(inst.constructor.name);
-    }
-    const _out = def.transform(payload.value, payload);
-    if (ctx.async) {
-      const output = _out instanceof Promise ? _out : Promise.resolve(_out);
-      return output.then((output) => {
-        payload.value = output;
-        return payload;
-      });
-    }
-    if (_out instanceof Promise) {
-      throw new $ZodAsyncError;
-    }
-    payload.value = _out;
-    return payload;
-  };
-});
-function handleOptionalResult(payload, result) {
-  payload.value = result.issues.length ? undefined : result.value;
-  return payload;
-}
-var $ZodOptional = /* @__PURE__ */ $constructor("$ZodOptional", (inst, def) => {
-  $ZodType.init(inst, def);
-  defineLazyInternal(inst, "optin", (zod) => zod.def.innerType._zod.optin === "defaulted" ? "defaulted" : "optional");
-  inst._zod.optout = "optional";
-  defineLazyInternal(inst, "values", (zod) => {
-    const values = zod.def.innerType._zod.values;
-    return values ? new Set([...values, undefined]) : undefined;
-  });
-  defineLazyInternal(inst, "pattern", (zod) => {
-    const pattern = zod.def.innerType._zod.pattern;
-    return pattern ? new RegExp(`^(${cleanRegex(pattern.source)})?$`) : undefined;
-  });
-  inst._zod.parse = (payload, ctx) => {
-    if (payload.value === undefined) {
-      if (def.innerType._zod.optin !== "defaulted")
-        return payload;
-      const result = def.innerType._zod.run({ value: payload.value, issues: [] }, ctx);
-      if (result instanceof Promise)
-        return result.then((result) => handleOptionalResult(payload, result));
-      return handleOptionalResult(payload, result);
-    }
-    return def.innerType._zod.run(payload, ctx);
-  };
-});
-var $ZodExactOptional = /* @__PURE__ */ $constructor("$ZodExactOptional", (inst, def) => {
-  $ZodOptional.init(inst, def);
-  defineLazyInternal(inst, "values", (zod) => zod.def.innerType._zod.values);
-  defineLazyInternal(inst, "pattern", (zod) => zod.def.innerType._zod.pattern);
-  inst._zod.parse = (payload, ctx) => {
-    return def.innerType._zod.run(payload, ctx);
-  };
-});
-var $ZodNullable = /* @__PURE__ */ $constructor("$ZodNullable", (inst, def) => {
-  $ZodType.init(inst, def);
-  defineLazyInternal(inst, "optin", (zod) => zod.def.innerType._zod.optin);
-  defineLazyInternal(inst, "optout", (zod) => zod.def.innerType._zod.optout);
-  defineLazyInternal(inst, "pattern", (zod) => {
-    const pattern = zod.def.innerType._zod.pattern;
-    return pattern ? new RegExp(`^(${cleanRegex(pattern.source)}|null)$`) : undefined;
-  });
-  defineLazyInternal(inst, "values", (zod) => {
-    return zod.def.innerType._zod.values ? new Set([...zod.def.innerType._zod.values, null]) : undefined;
-  });
-  inst._zod.parse = (payload, ctx) => {
-    if (payload.value === null)
-      return payload;
-    return def.innerType._zod.run(payload, ctx);
-  };
-});
-var $ZodDefault = /* @__PURE__ */ $constructor("$ZodDefault", (inst, def) => {
-  $ZodType.init(inst, def);
-  inst._zod.optin = "defaulted";
-  defineLazyInternal(inst, "values", (zod) => zod.def.innerType._zod.values);
-  inst._zod.parse = (payload, ctx) => {
-    if (ctx.direction === "backward") {
-      return def.innerType._zod.run(payload, ctx);
-    }
-    if (payload.value === undefined) {
-      payload.value = def.defaultValue;
-      return payload;
-    }
-    const result = def.innerType._zod.run(payload, ctx);
-    if (result instanceof Promise) {
-      return result.then((result) => handleDefaultResult(result, def));
-    }
-    return handleDefaultResult(result, def);
-  };
-});
-function handleDefaultResult(payload, def) {
-  if (payload.value === undefined) {
-    payload.value = def.defaultValue;
-  }
-  return payload;
-}
-var $ZodPrefault = /* @__PURE__ */ $constructor("$ZodPrefault", (inst, def) => {
-  $ZodType.init(inst, def);
-  inst._zod.optin = "defaulted";
-  defineLazyInternal(inst, "values", (zod) => zod.def.innerType._zod.values);
-  inst._zod.parse = (payload, ctx) => {
-    if (ctx.direction === "backward") {
-      return def.innerType._zod.run(payload, ctx);
-    }
-    if (payload.value === undefined) {
-      payload.value = def.defaultValue;
-    }
-    return def.innerType._zod.run(payload, ctx);
-  };
-});
-var $ZodNonOptional = /* @__PURE__ */ $constructor("$ZodNonOptional", (inst, def) => {
-  $ZodType.init(inst, def);
-  defineLazyInternal(inst, "values", (zod) => {
-    const v = zod.def.innerType._zod.values;
-    return v ? new Set([...v].filter((x) => x !== undefined)) : undefined;
-  });
-  inst._zod.parse = (payload, ctx) => {
-    const result = def.innerType._zod.run(payload, ctx);
-    if (result instanceof Promise) {
-      return result.then((result) => handleNonOptionalResult(result, inst));
-    }
-    return handleNonOptionalResult(result, inst);
-  };
-});
-function handleNonOptionalResult(payload, inst) {
-  if (!payload.issues.length && payload.value === undefined) {
-    payload.issues.push({
-      code: "invalid_type",
-      expected: "nonoptional",
-      input: payload.value,
-      inst
-    });
-  }
-  return payload;
-}
-function handleCatchResult(payload, result, def, ctx) {
-  if (!result.issues.length) {
-    payload.value = result.value;
-    if (result.memo)
-      payload.memo = true;
-    return payload;
-  }
-  payload.value = def.catchValue({
-    ...result,
-    value: payload.value,
-    error: {
-      issues: result.issues.map((iss) => finalizeIssue(iss, ctx, config()))
-    },
-    input: payload.value
-  });
-  return payload;
-}
-var $ZodCatch = /* @__PURE__ */ $constructor("$ZodCatch", (inst, def) => {
-  $ZodType.init(inst, def);
-  defineLazyInternal(inst, "optin", (zod) => zod.def.innerType._zod.optin === "defaulted" ? "defaulted" : "optional");
-  defineLazyInternal(inst, "optout", (zod) => zod.def.innerType._zod.optout);
-  defineLazyInternal(inst, "values", (zod) => zod.def.innerType._zod.values);
-  inst._zod.parse = (payload, ctx) => {
-    if (ctx.direction === "backward") {
-      return def.innerType._zod.run(payload, ctx);
-    }
-    const result = def.innerType._zod.run({ value: payload.value, issues: [] }, ctx);
-    if (result instanceof Promise) {
-      return result.then((result) => handleCatchResult(payload, result, def, ctx));
-    }
-    return handleCatchResult(payload, result, def, ctx);
-  };
-});
-var $ZodPipe = /* @__PURE__ */ $constructor("$ZodPipe", (inst, def) => {
-  $ZodType.init(inst, def);
-  defineLazyInternal(inst, "values", (zod) => zod.def.in._zod.values);
-  defineLazyInternal(inst, "optin", (zod) => zod.def.in._zod.optin);
-  defineLazyInternal(inst, "optout", (zod) => zod.def.out._zod.optout);
-  defineLazyInternal(inst, "propValues", (zod) => zod.def.in._zod.propValues);
-  inst._zod.parse = (payload, ctx) => {
-    if (ctx.direction === "backward") {
-      const right = def.out._zod.run(payload, ctx);
-      if (right instanceof Promise) {
-        return right.then((right) => handlePipeResult(right, def.in, ctx));
-      }
-      return handlePipeResult(right, def.in, ctx);
-    }
-    const left = def.in._zod.run(payload, ctx);
-    if (left instanceof Promise) {
-      return left.then((left) => handlePipeResult(left, def.out, ctx));
-    }
-    return handlePipeResult(left, def.out, ctx);
-  };
-});
-function handlePipeResult(left, next, ctx) {
-  if (left.issues.some((iss) => iss.code !== "unrecognized_keys")) {
-    left.aborted = true;
-    return left;
-  }
-  return next._zod.run({ value: left.value, issues: left.issues }, ctx);
-}
-var $ZodPreprocess = /* @__PURE__ */ $constructor("$ZodPreprocess", (inst, def) => {
-  $ZodPipe.init(inst, def);
-});
-var $ZodReadonly = /* @__PURE__ */ $constructor("$ZodReadonly", (inst, def) => {
-  $ZodType.init(inst, def);
-  defineLazyInternal(inst, "propValues", (zod) => zod.def.innerType._zod.propValues);
-  defineLazyInternal(inst, "values", (zod) => zod.def.innerType._zod.values);
-  defineLazyInternal(inst, "optin", (zod) => zod.def.innerType?._zod?.optin);
-  defineLazyInternal(inst, "optout", (zod) => zod.def.innerType?._zod?.optout);
-  inst._zod.parse = (payload, ctx) => {
-    if (ctx.direction === "backward") {
-      return def.innerType._zod.run(payload, ctx);
-    }
-    const result = def.innerType._zod.run(payload, ctx);
-    if (result instanceof Promise) {
-      return result.then(handleReadonlyResult);
-    }
-    return handleReadonlyResult(result);
-  };
-});
-function handleReadonlyResult(payload) {
-  if (!payload.memo)
-    payload.value = Object.freeze(payload.value);
-  return payload;
-}
-var $ZodCustom = /* @__PURE__ */ $constructor("$ZodCustom", (inst, def) => {
-  $ZodCheck.init(inst, def);
-  $ZodType.init(inst, def);
-  inst._zod.parse = (payload, _) => {
-    return payload;
-  };
-  inst._zod.check = (payload) => {
-    const input = payload.value;
-    const r = def.fn(input);
-    if (r instanceof Promise) {
-      return r.then((r) => handleRefineResult(r, payload, input, inst));
-    }
-    handleRefineResult(r, payload, input, inst);
-    return;
-  };
-});
-function handleRefineResult(result, payload, input, inst) {
-  if (!result) {
-    const _iss = {
-      code: "custom",
-      input,
-      inst,
-      path: [...inst._zod.def.path ?? []],
-      continue: !inst._zod.def.abort
-    };
-    if (inst._zod.def.params)
-      _iss.params = inst._zod.def.params;
-    payload.issues.push(issue(_iss));
-  }
-}
-// node_modules/zod/v4/core/memoizer.js
-class $ZodCyclicError extends Error {
-  constructor() {
-    super(`Cannot parse a reference cycle that closes through a transform`);
-    this.name = "ZodCyclicError";
-  }
-}
-var STATE = "~memo";
-var NO_ISSUES = [];
-function isRef(value) {
-  return value !== null && typeof value === "object";
-}
-function cloneIssues(issues) {
-  return issues.map((iss) => iss.path ? { ...iss, path: iss.path.slice() } : { ...iss });
-}
-var recursive = /* @__PURE__ */ new WeakMap;
-var NONE = 0;
-var ASSUMED = 1;
-var PROVEN = 2;
-function isRecursive(inst, stack, resolve) {
-  const cached = recursive.get(inst);
-  if (cached !== undefined)
-    return cached ? PROVEN : NONE;
-  if (stack.has(inst))
-    return PROVEN;
-  stack.add(inst);
-  let result = NONE;
-  const check = (child) => {
-    if (result !== PROVEN && child?._zod) {
-      const answer = isRecursive(child, stack, resolve);
-      if (answer > result)
-        result = answer;
-    }
-  };
-  const shape = (sh, spread) => {
-    let answer = NONE;
-    for (const key of Reflect.ownKeys(sh)) {
-      const desc = Object.getOwnPropertyDescriptor(sh, key);
-      if (spread && !desc.enumerable)
-        continue;
-      const child = desc.get ? ASSUMED : desc.value?._zod ? isRecursive(desc.value, stack, resolve) : NONE;
-      if (child > answer)
-        answer = child;
-    }
-    return answer;
-  };
-  const merge = (answer) => {
-    if (answer > result)
-      result = answer;
-  };
-  const def = inst._zod.def;
-  const kind = def.type;
-  switch (kind) {
-    case "object": {
-      const raw = rawShape(def);
-      merge(raw ? shape(raw, true) : ASSUMED);
-      check(def.catchall);
-      break;
-    }
-    case "array":
-      check(def.element);
-      break;
-    case "tuple":
-      for (const el of def.items)
-        check(el);
-      check(def.rest);
-      break;
-    case "record":
-    case "map":
-      check(def.keyType);
-      check(def.valueType);
-      break;
-    case "set":
-      check(def.valueType);
-      break;
-    case "union":
-      for (const el of def.options)
-        check(el);
-      break;
-    case "intersection":
-      check(def.left);
-      check(def.right);
-      break;
-    case "optional":
-    case "nullable":
-    case "default":
-    case "prefault":
-    case "catch":
-    case "readonly":
-    case "nonoptional":
-    case "promise":
-    case "success":
-      check(def.innerType);
-      break;
-    case "pipe":
-      check(def.in);
-      check(def.out);
-      break;
-    case "function":
-      check(def.input);
-      check(def.output);
-      break;
-    case "lazy": {
-      const inner = def._cachedInner ?? (resolve ? inst._zod.innerType : undefined);
-      merge(inner ? isRecursive(inner, stack, false) : ASSUMED);
-      break;
-    }
-    case "template_literal":
-    case "string":
-    case "number":
-    case "int":
-    case "boolean":
-    case "bigint":
-    case "symbol":
-    case "undefined":
-    case "null":
-    case "void":
-    case "never":
-    case "any":
-    case "unknown":
-    case "date":
-    case "nan":
-    case "enum":
-    case "literal":
-    case "file":
-    case "transform":
-    case "custom":
-      break;
-    default: {
-      for (const key in def) {
-        const desc = Object.getOwnPropertyDescriptor(def, key);
-        if (!desc || desc.get)
-          continue;
-        const value = desc.value;
-        if (!value || typeof value !== "object")
-          continue;
-        if (value._zod)
-          check(value);
-        else if (Array.isArray(value))
-          for (const el of value)
-            check(el);
-      }
-    }
-  }
-  stack.delete(inst);
-  return settle(inst, result);
-}
-function settle(inst, answer) {
-  if (answer !== ASSUMED)
-    recursive.set(inst, answer === PROVEN);
-  return answer;
-}
-function bucketFor(state, inst) {
-  let bucket = state.buckets.get(inst);
-  if (!bucket) {
-    bucket = new WeakMap;
-    state.buckets.set(inst, bucket);
-  }
-  return bucket;
-}
-var handoff;
-var open = [];
-var memo = {
-  alloc(_inst, payload, empty) {
-    const bucket = handoff;
-    if (!bucket)
-      return empty;
-    handoff = undefined;
-    const entry = { value: empty, issues: null };
-    bucket.set(payload.value, entry);
-    open.push(entry);
-    return empty;
-  },
-  guard(inst) {
-    var _a;
-    (_a = inst._zod).deferred ?? (_a.deferred = []);
-    inst._zod.deferred.push(() => {
-      const base = inst._zod.parse;
-      const wrapped = (payload, ctx) => {
-        if (ctx.direction !== "backward" && isBackEdge(ctx, payload.value))
-          throw new $ZodCyclicError;
-        return base(payload, ctx);
-      };
-      inst._zod.parse = wrapped;
-      if (inst._zod.run === base)
-        inst._zod.run = wrapped;
-    });
-  },
-  attach(inst) {
-    var _a;
-    let isRecursiveInst;
-    let rechecked = false;
-    let lastCtx;
-    let lastBucket;
-    (_a = inst._zod).deferred ?? (_a.deferred = []);
-    inst._zod.deferred.push(() => {
-      const base = inst._zod.parse;
-      const wrapped = (payload, ctx) => {
-        if (isRecursiveInst === undefined) {
-          const walked = isRecursive(inst, new Set, false);
-          if (walked === NONE) {
-            inst._zod.parse = base;
-            if (inst._zod.run === wrapped)
-              inst._zod.run = base;
-            return base(payload, ctx);
-          }
-          if (walked === PROVEN || rechecked)
-            isRecursiveInst = true;
-          else
-            rechecked = true;
-        }
-        const input = payload.value;
-        if (!isRef(input))
-          return base(payload, ctx);
-        let state = ctx[STATE];
-        if (!state) {
-          state = { buckets: new WeakMap, backEdges: undefined };
-          ctx[STATE] = state;
-        }
-        let bucket;
-        if (lastCtx === ctx) {
-          bucket = lastBucket;
-        } else {
-          bucket = bucketFor(state, inst);
-          lastCtx = ctx;
-          lastBucket = bucket;
-        }
-        const hit = bucket.get(input);
-        if (hit) {
-          payload.value = hit.value;
-          if (hit.issues) {
-            if (hit.issues.length)
-              payload.issues.push(...cloneIssues(hit.issues));
-          } else {
-            payload.memo = true;
-            state.backEdges ?? (state.backEdges = new WeakSet);
-            state.backEdges.add(hit.value);
-          }
-          return payload;
-        }
-        handoff = bucket;
-        const depth = open.length;
-        const result = base(payload, ctx);
-        handoff = undefined;
-        const entry = open.length > depth ? open.pop() : undefined;
-        if (result instanceof Promise) {
-          return result.then((r) => {
-            if (entry)
-              entry.issues = r.issues.length ? cloneIssues(r.issues) : NO_ISSUES;
-            return r;
-          });
-        }
-        if (entry)
-          entry.issues = result.issues.length ? cloneIssues(result.issues) : NO_ISSUES;
-        return result;
-      };
-      inst._zod.parse = wrapped;
-      if (inst._zod.run === base)
-        inst._zod.run = wrapped;
-    });
-  }
-};
-function memoizer() {
-  return memo;
-}
-function isBackEdge(ctx, value) {
-  const backEdges = ctx[STATE]?.backEdges;
-  return backEdges !== undefined && isRef(value) && backEdges.has(value);
-}
-// node_modules/zod/v4/locales/en.js
-var error = () => {
-  const Sizable = {
-    string: { unit: "characters", verb: "to have" },
-    file: { unit: "bytes", verb: "to have" },
-    array: { unit: "items", verb: "to have" },
-    set: { unit: "items", verb: "to have" },
-    map: { unit: "entries", verb: "to have" }
-  };
-  function getSizing(origin) {
-    return Sizable[origin] ?? null;
-  }
-  const FormatDictionary = {
-    regex: "input",
-    email: "email address",
-    url: "URL",
-    emoji: "emoji",
-    uuid: "UUID",
-    uuidv4: "UUIDv4",
-    uuidv6: "UUIDv6",
-    nanoid: "nanoid",
-    guid: "GUID",
-    cuid: "cuid",
-    cuid2: "cuid2",
-    ulid: "ULID",
-    xid: "XID",
-    ksuid: "KSUID",
-    datetime: "ISO datetime",
-    date: "ISO date",
-    time: "ISO time",
-    duration: "ISO duration",
-    ipv4: "IPv4 address",
-    ipv6: "IPv6 address",
-    mac: "MAC address",
-    cidrv4: "IPv4 range",
-    cidrv6: "IPv6 range",
-    base64: "base64-encoded string",
-    base64url: "base64url-encoded string",
-    json_string: "JSON string",
-    e164: "E.164 number",
-    currency_code: "currency code",
-    credit_card: "credit card number",
-    iban: "IBAN",
-    jwt: "JWT",
-    template_literal: "input"
-  };
-  const TypeDictionary = {
-    nan: "NaN"
-  };
-  function getTypeName(type, input) {
-    if (type === "number" && typeof input === "number" && !Number.isFinite(input)) {
-      return String(input);
-    }
-    return TypeDictionary[type] ?? type;
-  }
-  return (issue) => {
-    switch (issue.code) {
-      case "invalid_type": {
-        const expected = getTypeName(issue.expected);
-        const receivedType = parsedType(issue.input);
-        const received = getTypeName(receivedType, issue.input);
-        return `Invalid input: expected ${expected}, received ${received}`;
-      }
-      case "invalid_value":
-        if (issue.values.length === 1)
-          return `Invalid input: expected ${stringifyPrimitive(issue.values[0])}`;
-        return `Invalid option: expected one of ${joinValues(issue.values, "|")}`;
-      case "too_big": {
-        const adj = issue.exact ? "exactly " : issue.inclusive ? "<=" : "<";
-        const sizing = getSizing(issue.origin);
-        if (sizing)
-          return `Too big: expected ${issue.origin ?? "value"} to have ${adj}${issue.maximum.toString()} ${sizing.unit ?? "elements"}`;
-        return `Too big: expected ${issue.origin ?? "value"} to be ${adj}${issue.maximum.toString()}`;
-      }
-      case "too_small": {
-        const adj = issue.exact ? "exactly " : issue.inclusive ? ">=" : ">";
-        const sizing = getSizing(issue.origin);
-        if (sizing) {
-          return `Too small: expected ${issue.origin} to have ${adj}${issue.minimum.toString()} ${sizing.unit}`;
-        }
-        return `Too small: expected ${issue.origin} to be ${adj}${issue.minimum.toString()}`;
-      }
-      case "invalid_format": {
-        const _issue = issue;
-        if (_issue.format === "starts_with") {
-          return `Invalid string: must start with "${_issue.prefix}"`;
-        }
-        if (_issue.format === "ends_with")
-          return `Invalid string: must end with "${_issue.suffix}"`;
-        if (_issue.format === "includes")
-          return `Invalid string: must include "${_issue.includes}"`;
-        if (_issue.format === "regex")
-          return `Invalid string: must match pattern ${_issue.pattern}`;
-        return `Invalid ${FormatDictionary[_issue.format] ?? issue.format}`;
-      }
-      case "not_multiple_of":
-        return `Invalid number: must be a multiple of ${issue.divisor}`;
-      case "unrecognized_keys":
-        return `Unrecognized key${issue.keys.length > 1 ? "s" : ""}: ${joinValues(issue.keys, ", ")}`;
-      case "invalid_key":
-        return `Invalid key in ${issue.origin}`;
-      case "invalid_union":
-        if (issue.options && Array.isArray(issue.options) && issue.options.length > 0) {
-          const opts = issue.options.map((o) => `'${o}'`).join(" | ");
-          return `Invalid discriminator value. Expected ${opts}`;
-        }
-        if (issue.inclusive === false) {
-          return "Invalid input: more than one option matched";
-        }
-        return "Invalid input";
-      case "invalid_element":
-        return `Invalid value in ${issue.origin}`;
-      default:
-        return `Invalid input`;
-    }
-  };
-};
-function en_default() {
-  return {
-    localeError: error()
-  };
-}
-// node_modules/zod/v4/core/registries.js
-var _a2;
-class $ZodRegistry {
-  constructor() {
-    this._map = new WeakMap;
-    this._idmap = new Map;
-  }
-  add(schema, ..._meta) {
-    const meta = _meta[0];
-    this._map.set(schema, meta);
-    if (meta && typeof meta === "object" && "id" in meta) {
-      this._idmap.set(meta.id, schema);
-    }
-    return this;
-  }
-  clear() {
-    this._map = new WeakMap;
-    this._idmap = new Map;
-    return this;
-  }
-  remove(schema) {
-    const meta = this._map.get(schema);
-    if (meta && typeof meta === "object" && "id" in meta) {
-      this._idmap.delete(meta.id);
-    }
-    this._map.delete(schema);
-    return this;
-  }
-  get(schema) {
-    const p = schema._zod.parent;
-    if (p) {
-      const pm = { ...this.get(p) ?? {} };
-      delete pm.id;
-      const f = { ...pm, ...this._map.get(schema) };
-      return Object.keys(f).length ? f : undefined;
-    }
-    return this._map.get(schema);
-  }
-  has(schema) {
-    return this._map.has(schema);
-  }
-}
-function registry() {
-  return new $ZodRegistry;
-}
-(_a2 = globalThis).__zod_globalRegistry ?? (_a2.__zod_globalRegistry = registry());
-var globalRegistry = globalThis.__zod_globalRegistry;
-// node_modules/zod/v4/core/api.js
-function snapshotChecks(def) {
-  if (def.checks)
-    def.checks = [...def.checks];
-  return def;
-}
-function _string(Class, params) {
-  return new Class(snapshotChecks({ type: "string", ...normalizeParams(params) }));
-}
-function _email(Class, params) {
-  return new Class({
-    type: "string",
-    format: "email",
-    check: "string_format",
-    abort: false,
-    ...normalizeParams(params)
-  });
-}
-function _guid(Class, params) {
-  return new Class({
-    type: "string",
-    format: "guid",
-    check: "string_format",
-    abort: false,
-    ...normalizeParams(params)
-  });
-}
-function _uuid(Class, params) {
-  return new Class({
-    type: "string",
-    format: "uuid",
-    check: "string_format",
-    abort: false,
-    ...normalizeParams(params)
-  });
-}
-function _uuidv4(Class, params) {
-  return new Class({
-    type: "string",
-    format: "uuid",
-    check: "string_format",
-    abort: false,
-    version: "v4",
-    ...normalizeParams(params)
-  });
-}
-function _uuidv6(Class, params) {
-  return new Class({
-    type: "string",
-    format: "uuid",
-    check: "string_format",
-    abort: false,
-    version: "v6",
-    ...normalizeParams(params)
-  });
-}
-function _uuidv7(Class, params) {
-  return new Class({
-    type: "string",
-    format: "uuid",
-    check: "string_format",
-    abort: false,
-    version: "v7",
-    ...normalizeParams(params)
-  });
-}
-function _url(Class, params) {
-  return new Class({
-    type: "string",
-    format: "url",
-    check: "string_format",
-    abort: false,
-    ...normalizeParams(params)
-  });
-}
-function _emoji2(Class, params) {
-  return new Class({
-    type: "string",
-    format: "emoji",
-    check: "string_format",
-    abort: false,
-    ...normalizeParams(params)
-  });
-}
-function _nanoid(Class, params) {
-  return new Class({
-    type: "string",
-    format: "nanoid",
-    check: "string_format",
-    abort: false,
-    ...normalizeParams(params)
-  });
-}
-function _cuid(Class, params) {
-  return new Class({
-    type: "string",
-    format: "cuid",
-    check: "string_format",
-    abort: false,
-    ...normalizeParams(params)
-  });
-}
-function _cuid2(Class, params) {
-  return new Class({
-    type: "string",
-    format: "cuid2",
-    check: "string_format",
-    abort: false,
-    ...normalizeParams(params)
-  });
-}
-function _ulid(Class, params) {
-  return new Class({
-    type: "string",
-    format: "ulid",
-    check: "string_format",
-    abort: false,
-    ...normalizeParams(params)
-  });
-}
-function _xid(Class, params) {
-  return new Class({
-    type: "string",
-    format: "xid",
-    check: "string_format",
-    abort: false,
-    ...normalizeParams(params)
-  });
-}
-function _ksuid(Class, params) {
-  return new Class({
-    type: "string",
-    format: "ksuid",
-    check: "string_format",
-    abort: false,
-    ...normalizeParams(params)
-  });
-}
-function _ipv4(Class, params) {
-  return new Class({
-    type: "string",
-    format: "ipv4",
-    check: "string_format",
-    abort: false,
-    ...normalizeParams(params)
-  });
-}
-function _ipv6(Class, params) {
-  return new Class({
-    type: "string",
-    format: "ipv6",
-    check: "string_format",
-    abort: false,
-    ...normalizeParams(params)
-  });
-}
-function _cidrv4(Class, params) {
-  return new Class({
-    type: "string",
-    format: "cidrv4",
-    check: "string_format",
-    abort: false,
-    ...normalizeParams(params)
-  });
-}
-function _cidrv6(Class, params) {
-  return new Class({
-    type: "string",
-    format: "cidrv6",
-    check: "string_format",
-    abort: false,
-    ...normalizeParams(params)
-  });
-}
-function _base64(Class, params) {
-  return new Class({
-    type: "string",
-    format: "base64",
-    check: "string_format",
-    abort: false,
-    ...normalizeParams(params)
-  });
-}
-function _base64url(Class, params) {
-  return new Class({
-    type: "string",
-    format: "base64url",
-    check: "string_format",
-    abort: false,
-    ...normalizeParams(params)
-  });
-}
-function _e164(Class, params) {
-  return new Class({
-    type: "string",
-    format: "e164",
-    check: "string_format",
-    abort: false,
-    ...normalizeParams(params)
-  });
-}
-function _jwt(Class, params) {
-  return new Class({
-    type: "string",
-    format: "jwt",
-    check: "string_format",
-    abort: false,
-    ...normalizeParams(params)
-  });
-}
-function _isoDateTime(Class, params) {
-  return new Class({
-    type: "string",
-    format: "datetime",
-    check: "string_format",
-    offset: false,
-    local: false,
-    precision: null,
-    ...normalizeParams(params)
-  });
-}
-function _isoDate(Class, params) {
-  return new Class({
-    type: "string",
-    format: "date",
-    check: "string_format",
-    ...normalizeParams(params)
-  });
-}
-function _isoTime(Class, params) {
-  return new Class({
-    type: "string",
-    format: "time",
-    check: "string_format",
-    precision: null,
-    ...normalizeParams(params)
-  });
-}
-function _isoDuration(Class, params) {
-  return new Class({
-    type: "string",
-    format: "duration",
-    check: "string_format",
-    ...normalizeParams(params)
-  });
-}
-function _number(Class, params) {
-  return new Class(snapshotChecks({ type: "number", checks: [], ...normalizeParams(params) }));
-}
-function _int(Class, params) {
-  return new Class({
-    type: "number",
-    check: "number_format",
-    abort: false,
-    format: "safeint",
-    ...normalizeParams(params)
-  });
-}
-function _boolean(Class, params) {
-  return new Class({
-    type: "boolean",
-    ...normalizeParams(params)
-  });
-}
-function _null2(Class, params) {
-  return new Class({
-    type: "null",
-    ...normalizeParams(params)
-  });
-}
-function _unknown(Class) {
-  return new Class({
-    type: "unknown"
-  });
-}
-function _never(Class, params) {
-  return new Class({
-    type: "never",
-    ...normalizeParams(params)
-  });
-}
-function _lt(value, params) {
-  return new $ZodCheckLessThan({
-    check: "less_than",
-    ...normalizeParams(params),
-    value,
-    inclusive: false
-  });
-}
-function _lte(value, params) {
-  return new $ZodCheckLessThan({
-    check: "less_than",
-    ...normalizeParams(params),
-    value,
-    inclusive: true
-  });
-}
-function _gt(value, params) {
-  return new $ZodCheckGreaterThan({
-    check: "greater_than",
-    ...normalizeParams(params),
-    value,
-    inclusive: false
-  });
-}
-function _gte(value, params) {
-  return new $ZodCheckGreaterThan({
-    check: "greater_than",
-    ...normalizeParams(params),
-    value,
-    inclusive: true
-  });
-}
-function _multipleOf(value, params) {
-  return new $ZodCheckMultipleOf({
-    check: "multiple_of",
-    ...normalizeParams(params),
-    value
-  });
-}
-function _maxLength(maximum, params) {
-  const ch = new $ZodCheckMaxLength({
-    check: "max_length",
-    ...normalizeParams(params),
-    maximum
-  });
-  return ch;
-}
-function _minLength(minimum, params) {
-  return new $ZodCheckMinLength({
-    check: "min_length",
-    ...normalizeParams(params),
-    minimum
-  });
-}
-function _length(length, params) {
-  return new $ZodCheckLengthEquals({
-    check: "length_equals",
-    ...normalizeParams(params),
-    length
-  });
-}
-function _regex(pattern, params) {
-  return new $ZodCheckRegex({
-    check: "string_format",
-    format: "regex",
-    ...normalizeParams(params),
-    pattern
-  });
-}
-function _lowercase(params) {
-  return new $ZodCheckLowerCase({
-    check: "string_format",
-    format: "lowercase",
-    ...normalizeParams(params)
-  });
-}
-function _uppercase(params) {
-  return new $ZodCheckUpperCase({
-    check: "string_format",
-    format: "uppercase",
-    ...normalizeParams(params)
-  });
-}
-function _includes(includes, params) {
-  return new $ZodCheckIncludes({
-    check: "string_format",
-    format: "includes",
-    ...normalizeParams(params),
-    includes
-  });
-}
-function _startsWith(prefix, params) {
-  return new $ZodCheckStartsWith({
-    check: "string_format",
-    format: "starts_with",
-    ...normalizeParams(params),
-    prefix
-  });
-}
-function _endsWith(suffix, params) {
-  return new $ZodCheckEndsWith({
-    check: "string_format",
-    format: "ends_with",
-    ...normalizeParams(params),
-    suffix
-  });
-}
-function _overwrite(tx) {
-  return new $ZodCheckOverwrite({
-    check: "overwrite",
-    tx
-  });
-}
-function _normalize(form) {
-  return _overwrite((input) => input.normalize(form));
-}
-function _trim() {
-  return _overwrite((input) => input.trim());
-}
-function _toLowerCase() {
-  return _overwrite((input) => input.toLowerCase());
-}
-function _toUpperCase() {
-  return _overwrite((input) => input.toUpperCase());
-}
-function _slugify() {
-  return _overwrite((input) => slugify(input));
-}
-function _array(Class, element, params) {
-  return new Class({
-    type: "array",
-    element,
-    ...normalizeParams(params)
-  });
-}
-function _custom(Class, fn, _params) {
-  const norm = normalizeParams(_params);
-  norm.abort ?? (norm.abort = true);
-  const schema = new Class({
-    type: "custom",
-    check: "custom",
-    fn,
-    ...norm
-  });
-  return schema;
-}
-function _refine(Class, fn, _params) {
-  const schema = new Class({
-    type: "custom",
-    check: "custom",
-    fn,
-    ...normalizeParams(_params)
-  });
-  return schema;
-}
-function _superRefine(fn, params) {
-  const ch = _check((payload) => {
-    payload.addIssue = (issue2) => {
-      if (typeof issue2 === "string") {
-        payload.issues.push(issue(issue2, payload.value, ch._zod.def));
-      } else {
-        const _issue = issue2;
-        if (_issue.fatal)
-          _issue.continue = false;
-        _issue.code ?? (_issue.code = "custom");
-        if (!("input" in _issue))
-          _issue.input = payload.value;
-        _issue.inst ?? (_issue.inst = ch);
-        _issue.continue ?? (_issue.continue = !ch._zod.def.abort);
-        payload.issues.push(issue(_issue));
-      }
-    };
-    return fn(payload.value, payload);
-  }, params);
-  return ch;
-}
-function _check(fn, params) {
-  const ch = new $ZodCheck({
-    check: "custom",
-    ...normalizeParams(params)
-  });
-  ch._zod.check = fn;
-  return ch;
-}
-// node_modules/zod/v4/core/to-json-schema.js
-function assignProps(target, ...sources) {
-  for (const source of sources) {
-    for (const key of Reflect.ownKeys(source)) {
-      if (Object.prototype.propertyIsEnumerable.call(source, key)) {
-        assignProp(target, key, source[key]);
-      }
-    }
-  }
-  return target;
-}
-function initializeContext(params) {
-  let target = params?.target ?? "draft-2020-12";
-  if (target === "draft-4")
-    target = "draft-04";
-  if (target === "draft-7")
-    target = "draft-07";
-  return {
-    processors: params.processors ?? {},
-    metadataRegistry: params?.metadata ?? globalRegistry,
-    target,
-    unrepresentable: params?.unrepresentable ?? "throw",
-    override: params?.override ?? (() => {}),
-    io: params?.io ?? "output",
-    counter: 0,
-    seen: new Map,
-    sharedDefsExtractedFor: undefined,
-    sharedEmitDoneFor: undefined,
-    cycles: params?.cycles ?? "ref",
-    reused: params?.reused ?? "inline",
-    intersections: [],
-    deferred: [],
-    external: params?.external ?? undefined
-  };
-}
-function handleUnrepresentable(schema, ctx, json, params, message) {
-  const result = typeof ctx.unrepresentable === "function" ? ctx.unrepresentable({ zodSchema: schema, path: params.path, message }) : ctx.unrepresentable;
-  if (result === "any")
-    return false;
-  if (result === undefined || result === "throw")
-    throw new Error(message);
-  Object.assign(json, result);
-  return true;
-}
-function processSchema(schema, ctx, _params = { path: [], schemaPath: [] }) {
-  var _a;
-  const def = schema._zod.def;
-  const seen = ctx.seen.get(schema);
-  if (seen) {
-    seen.count++;
-    const isCycle = _params.schemaPath.includes(schema);
-    if (isCycle) {
-      seen.cycle = _params.path;
-    }
-    return seen.schema;
-  }
-  const result = { schema: {}, count: 1, cycle: undefined, path: _params.path };
-  ctx.seen.set(schema, result);
-  ctx.sharedDefsExtractedFor = undefined;
-  ctx.sharedEmitDoneFor = undefined;
-  const overrideSchema = schema._zod.toJSONSchema?.();
-  if (overrideSchema) {
-    result.schema = overrideSchema;
-  } else {
-    const params = {
-      ..._params,
-      schemaPath: [..._params.schemaPath, schema],
-      path: _params.path
-    };
-    if (schema._zod.processJSONSchema) {
-      schema._zod.processJSONSchema(ctx, result.schema, params);
-    } else {
-      const _json = result.schema;
-      const processor = ctx.processors[def.type];
-      if (!processor) {
-        throw new Error(`[toJSONSchema]: Non-representable type encountered: ${def.type}`);
-      }
-      processor(schema, ctx, _json, params);
-    }
-    const parent = schema._zod.parent;
-    if (parent) {
-      if (!result.ref)
-        result.ref = parent;
-      processSchema(parent, ctx, params);
-      ctx.seen.get(parent).isParent = true;
-    }
-  }
-  const meta = ctx.metadataRegistry.get(schema);
-  if (meta)
-    assignProps(result.schema, meta);
-  if (ctx.io === "input" && isTransforming(schema)) {
-    delete result.schema.examples;
-    delete result.schema.default;
-  }
-  if (ctx.io === "input" && "_prefault" in result.schema)
-    (_a = result.schema).default ?? (_a.default = result.schema._prefault);
-  delete result.schema._prefault;
-  const _result = ctx.seen.get(schema);
-  return _result.schema;
-}
-function encodeJSONPointerSegment(segment) {
-  return segment.replace(/~/g, "~0").replace(/\//g, "~1");
-}
-function extractDefs(ctx, schema) {
-  const root = ctx.seen.get(schema);
-  if (!root)
-    throw new Error("Unprocessed schema. This is a bug in Zod.");
-  if (ctx.external && ctx.sharedDefsExtractedFor === ctx.external)
-    return;
-  const idToSchema = new Map;
-  for (const entry of ctx.seen.entries()) {
-    const id = ctx.metadataRegistry.get(entry[0])?.id;
-    if (id) {
-      const existing = idToSchema.get(id);
-      if (existing && existing !== entry[0]) {
-        throw new Error(`Duplicate schema id "${id}" detected during JSON Schema conversion. Two different schemas cannot share the same id when converted together.`);
-      }
-      idToSchema.set(id, entry[0]);
-    }
-  }
-  const makeURI = (entry) => {
-    const defsSegment = ctx.target === "draft-2020-12" ? "$defs" : "definitions";
-    if (ctx.external) {
-      const externalId = ctx.external.registry.get(entry[0])?.id;
-      const uriGenerator = ctx.external.uri ?? ((id) => id);
-      if (externalId) {
-        return { ref: uriGenerator(externalId) };
-      }
-      const id = entry[1].defId ?? entry[1].schema.id ?? `schema${ctx.counter++}`;
-      entry[1].defId = id;
-      return { defId: id, ref: `${uriGenerator("__shared")}#/${defsSegment}/${encodeJSONPointerSegment(id)}` };
-    }
-    const uriPrefix = `#`;
-    const defUriPrefix = `${uriPrefix}/${defsSegment}/`;
-    if (entry[1] === root && !entry[1].schema.id) {
-      return { ref: uriPrefix };
-    }
-    const defId = entry[1].schema.id ?? `__schema${ctx.counter++}`;
-    return { defId, ref: defUriPrefix + encodeJSONPointerSegment(defId) };
-  };
-  const extractToDef = (entry) => {
-    if (entry[1].schema.$ref) {
-      return;
-    }
-    const seen = entry[1];
-    const { ref, defId } = makeURI(entry);
-    seen.def = { ...seen.schema };
-    if (defId)
-      seen.defId = defId;
-    const schema = seen.schema;
-    for (const key in schema) {
-      delete schema[key];
-    }
-    schema.$ref = ref;
-  };
-  if (ctx.cycles === "throw") {
-    for (const entry of ctx.seen.entries()) {
-      const seen = entry[1];
-      if (seen.cycle) {
-        throw new Error("Cycle detected: " + `#/${seen.cycle?.join("/")}/<root>` + '\n\nSet the `cycles` parameter to `"ref"` to resolve cyclical schemas with defs.');
-      }
-    }
-  }
-  for (const entry of ctx.seen.entries()) {
-    const seen = entry[1];
-    if (schema === entry[0]) {
-      extractToDef(entry);
-      continue;
-    }
-    if (ctx.external) {
-      const ext = ctx.external.registry.get(entry[0])?.id;
-      if (schema !== entry[0] && ext) {
-        extractToDef(entry);
-        continue;
-      }
-    }
-    const id = ctx.metadataRegistry.get(entry[0])?.id;
-    if (id) {
-      extractToDef(entry);
-      continue;
-    }
-    if (seen.cycle) {
-      extractToDef(entry);
-      continue;
-    }
-    if (seen.count > 1) {
-      if (ctx.reused === "ref") {
-        extractToDef(entry);
-      }
-    }
-  }
-  if (ctx.external)
-    ctx.sharedDefsExtractedFor = ctx.external;
-}
-function compactTypeUnion(schema) {
-  const options = schema.anyOf;
-  if (!Array.isArray(options) || options.length === 0 || schema.type !== undefined)
-    return;
-  const types = [];
-  for (const option of options) {
-    if (!option || typeof option !== "object")
-      return;
-    compactTypeUnion(option);
-    const keys = Object.keys(option);
-    if (keys.length !== 1 || keys[0] !== "type")
-      return;
-    const type = option.type;
-    for (const member of Array.isArray(type) ? type : [type]) {
-      if (typeof member !== "string")
-        return;
-      if (!types.includes(member))
-        types.push(member);
-    }
-  }
-  delete schema.anyOf;
-  schema.type = types.length === 1 ? types[0] : types;
-}
-var FOLDABLE_KEYS = new Set(["type", "properties", "required", "additionalProperties"]);
-var UNION_KEYS = ["oneOf", "anyOf"];
-function undeclaredConstraint(member) {
-  const extra = member.additionalProperties;
-  if (extra === undefined || extra === false || typeof extra !== "object" || extra === null)
-    return null;
-  return Object.keys(extra).length ? extra : null;
-}
-function foldObjects(members) {
-  const objects = [];
-  for (const member of members) {
-    if (typeof member !== "object" || member.type !== "object")
-      return null;
-    for (const key in member) {
-      if (!FOLDABLE_KEYS.has(key))
-        return null;
-    }
-    objects.push(member);
-  }
-  const properties = {};
-  const required = new Set;
-  for (const object of objects) {
-    for (const key in object.properties) {
-      if (Object.prototype.hasOwnProperty.call(properties, key))
-        continue;
-      const parts = [];
-      for (const other of objects) {
-        const part = other.properties?.[key] ?? undeclaredConstraint(other);
-        if (part === null || part === undefined)
-          continue;
-        if (!parts.some((seen) => JSON.stringify(seen) === JSON.stringify(part)))
-          parts.push(part);
-      }
-      const merged = parts.length === 1 ? parts[0] : foldObjects(parts) ?? { allOf: parts };
-      assignProp(properties, key, merged);
-    }
-    for (const key of object.required ?? [])
-      required.add(key);
-  }
-  const folded = { type: "object", properties };
-  if (required.size)
-    folded.required = [...required];
-  if (objects.every((object) => object.additionalProperties === false)) {
-    folded.additionalProperties = false;
-  } else {
-    const constraints = [];
-    for (const object of objects) {
-      const constraint = undeclaredConstraint(object);
-      if (constraint && !constraints.some((seen) => JSON.stringify(seen) === JSON.stringify(constraint)))
-        constraints.push(constraint);
-    }
-    if (constraints.length === 1)
-      folded.additionalProperties = constraints[0];
-    else if (constraints.length > 1)
-      folded.additionalProperties = { allOf: constraints };
-  }
-  return folded;
-}
-function foldIntersection(json) {
-  const allOf = json.allOf;
-  if (!Array.isArray(allOf) || allOf.length < 2)
-    return;
-  for (const key of FOLDABLE_KEYS)
-    if (key in json)
-      return;
-  const unions = allOf.filter((m) => UNION_KEYS.some((k) => Array.isArray(m[k])));
-  let folded = null;
-  if (!unions.length) {
-    folded = foldObjects(allOf);
-  } else {
-    const union = unions[0];
-    const keyword = UNION_KEYS.find((k) => Array.isArray(union[k]));
-    if (Object.keys(union).length !== 1)
-      return;
-    const rest = allOf.filter((m) => m !== union);
-    const branches = union[keyword].map((branch) => foldObjects([...rest, branch]));
-    if (branches.some((b) => !b))
-      return;
-    folded = { [keyword]: branches };
-  }
-  if (!folded)
-    return;
-  delete json.allOf;
-  assignProps(json, folded);
-}
-function finalize(ctx, schema) {
-  const root = ctx.seen.get(schema);
-  if (!root)
-    throw new Error("Unprocessed schema. This is a bug in Zod.");
-  const flattenRef = (zodSchema) => {
-    const seen = ctx.seen.get(zodSchema);
-    if (seen.ref === null)
-      return;
-    const schema = seen.def ?? seen.schema;
-    const _cached = { ...schema };
-    const ref = seen.ref;
-    seen.ref = null;
-    if (ref) {
-      flattenRef(ref);
-      const refSeen = ctx.seen.get(ref);
-      const refSchema = refSeen.schema;
-      if (refSchema.$ref && (ctx.target === "draft-07" || ctx.target === "draft-04" || ctx.target === "openapi-3.0")) {
-        schema.allOf = schema.allOf ?? [];
-        schema.allOf.push(refSchema);
-      } else {
-        assignProps(schema, refSchema);
-      }
-      assignProps(schema, _cached);
-      const isParentRef = zodSchema._zod.parent === ref;
-      if (isParentRef) {
-        for (const key in schema) {
-          if (key === "$ref" || key === "allOf")
-            continue;
-          if (!(key in _cached)) {
-            delete schema[key];
-          }
-        }
-      }
-      if (refSchema.$ref && refSeen.def) {
-        for (const key in schema) {
-          if (key === "$ref" || key === "allOf")
-            continue;
-          if (key in refSeen.def && JSON.stringify(schema[key]) === JSON.stringify(refSeen.def[key])) {
-            delete schema[key];
-          }
-        }
-      }
-    }
-    const parent = zodSchema._zod.parent;
-    if (parent && parent !== ref) {
-      flattenRef(parent);
-      const parentSeen = ctx.seen.get(parent);
-      if (parentSeen?.schema.$ref) {
-        schema.$ref = parentSeen.schema.$ref;
-        if (parentSeen.def) {
-          for (const key in schema) {
-            if (key === "$ref" || key === "allOf")
-              continue;
-            if (key in parentSeen.def && JSON.stringify(schema[key]) === JSON.stringify(parentSeen.def[key])) {
-              delete schema[key];
-            }
-          }
-        }
-      }
-    }
-    ctx.override({
-      zodSchema,
-      jsonSchema: schema,
-      path: seen.path ?? []
-    });
-  };
-  if (!ctx.external || ctx.sharedEmitDoneFor !== ctx.external) {
-    for (const entry of [...ctx.seen.entries()].reverse()) {
-      flattenRef(entry[0]);
-    }
-    if (ctx.target !== "openapi-3.0") {
-      for (const entry of ctx.seen.entries()) {
-        compactTypeUnion(entry[1].def ?? entry[1].schema);
-      }
-    }
-    for (const rewrite of ctx.deferred)
-      rewrite();
-    if (ctx.intersections.length) {
-      const carriers = new Map;
-      for (const seen of ctx.seen.values()) {
-        for (const json of [seen.schema, seen.def]) {
-          const allOf = json?.allOf;
-          if (!Array.isArray(allOf))
-            continue;
-          const existing = carriers.get(allOf);
-          if (existing)
-            existing.push(json);
-          else
-            carriers.set(allOf, [json]);
-        }
-      }
-      for (const allOf of ctx.intersections) {
-        for (const json of carriers.get(allOf) ?? [])
-          foldIntersection(json);
-      }
-    }
-  }
-  const result = {};
-  if (ctx.target === "draft-2020-12") {
-    result.$schema = "https://json-schema.org/draft/2020-12/schema";
-  } else if (ctx.target === "draft-07") {
-    result.$schema = "http://json-schema.org/draft-07/schema#";
-  } else if (ctx.target === "draft-04") {
-    result.$schema = "http://json-schema.org/draft-04/schema#";
-  } else if (ctx.target === "openapi-3.0") {}
-  if (ctx.external?.uri) {
-    const id = ctx.external.registry.get(schema)?.id;
-    if (!id)
-      throw new Error("Schema is missing an `id` property");
-    result.$id = ctx.external.uri(id);
-  }
-  assignProps(result, root.defId ? root.schema : root.def ?? root.schema);
-  const rootMetaId = ctx.metadataRegistry.get(schema)?.id;
-  if (rootMetaId !== undefined && result.id === rootMetaId)
-    delete result.id;
-  const defs = ctx.external?.defs ?? {};
-  if (!ctx.external || ctx.sharedEmitDoneFor !== ctx.external) {
-    for (const entry of ctx.seen.entries()) {
-      const seen = entry[1];
-      if (seen.def && seen.defId) {
-        if (seen.def.id === seen.defId)
-          delete seen.def.id;
-        assignProp(defs, seen.defId, seen.def);
-      }
-    }
-  }
-  if (ctx.external)
-    ctx.sharedEmitDoneFor = ctx.external;
-  if (ctx.external) {} else {
-    if (Object.keys(defs).length > 0) {
-      if (ctx.target === "draft-2020-12") {
-        result.$defs = defs;
-      } else {
-        result.definitions = defs;
-      }
-    }
-  }
-  try {
-    const finalized = JSON.parse(JSON.stringify(result));
-    Object.defineProperty(finalized, "~standard", {
-      value: {
-        ...schema["~standard"],
-        jsonSchema: {
-          input: createStandardJSONSchemaMethod(schema, "input", ctx.processors),
-          output: createStandardJSONSchemaMethod(schema, "output", ctx.processors)
-        }
-      },
-      enumerable: false,
-      writable: false
-    });
-    return finalized;
-  } catch (_err) {
-    throw new Error("Error converting schema to JSON.");
-  }
-}
-function isTransforming(_schema, _ctx) {
-  const ctx = _ctx ?? { seen: new Set };
-  if (ctx.seen.has(_schema))
-    return false;
-  ctx.seen.add(_schema);
-  const def = _schema._zod.def;
-  if (def.type === "transform")
-    return true;
-  if (def.type === "array")
-    return isTransforming(def.element, ctx);
-  if (def.type === "set")
-    return isTransforming(def.valueType, ctx);
-  if (def.type === "lazy")
-    return isTransforming(def.getter(), ctx);
-  if (def.type === "promise" || def.type === "optional" || def.type === "nonoptional" || def.type === "nullable" || def.type === "readonly" || def.type === "default" || def.type === "prefault" || def.type === "catch") {
-    return isTransforming(def.innerType, ctx);
-  }
-  if (def.type === "intersection") {
-    return isTransforming(def.left, ctx) || isTransforming(def.right, ctx);
-  }
-  if (def.type === "record" || def.type === "map") {
-    return isTransforming(def.keyType, ctx) || isTransforming(def.valueType, ctx);
-  }
-  if (def.type === "pipe") {
-    if (_schema._zod.traits.has("$ZodCodec"))
-      return true;
-    return isTransforming(def.in, ctx) || isTransforming(def.out, ctx);
-  }
-  if (def.type === "object") {
-    for (const key in def.shape) {
-      if (isTransforming(def.shape[key], ctx))
-        return true;
-    }
-    return false;
-  }
-  if (def.type === "union") {
-    for (const option of def.options) {
-      if (isTransforming(option, ctx))
-        return true;
-    }
-    return false;
-  }
-  if (def.type === "tuple") {
-    for (const item of def.items) {
-      if (isTransforming(item, ctx))
-        return true;
-    }
-    if (def.rest && isTransforming(def.rest, ctx))
-      return true;
-    return false;
-  }
-  return false;
-}
-var createToJSONSchemaMethod = (schema, processors = {}) => (params) => {
-  const ctx = initializeContext({ ...params, processors });
-  processSchema(schema, ctx);
-  extractDefs(ctx, schema);
-  return finalize(ctx, schema);
-};
-var createStandardJSONSchemaMethod = (schema, io, processors = {}) => (params) => {
-  const { libraryOptions, target } = params ?? {};
-  const ctx = initializeContext({ ...libraryOptions ?? {}, target, io, processors });
-  processSchema(schema, ctx);
-  extractDefs(ctx, schema);
-  return finalize(ctx, schema);
-};
-// node_modules/zod/v4/core/json-schema-processors.js
-var narrowMin = (agg, key, value) => {
-  if (agg[key] === undefined || value > agg[key])
-    agg[key] = value;
-};
-var narrowMax = (agg, key, value) => {
-  if (agg[key] === undefined || value < agg[key])
-    agg[key] = value;
-};
-var narrowBoth = (agg, value) => {
-  narrowMin(agg, "minimum", value);
-  narrowMax(agg, "maximum", value);
-};
-var addDivisor = (agg, value) => {
-  agg.multipleOf ?? (agg.multipleOf = []);
-  if (!agg.multipleOf.includes(value))
-    agg.multipleOf.push(value);
-};
-var addPattern = (agg, pattern) => {
-  agg.patterns ?? (agg.patterns = new Set);
-  agg.patterns.add(pattern);
-};
-var intersectMime = (agg, mime) => {
-  agg.mime = agg.mime ? agg.mime.filter((m) => mime.includes(m)) : [...mime];
-};
-var setFormat = (agg, format) => {
-  agg.format = format;
-  if (format.includes("int"))
-    agg.isInt = true;
-};
-var minContributor = (agg, def) => narrowMin(agg, "minimum", def.minimum);
-var maxContributor = (agg, def) => narrowMax(agg, "maximum", def.maximum);
-var formatContributor = (ranges) => (agg, def) => {
-  setFormat(agg, def.format);
-  const [minimum, maximum] = ranges[def.format];
-  narrowMin(agg, "minimum", minimum);
-  narrowMax(agg, "maximum", maximum);
-};
-var contributors = {
-  greater_than: (agg, def) => narrowMin(agg, def.inclusive ? "minimum" : "exclusiveMinimum", def.value),
-  less_than: (agg, def) => narrowMax(agg, def.inclusive ? "maximum" : "exclusiveMaximum", def.value),
-  multiple_of: (agg, def) => addDivisor(agg, def.value),
-  number_format: formatContributor(NUMBER_FORMAT_RANGES),
-  bigint_format: formatContributor(BIGINT_FORMAT_RANGES),
-  min_length: minContributor,
-  max_length: maxContributor,
-  length_equals: (agg, def) => narrowBoth(agg, def.length),
-  min_size: minContributor,
-  max_size: maxContributor,
-  size_equals: (agg, def) => narrowBoth(agg, def.size),
-  string_format: (agg, def) => {
-    setFormat(agg, def.format);
-    if (def.pattern)
-      addPattern(agg, def.pattern);
-    if (def.format === "base64" || def.format === "base64url")
-      agg.contentEncoding = def.format;
-    if (def.local || def.precision === -1)
-      agg.laxFormat = true;
-  },
-  mime_type: (agg, def) => intersectMime(agg, def.mime)
-};
-function aggregateChecks(schema) {
-  const agg = {};
-  const def = schema._zod.def;
-  const list = schema._zod.traits.has("$ZodCheck") ? [schema, ...def.checks ?? []] : def.checks ?? [];
-  for (const ch of list)
-    contributors[ch._zod.def.check]?.(agg, ch._zod.def);
-  const bag = schema._zod.bag;
-  if (bag.minimum !== undefined)
-    narrowMin(agg, "minimum", bag.minimum);
-  if (bag.exclusiveMinimum !== undefined)
-    narrowMin(agg, "exclusiveMinimum", bag.exclusiveMinimum);
-  if (bag.maximum !== undefined)
-    narrowMax(agg, "maximum", bag.maximum);
-  if (bag.exclusiveMaximum !== undefined)
-    narrowMax(agg, "exclusiveMaximum", bag.exclusiveMaximum);
-  if (bag.multipleOf !== undefined)
-    addDivisor(agg, bag.multipleOf);
-  if (bag.format !== undefined) {
-    agg.format ?? (agg.format = bag.format);
-    if (bag.format.includes("int"))
-      agg.isInt = true;
-  }
-  if (bag.mime)
-    intersectMime(agg, bag.mime);
-  for (const pattern of bag.patterns ?? [])
-    addPattern(agg, pattern);
-  return agg;
-}
-var formatMap = {
-  guid: "uuid",
-  url: "uri",
-  datetime: "date-time",
-  json_string: "json-string",
-  regex: ""
-};
-var exactPatterns = new Map([
-  [base64Charset, base64],
-  [base64urlCharset, base64url]
-]);
-var exactPattern = (p) => exactPatterns.get(p) ?? p;
-var stringProcessor = (schema, ctx, _json, _params) => {
-  const json = _json;
-  json.type = "string";
-  const { minimum, maximum, format, patterns, contentEncoding, laxFormat } = aggregateChecks(schema);
-  if (typeof minimum === "number")
-    json.minLength = minimum;
-  if (typeof maximum === "number")
-    json.maxLength = maximum;
-  if (format) {
-    json.format = formatMap[format] ?? format;
-    if (json.format === "")
-      delete json.format;
-    if (format === "time" || laxFormat) {
-      delete json.format;
-    }
-  }
-  if (contentEncoding)
-    json.contentEncoding = contentEncoding;
-  if (patterns && patterns.size > 0) {
-    const patternList = [...patterns].map(exactPattern);
-    if (patternList.length === 1)
-      json.pattern = patternList[0].source;
-    else if (patternList.length > 1) {
-      json.allOf = [
-        ...patternList.map((regex) => ({
-          ...ctx.target === "draft-07" || ctx.target === "draft-04" || ctx.target === "openapi-3.0" ? { type: "string" } : {},
-          pattern: regex.source
-        }))
-      ];
-    }
-  }
-};
-var numberProcessor = (schema, ctx, _json, params) => {
-  const json = _json;
-  const { minimum, maximum, multipleOf, exclusiveMaximum, exclusiveMinimum, isInt } = aggregateChecks(schema);
-  json.type = isInt ? "integer" : "number";
-  const exMin = typeof exclusiveMinimum === "number" && exclusiveMinimum >= (minimum ?? Number.NEGATIVE_INFINITY);
-  const exMax = typeof exclusiveMaximum === "number" && exclusiveMaximum <= (maximum ?? Number.POSITIVE_INFINITY);
-  const legacy = ctx.target === "draft-04" || ctx.target === "openapi-3.0";
-  if (exMin) {
-    if (legacy) {
-      json.minimum = exclusiveMinimum;
-      json.exclusiveMinimum = true;
-    } else {
-      json.exclusiveMinimum = exclusiveMinimum;
-    }
-  } else if (typeof minimum === "number") {
-    json.minimum = minimum;
-  }
-  if (exMax) {
-    if (legacy) {
-      json.maximum = exclusiveMaximum;
-      json.exclusiveMaximum = true;
-    } else {
-      json.exclusiveMaximum = exclusiveMaximum;
-    }
-  } else if (typeof maximum === "number") {
-    json.maximum = maximum;
-  }
-  if (multipleOf) {
-    const divisors = new Set;
-    for (const divisor of multipleOf) {
-      if (Number.isFinite(divisor) && divisor !== 0)
-        divisors.add(Math.abs(divisor));
-      else
-        handleUnrepresentable(schema, ctx, json, params, `A multipleOf divisor of ${divisor} cannot be represented in JSON Schema`);
-    }
-    const [first, ...rest] = divisors;
-    if (first !== undefined)
-      json.multipleOf = first;
-    if (rest.length)
-      json.allOf = [...json.allOf ?? [], ...rest.map((m) => ({ multipleOf: m }))];
-  }
-};
-var booleanProcessor = (_schema, _ctx, json, _params) => {
-  json.type = "boolean";
-};
-var nullProcessor = (_schema, ctx, json, _params) => {
-  if (ctx.target === "openapi-3.0") {
-    json.type = "string";
-    json.nullable = true;
-    json.enum = [null];
-  } else {
-    json.type = "null";
-  }
-};
-var neverProcessor = (_schema, _ctx, json, _params) => {
-  json.not = {};
-};
-var unknownProcessor = (_schema, _ctx, _json, _params) => {};
-var enumProcessor = (schema, _ctx, json, _params) => {
-  const def = schema._zod.def;
-  const values = getEnumValues(def.entries);
-  if (values.length === 0) {
-    json.not = {};
-    return;
-  }
-  if (values.every((v) => typeof v === "number"))
-    json.type = "number";
-  if (values.every((v) => typeof v === "string"))
-    json.type = "string";
-  json.enum = values;
-};
-var literalProcessor = (schema, ctx, json, params) => {
-  const def = schema._zod.def;
-  if (def.values.length === 0) {
-    json.not = {};
-    return;
-  }
-  const vals = [];
-  for (const val of def.values) {
-    if (val === undefined) {
-      if (handleUnrepresentable(schema, ctx, json, params, "Literal `undefined` cannot be represented in JSON Schema"))
-        return;
-    } else if (typeof val === "bigint") {
-      if (handleUnrepresentable(schema, ctx, json, params, "BigInt literals cannot be represented in JSON Schema"))
-        return;
-      vals.push(Number(val));
-    } else {
-      vals.push(val);
-    }
-  }
-  if (vals.length === 0) {} else if (vals.length === 1) {
-    const val = vals[0];
-    json.type = val === null ? "null" : typeof val;
-    if (ctx.target === "draft-04" || ctx.target === "openapi-3.0") {
-      json.enum = [val];
-    } else {
-      json.const = val;
-    }
-  } else {
-    if (vals.every((v) => typeof v === "number"))
-      json.type = "number";
-    if (vals.every((v) => typeof v === "string"))
-      json.type = "string";
-    if (vals.every((v) => typeof v === "boolean"))
-      json.type = "boolean";
-    if (vals.every((v) => v === null))
-      json.type = "null";
-    json.enum = vals;
-  }
-};
-var customProcessor = (schema, ctx, json, params) => {
-  handleUnrepresentable(schema, ctx, json, params, "Custom types cannot be represented in JSON Schema");
-};
-var transformProcessor = (schema, ctx, json, params) => {
-  handleUnrepresentable(schema, ctx, json, params, "Transforms cannot be represented in JSON Schema");
-};
-var arrayProcessor = (schema, ctx, _json, params) => {
-  const json = _json;
-  const def = schema._zod.def;
-  const { minimum, maximum } = aggregateChecks(schema);
-  if (typeof minimum === "number")
-    json.minItems = minimum;
-  if (typeof maximum === "number")
-    json.maxItems = maximum;
-  json.type = "array";
-  json.items = processSchema(def.element, ctx, {
-    ...params,
-    path: [...params.path, "items"]
-  });
-};
-function inputOptin(schema) {
-  const def = schema._zod.def;
-  if (def.type === "pipe" && def.in._zod.traits.has("$ZodTransform")) {
-    return inputOptin(def.out);
-  }
-  if (def.type === "catch") {
-    return inputOptin(def.innerType);
-  }
-  return schema._zod.optin;
-}
-var objectProcessor = (schema, ctx, _json, params) => {
-  const json = _json;
-  const def = schema._zod.def;
-  const shape = def.shape;
-  const symbolKeys = Object.getOwnPropertySymbols(shape);
-  if (symbolKeys.length && handleUnrepresentable(schema, ctx, json, params, "Symbol keys cannot be represented in JSON Schema")) {
-    return;
-  }
-  json.type = "object";
-  json.properties = {};
-  for (const key in shape) {
-    assignProp(json.properties, key, processSchema(shape[key], ctx, {
-      ...params,
-      path: [...params.path, "properties", key]
-    }));
-  }
-  const requiredKeys = [];
-  for (const key of Object.keys(shape)) {
-    const field = def.shape[key];
-    if (ctx.io === "input" ? inputOptin(field) === undefined : field._zod.optout === undefined) {
-      requiredKeys.push(key);
-    }
-  }
-  if (requiredKeys.length > 0) {
-    json.required = requiredKeys;
-  }
-  if (def.catchall?._zod.def.type === "never") {
-    json.additionalProperties = false;
-  } else if (!def.catchall) {
-    if (ctx.io === "output")
-      json.additionalProperties = false;
-  } else if (def.catchall) {
-    json.additionalProperties = processSchema(def.catchall, ctx, {
-      ...params,
-      path: [...params.path, "additionalProperties"]
-    });
-  }
-};
-var unionProcessor = (schema, ctx, json, params) => {
-  const def = schema._zod.def;
-  const isExclusive = def.inclusive === false;
-  const options = def.options.map((x, i) => processSchema(x, ctx, {
-    ...params,
-    path: [...params.path, isExclusive ? "oneOf" : "anyOf", i]
-  }));
-  if (isExclusive) {
-    json.oneOf = options;
-  } else {
-    json.anyOf = options;
-  }
-};
-var intersectionProcessor = (schema, ctx, json, params) => {
-  const def = schema._zod.def;
-  const a = processSchema(def.left, ctx, {
-    ...params,
-    path: [...params.path, "allOf", 0]
-  });
-  const b = processSchema(def.right, ctx, {
-    ...params,
-    path: [...params.path, "allOf", 1]
-  });
-  const isSimpleIntersection = (val) => ("allOf" in val) && Object.keys(val).length === 1;
-  const allOf = [
-    ...isSimpleIntersection(a) ? a.allOf : [a],
-    ...isSimpleIntersection(b) ? b.allOf : [b]
-  ];
-  json.allOf = allOf;
-  ctx.intersections.push(allOf);
-};
-function stringifyKeyNames(bySchema, json, visited) {
-  if (json.$ref) {
-    if (visited.has(json))
-      return json;
-    visited.add(json);
-    const def = bySchema.get(json)?.def;
-    if (!def)
-      return json;
-    const inlined = stringifyKeyNames(bySchema, def, visited);
-    return inlined === def ? json : inlined;
-  }
-  for (const keyword of ["anyOf", "oneOf"]) {
-    const branches = json[keyword];
-    if (!Array.isArray(branches))
-      continue;
-    const mapped = branches.map((branch) => stringifyKeyNames(bySchema, branch, visited));
-    if (mapped.some((branch, i) => branch !== branches[i]))
-      json = { ...json, [keyword]: mapped };
-  }
-  const types = Array.isArray(json.type) ? json.type : [json.type];
-  const numericType = !types.includes("string") && types.some((t) => t === "number" || t === "integer");
-  const values = json.enum ?? (json.const !== undefined ? [json.const] : undefined);
-  if (!numericType && !values?.some((v) => typeof v === "number"))
-    return json;
-  const { minimum, maximum, exclusiveMinimum, exclusiveMaximum, multipleOf, format, id, ...rest } = json;
-  if (rest.enum)
-    rest.enum = rest.enum.map((v) => typeof v === "number" ? String(v) : v);
-  else if (typeof rest.const === "number")
-    rest.const = String(rest.const);
-  if (!numericType)
-    return rest;
-  rest.type = "string";
-  if (!values)
-    rest.pattern = (types.includes("number") ? number : integer).source;
-  return rest;
-}
-var pendingRecords = new WeakMap;
-function rewriteKeyNames(ctx) {
-  const bySchema = new Map;
-  for (const entry of ctx.seen.values()) {
-    if (entry.def && !bySchema.has(entry.schema))
-      bySchema.set(entry.schema, entry);
-  }
-  const rewrites = new Map;
-  for (const record of pendingRecords.get(ctx) ?? []) {
-    const seen = ctx.seen.get(record);
-    const names = (seen?.def ?? seen?.schema)?.propertyNames;
-    if (!names || names === true || rewrites.has(names))
-      continue;
-    const rewritten = stringifyKeyNames(bySchema, names, new Set);
-    if (rewritten !== names)
-      rewrites.set(names, rewritten);
-  }
-  if (!rewrites.size)
-    return;
-  for (const entry of ctx.seen.values()) {
-    for (const carrier of [entry.schema, entry.def]) {
-      const rewritten = carrier && rewrites.get(carrier.propertyNames);
-      if (rewritten)
-        carrier.propertyNames = rewritten;
-    }
-  }
-}
-var recordProcessor = (schema, ctx, _json, params) => {
-  const json = _json;
-  const def = schema._zod.def;
-  json.type = "object";
-  const keyType = def.keyType;
-  const patterns = aggregateChecks(keyType).patterns;
-  if (def.mode === "loose" && patterns && patterns.size > 0) {
-    const valueSchema = processSchema(def.valueType, ctx, {
-      ...params,
-      path: [...params.path, "patternProperties", "*"]
-    });
-    json.patternProperties = {};
-    for (const pattern of patterns) {
-      assignProp(json.patternProperties, exactPattern(pattern).source, valueSchema);
-    }
-  } else {
-    if (ctx.target === "draft-07" || ctx.target === "draft-2020-12") {
-      json.propertyNames = processSchema(def.keyType, ctx, {
-        ...params,
-        path: [...params.path, "propertyNames"]
-      });
-      let pending = pendingRecords.get(ctx);
-      if (!pending) {
-        pending = [];
-        pendingRecords.set(ctx, pending);
-        ctx.deferred.push(() => rewriteKeyNames(ctx));
-      }
-      pending.push(schema);
-    }
-    json.additionalProperties = processSchema(def.valueType, ctx, {
-      ...params,
-      path: [...params.path, "additionalProperties"]
-    });
-  }
-  const keyValues = keyType._zod.values;
-  const omittableOnInput = ctx.io === "input" && inputOptin(def.valueType) !== undefined;
-  if (keyValues && !def.partial && !omittableOnInput) {
-    const validKeyValues = [...keyValues].filter((v) => typeof v === "string" || typeof v === "number");
-    if (validKeyValues.length > 0) {
-      json.required = validKeyValues.map(String);
-    }
-  }
-};
-var nullableProcessor = (schema, ctx, json, params) => {
-  const def = schema._zod.def;
-  const inner = processSchema(def.innerType, ctx, params);
-  const seen = ctx.seen.get(schema);
-  if (ctx.target === "openapi-3.0") {
-    seen.ref = def.innerType;
-    json.nullable = true;
-  } else {
-    json.anyOf = [inner, { type: "null" }];
-  }
-};
-var nonoptionalProcessor = (schema, ctx, _json, params) => {
-  const def = schema._zod.def;
-  processSchema(def.innerType, ctx, params);
-  const seen = ctx.seen.get(schema);
-  seen.ref = def.innerType;
-};
-var UNREPRESENTABLE_DEFAULT = Symbol();
-function serializeDefaultValue(value, schema, ctx, json, params) {
-  let unrepresentable = false;
-  const serialized = JSON.stringify(value, (_, val) => {
-    if (typeof val !== "bigint")
-      return val;
-    unrepresentable = true;
-    return null;
-  });
-  if (!unrepresentable)
-    return JSON.parse(serialized);
-  handleUnrepresentable(schema, ctx, json, params, "BigInt defaults cannot be represented in JSON Schema");
-  return UNREPRESENTABLE_DEFAULT;
-}
-var defaultProcessor = (schema, ctx, json, params) => {
-  const def = schema._zod.def;
-  processSchema(def.innerType, ctx, params);
-  const seen = ctx.seen.get(schema);
-  seen.ref = def.innerType;
-  const value = serializeDefaultValue(def.defaultValue, schema, ctx, json, params);
-  if (value !== UNREPRESENTABLE_DEFAULT)
-    json.default = value;
-};
-var prefaultProcessor = (schema, ctx, json, params) => {
-  const def = schema._zod.def;
-  processSchema(def.innerType, ctx, params);
-  const seen = ctx.seen.get(schema);
-  seen.ref = def.innerType;
-  if (ctx.io !== "input")
-    return;
-  const value = serializeDefaultValue(def.defaultValue, schema, ctx, json, params);
-  if (value !== UNREPRESENTABLE_DEFAULT)
-    json._prefault = value;
-};
-var catchProcessor = (schema, ctx, json, params) => {
-  const def = schema._zod.def;
-  processSchema(def.innerType, ctx, params);
-  const seen = ctx.seen.get(schema);
-  seen.ref = def.innerType;
-  let catchValue;
-  try {
-    catchValue = def.catchValue(undefined);
-  } catch {
-    handleUnrepresentable(schema, ctx, json, params, "Dynamic catch values are not supported in JSON Schema");
-    return;
-  }
-  json.default = catchValue;
-};
-var pipeProcessor = (schema, ctx, _json, params) => {
-  const def = schema._zod.def;
-  const inIsTransform = def.in._zod.traits.has("$ZodTransform");
-  const innerType = ctx.io === "input" ? inIsTransform ? def.out : def.in : def.out;
-  processSchema(innerType, ctx, params);
-  const seen = ctx.seen.get(schema);
-  seen.ref = innerType;
-};
-var readonlyProcessor = (schema, ctx, json, params) => {
-  const def = schema._zod.def;
-  processSchema(def.innerType, ctx, params);
-  const seen = ctx.seen.get(schema);
-  seen.ref = def.innerType;
-  json.readOnly = true;
-};
-var optionalProcessor = (schema, ctx, _json, params) => {
-  const def = schema._zod.def;
-  processSchema(def.innerType, ctx, params);
-  const seen = ctx.seen.get(schema);
-  seen.ref = def.innerType;
-};
-// node_modules/@modelcontextprotocol/sdk/dist/esm/server/zod-compat.js
-function isZ4Schema(s) {
-  const schema = s;
-  return !!schema._zod;
-}
-function safeParse2(schema, data) {
-  if (isZ4Schema(schema)) {
-    const result = safeParse(schema, data);
-    return result;
-  }
-  const v3Schema = schema;
-  const result = v3Schema.safeParse(data);
-  return result;
-}
-function getObjectShape(schema) {
-  if (!schema)
-    return;
-  let rawShape;
-  if (isZ4Schema(schema)) {
-    const v4Schema = schema;
-    rawShape = v4Schema._zod?.def?.shape;
-  } else {
-    const v3Schema = schema;
-    rawShape = v3Schema.shape;
-  }
-  if (!rawShape)
-    return;
-  if (typeof rawShape === "function") {
-    try {
-      return rawShape();
-    } catch {
-      return;
-    }
-  }
-  return rawShape;
-}
-function getLiteralValue(schema) {
-  if (isZ4Schema(schema)) {
-    const v4Schema = schema;
-    const def = v4Schema._zod?.def;
-    if (def) {
-      if (def.value !== undefined)
-        return def.value;
-      if (Array.isArray(def.values) && def.values.length > 0) {
-        return def.values[0];
-      }
-    }
-  }
-  const v3Schema = schema;
-  const def = v3Schema._def;
-  if (def) {
-    if (def.value !== undefined)
-      return def.value;
-    if (Array.isArray(def.values) && def.values.length > 0) {
-      return def.values[0];
-    }
-  }
-  const directValue = schema.value;
-  if (directValue !== undefined)
-    return directValue;
-  return;
-}
-// node_modules/zod/v4/classic/errors.js
-var _installedErrorProtos = /* @__PURE__ */ new WeakSet([Object.prototype, Error.prototype]);
-function _lazyMethod(proto, key, make) {
-  Object.defineProperty(proto, key, {
-    configurable: true,
-    enumerable: false,
-    get() {
-      const value = make(this);
-      Object.defineProperty(this, key, { value, configurable: true, writable: true });
-      return value;
-    },
-    set(value) {
-      Object.defineProperty(this, key, { value, configurable: true, writable: true });
-    }
-  });
-}
-var initializer2 = (inst, issues) => {
-  $ZodError.init(inst, issues);
-  inst.name = "ZodError";
-  const proto = Object.getPrototypeOf(inst);
-  if (_installedErrorProtos.has(proto))
-    return;
-  _installedErrorProtos.add(proto);
-  _lazyMethod(proto, "format", (self) => (mapper) => formatError(self, mapper));
-  _lazyMethod(proto, "flatten", (self) => (mapper) => flattenError(self, mapper));
-  _lazyMethod(proto, "addIssue", (self) => (issue) => {
-    self.issues.push(issue);
-    self.message = JSON.stringify(self.issues, jsonStringifyReplacer, 2);
-  });
-  _lazyMethod(proto, "addIssues", (self) => (issues) => {
-    self.issues.push(...issues);
-    self.message = JSON.stringify(self.issues, jsonStringifyReplacer, 2);
-  });
-  Object.defineProperty(proto, "isEmpty", {
-    configurable: true,
-    enumerable: false,
-    get() {
-      return this.issues.length === 0;
-    }
-  });
-};
-var ZodRealError = /* @__PURE__ */ $constructor("ZodError", initializer2, undefined, {
-  Parent: Error
-});
-
-// node_modules/zod/v4/classic/parse.js
-var parse3 = /* @__PURE__ */ _parse(ZodRealError);
-var parseAsync2 = /* @__PURE__ */ _parseAsync(ZodRealError);
-var safeParse3 = /* @__PURE__ */ _safeParse(ZodRealError);
-var safeParseAsync2 = /* @__PURE__ */ _safeParseAsync(ZodRealError);
-var encode2 = /* @__PURE__ */ _encode(ZodRealError);
-var decode2 = /* @__PURE__ */ _decode(ZodRealError);
-var encodeAsync2 = /* @__PURE__ */ _encodeAsync(ZodRealError);
-var decodeAsync2 = /* @__PURE__ */ _decodeAsync(ZodRealError);
-var safeEncode2 = /* @__PURE__ */ _safeEncode(ZodRealError);
-var safeDecode2 = /* @__PURE__ */ _safeDecode(ZodRealError);
-var safeEncodeAsync2 = /* @__PURE__ */ _safeEncodeAsync(ZodRealError);
-var safeDecodeAsync2 = /* @__PURE__ */ _safeDecodeAsync(ZodRealError);
-
-// node_modules/zod/v4/classic/schemas.js
-function _ensureDefaultLocale() {
-  if (!globalConfig.localeError)
-    config(en_default());
-}
-function _ensureDefaultMemoizer() {
-  if (!globalConfig.memoizer)
-    config({ memoizer: memoizer() });
-}
-var ZodType = /* @__PURE__ */ $constructor("ZodType", (inst, def) => {
-  _ensureDefaultLocale();
-  $ZodType.init(inst, def);
-  inst.def = def;
-  inst.type = def.type;
-  return inst;
-}, {
-  check(...chks) {
-    const def = this.def;
-    return this.clone(mergeDefs(def, {
-      checks: [
-        ...def.checks ?? [],
-        ...chks.map((ch) => typeof ch === "function" ? { _zod: { check: ch, def: { check: "custom" }, onattach: [] } } : ch)
-      ]
-    }), { parent: true });
-  },
-  with(...chks) {
-    return this.check(...chks);
-  },
-  clone(def, params) {
-    return clone(this, def, params);
-  },
-  brand() {
-    return this;
-  },
-  register(reg, meta) {
-    reg.add(this, meta);
-    return this;
-  },
-  refine(check, params) {
-    return this.check(refine(check, params));
-  },
-  superRefine(refinement, params) {
-    return this.check(superRefine(refinement, params));
-  },
-  overwrite(fn) {
-    return this.check(_overwrite(fn));
-  },
-  optional() {
-    return optional(this);
-  },
-  exactOptional() {
-    return exactOptional(this);
-  },
-  nullable() {
-    return nullable(this);
-  },
-  nullish() {
-    return optional(nullable(this));
-  },
-  nonoptional(params) {
-    return nonoptional(this, params);
-  },
-  array() {
-    return array(this);
-  },
-  or(arg) {
-    return union([this, arg]);
-  },
-  and(arg) {
-    return intersection(this, arg);
-  },
-  transform(tx) {
-    return pipe(this, transform(tx));
-  },
-  default(d) {
-    return _default(this, d);
-  },
-  prefault(d) {
-    return prefault(this, d);
-  },
-  catch(params) {
-    return _catch(this, params);
-  },
-  pipe(target) {
-    return pipe(this, target);
-  },
-  readonly() {
-    return readonly(this);
-  },
-  describe(description) {
-    const cl = this.clone();
-    globalRegistry.add(cl, { description });
-    return cl;
-  },
-  meta(...args) {
-    if (args.length === 0)
-      return globalRegistry.get(this);
-    const cl = this.clone();
-    globalRegistry.add(cl, args[0]);
-    return cl;
-  },
-  isOptional() {
-    return this.safeParse(undefined).success;
-  },
-  isNullable() {
-    return this.safeParse(null).success;
-  },
-  apply(fn, ...args) {
-    return args.length === 0 ? fn(this) : fn(this, ...args);
-  },
-  get "~standard"() {
-    return hide(this, "~standard", {
-      ...standardProps(this),
-      jsonSchema: {
-        input: createStandardJSONSchemaMethod(this, "input"),
-        output: createStandardJSONSchemaMethod(this, "output")
-      }
-    });
-  },
-  set "~standard"(value) {
-    own(this, "~standard", value);
-  },
-  parse: function _parse(data, params) {
-    return parse3(this, data, params, { callee: _parse });
-  },
-  parseAsync: async function _parseAsync(data, params) {
-    return await parseAsync2(this, data, params, { callee: _parseAsync });
-  },
-  safeParse(data, params) {
-    return safeParse3(this, data, params);
-  },
-  async safeParseAsync(data, params) {
-    return safeParseAsync2(this, data, params);
-  },
-  get spa() {
-    return this?.safeParseAsync;
-  },
-  set spa(value) {
-    own(this, "spa", value);
-  },
-  validate(data, params) {
-    return validate(this, data, params);
-  },
-  validateAsync(data, params) {
-    return validateAsync(this, data, params);
-  },
-  encode: function _encode(data, params) {
-    return encode2(this, data, params, { callee: _encode });
-  },
-  decode: function _decode(data, params) {
-    return decode2(this, data, params, { callee: _decode });
-  },
-  encodeAsync: async function _encodeAsync(data, params) {
-    return await encodeAsync2(this, data, params, { callee: _encodeAsync });
-  },
-  decodeAsync: async function _decodeAsync(data, params) {
-    return await decodeAsync2(this, data, params, { callee: _decodeAsync });
-  },
-  safeEncode(data, params) {
-    return safeEncode2(this, data, params);
-  },
-  safeDecode(data, params) {
-    return safeDecode2(this, data, params);
-  },
-  async safeEncodeAsync(data, params) {
-    return safeEncodeAsync2(this, data, params);
-  },
-  async safeDecodeAsync(data, params) {
-    return safeDecodeAsync2(this, data, params);
-  },
-  toJSONSchema(params) {
-    return createToJSONSchemaMethod(this, {})(params);
-  },
-  get description() {
-    return globalRegistry.get(this)?.description;
-  },
-  get _def() {
-    return this._zod.def;
-  }
-});
-var _ZodString = /* @__PURE__ */ $constructor("_ZodString", (inst, def) => {
-  $ZodString.init(inst, def);
-  ZodType.init(inst, def);
-  inst._zod.processJSONSchema = (ctx, json, params) => stringProcessor(inst, ctx, json, params);
-}, /* @__PURE__ */ derived({
-  format: (inst) => aggregateChecks(inst).format ?? null,
-  minLength: (inst) => aggregateChecks(inst).minimum ?? null,
-  maxLength: (inst) => aggregateChecks(inst).maximum ?? null
-}, {
-  regex(...args) {
-    return this.check(_regex(...args));
-  },
-  includes(...args) {
-    return this.check(_includes(...args));
-  },
-  startsWith(...args) {
-    return this.check(_startsWith(...args));
-  },
-  endsWith(...args) {
-    return this.check(_endsWith(...args));
-  },
-  min(...args) {
-    return this.check(_minLength(...args));
-  },
-  max(...args) {
-    return this.check(_maxLength(...args));
-  },
-  length(...args) {
-    return this.check(_length(...args));
-  },
-  nonempty(...args) {
-    return this.check(_minLength(1, ...args));
-  },
-  lowercase(params) {
-    return this.check(_lowercase(params));
-  },
-  uppercase(params) {
-    return this.check(_uppercase(params));
-  },
-  trim() {
-    return this.check(_trim());
-  },
-  normalize(...args) {
-    return this.check(_normalize(...args));
-  },
-  toLowerCase() {
-    return this.check(_toLowerCase());
-  },
-  toUpperCase() {
-    return this.check(_toUpperCase());
-  },
-  slugify() {
-    return this.check(_slugify());
-  }
-}));
-var ZodString = /* @__PURE__ */ $constructor("ZodString", (inst, def) => {
-  $ZodString.init(inst, def);
-  _ZodString.init(inst, def);
-}, {
-  email(params) {
-    return this.check(_email(ZodEmail, params));
-  },
-  url(params) {
-    return this.check(_url(ZodURL, params));
-  },
-  jwt(params) {
-    return this.check(_jwt(ZodJWT, params));
-  },
-  emoji(params) {
-    return this.check(_emoji2(ZodEmoji, params));
-  },
-  guid(params) {
-    return this.check(_guid(ZodGUID, params));
-  },
-  uuid(params) {
-    return this.check(_uuid(ZodUUID, params));
-  },
-  uuidv4(params) {
-    return this.check(_uuidv4(ZodUUID, params));
-  },
-  uuidv6(params) {
-    return this.check(_uuidv6(ZodUUID, params));
-  },
-  uuidv7(params) {
-    return this.check(_uuidv7(ZodUUID, params));
-  },
-  nanoid(params) {
-    return this.check(_nanoid(ZodNanoID, params));
-  },
-  cuid(params) {
-    return this.check(_cuid(ZodCUID, params));
-  },
-  cuid2(params) {
-    return this.check(_cuid2(ZodCUID2, params));
-  },
-  ulid(params) {
-    return this.check(_ulid(ZodULID, params));
-  },
-  base64(params) {
-    return this.check(_base64(ZodBase64, params));
-  },
-  base64url(params) {
-    return this.check(_base64url(ZodBase64URL, params));
-  },
-  xid(params) {
-    return this.check(_xid(ZodXID, params));
-  },
-  ksuid(params) {
-    return this.check(_ksuid(ZodKSUID, params));
-  },
-  ipv4(params) {
-    return this.check(_ipv4(ZodIPv4, params));
-  },
-  ipv6(params) {
-    return this.check(_ipv6(ZodIPv6, params));
-  },
-  cidrv4(params) {
-    return this.check(_cidrv4(ZodCIDRv4, params));
-  },
-  cidrv6(params) {
-    return this.check(_cidrv6(ZodCIDRv6, params));
-  },
-  e164(params) {
-    return this.check(_e164(ZodE164, params));
-  },
-  datetime(params) {
-    return this.check(_isoDateTime(ZodISODateTime, params));
-  },
-  date(params) {
-    return this.check(_isoDate(ZodISODate, params));
-  },
-  time(params) {
-    return this.check(_isoTime(ZodISOTime, params));
-  },
-  duration(params) {
-    return this.check(_isoDuration(ZodISODuration, params));
-  }
-});
-function string2(params) {
-  return _string(ZodString, params);
-}
-var ZodStringFormat = /* @__PURE__ */ $constructor("ZodStringFormat", (inst, def) => {
-  $ZodStringFormat.init(inst, def);
-  _ZodString.init(inst, def);
-});
-var ZodISODateTime = /* @__PURE__ */ $constructor("ZodISODateTime", (inst, def) => {
-  $ZodISODateTime.init(inst, def);
-  ZodStringFormat.init(inst, def);
-});
-var ZodISODate = /* @__PURE__ */ $constructor("ZodISODate", (inst, def) => {
-  $ZodISODate.init(inst, def);
-  ZodStringFormat.init(inst, def);
-});
-var ZodISOTime = /* @__PURE__ */ $constructor("ZodISOTime", (inst, def) => {
-  $ZodISOTime.init(inst, def);
-  ZodStringFormat.init(inst, def);
-});
-var ZodISODuration = /* @__PURE__ */ $constructor("ZodISODuration", (inst, def) => {
-  $ZodISODuration.init(inst, def);
-  ZodStringFormat.init(inst, def);
-});
-var ZodEmail = /* @__PURE__ */ $constructor("ZodEmail", (inst, def) => {
-  $ZodEmail.init(inst, def);
-  ZodStringFormat.init(inst, def);
-});
-var ZodGUID = /* @__PURE__ */ $constructor("ZodGUID", (inst, def) => {
-  $ZodGUID.init(inst, def);
-  ZodStringFormat.init(inst, def);
-});
-var ZodUUID = /* @__PURE__ */ $constructor("ZodUUID", (inst, def) => {
-  $ZodUUID.init(inst, def);
-  ZodStringFormat.init(inst, def);
-});
-var ZodURL = /* @__PURE__ */ $constructor("ZodURL", (inst, def) => {
-  $ZodURL.init(inst, def);
-  ZodStringFormat.init(inst, def);
-});
-var ZodEmoji = /* @__PURE__ */ $constructor("ZodEmoji", (inst, def) => {
-  $ZodEmoji.init(inst, def);
-  ZodStringFormat.init(inst, def);
-});
-var ZodNanoID = /* @__PURE__ */ $constructor("ZodNanoID", (inst, def) => {
-  $ZodNanoID.init(inst, def);
-  ZodStringFormat.init(inst, def);
-});
-var ZodCUID = /* @__PURE__ */ $constructor("ZodCUID", (inst, def) => {
-  $ZodCUID.init(inst, def);
-  ZodStringFormat.init(inst, def);
-});
-var ZodCUID2 = /* @__PURE__ */ $constructor("ZodCUID2", (inst, def) => {
-  $ZodCUID2.init(inst, def);
-  ZodStringFormat.init(inst, def);
-});
-var ZodULID = /* @__PURE__ */ $constructor("ZodULID", (inst, def) => {
-  $ZodULID.init(inst, def);
-  ZodStringFormat.init(inst, def);
-});
-var ZodXID = /* @__PURE__ */ $constructor("ZodXID", (inst, def) => {
-  $ZodXID.init(inst, def);
-  ZodStringFormat.init(inst, def);
-});
-var ZodKSUID = /* @__PURE__ */ $constructor("ZodKSUID", (inst, def) => {
-  $ZodKSUID.init(inst, def);
-  ZodStringFormat.init(inst, def);
-});
-var ZodIPv4 = /* @__PURE__ */ $constructor("ZodIPv4", (inst, def) => {
-  $ZodIPv4.init(inst, def);
-  ZodStringFormat.init(inst, def);
-});
-var ZodIPv6 = /* @__PURE__ */ $constructor("ZodIPv6", (inst, def) => {
-  $ZodIPv6.init(inst, def);
-  ZodStringFormat.init(inst, def);
-});
-var ZodCIDRv4 = /* @__PURE__ */ $constructor("ZodCIDRv4", (inst, def) => {
-  $ZodCIDRv4.init(inst, def);
-  ZodStringFormat.init(inst, def);
-});
-var ZodCIDRv6 = /* @__PURE__ */ $constructor("ZodCIDRv6", (inst, def) => {
-  $ZodCIDRv6.init(inst, def);
-  ZodStringFormat.init(inst, def);
-});
-var ZodBase64 = /* @__PURE__ */ $constructor("ZodBase64", (inst, def) => {
-  $ZodBase64.init(inst, def);
-  ZodStringFormat.init(inst, def);
-});
-var ZodBase64URL = /* @__PURE__ */ $constructor("ZodBase64URL", (inst, def) => {
-  $ZodBase64URL.init(inst, def);
-  ZodStringFormat.init(inst, def);
-});
-var ZodE164 = /* @__PURE__ */ $constructor("ZodE164", (inst, def) => {
-  $ZodE164.init(inst, def);
-  ZodStringFormat.init(inst, def);
-});
-var ZodJWT = /* @__PURE__ */ $constructor("ZodJWT", (inst, def) => {
-  $ZodJWT.init(inst, def);
-  ZodStringFormat.init(inst, def);
-});
-var ZodNumber = /* @__PURE__ */ $constructor("ZodNumber", (inst, def) => {
-  $ZodNumber.init(inst, def);
-  ZodType.init(inst, def);
-  inst._zod.processJSONSchema = (ctx, json, params) => numberProcessor(inst, ctx, json, params);
-  inst.isFinite = true;
-}, /* @__PURE__ */ derived({
-  minValue: (inst) => {
-    const { minimum, exclusiveMinimum } = aggregateChecks(inst);
-    return Math.max(minimum ?? Number.NEGATIVE_INFINITY, exclusiveMinimum ?? Number.NEGATIVE_INFINITY);
-  },
-  maxValue: (inst) => {
-    const { maximum, exclusiveMaximum } = aggregateChecks(inst);
-    return Math.min(maximum ?? Number.POSITIVE_INFINITY, exclusiveMaximum ?? Number.POSITIVE_INFINITY);
-  },
-  isInt: (inst) => {
-    const { isInt, multipleOf } = aggregateChecks(inst);
-    return !!isInt || !!multipleOf?.some(Number.isSafeInteger);
-  },
-  format: (inst) => aggregateChecks(inst).format ?? null
-}, {
-  gt(value, params) {
-    return this.check(_gt(value, params));
-  },
-  gte(value, params) {
-    return this.check(_gte(value, params));
-  },
-  min(value, params) {
-    return this.check(_gte(value, params));
-  },
-  lt(value, params) {
-    return this.check(_lt(value, params));
-  },
-  lte(value, params) {
-    return this.check(_lte(value, params));
-  },
-  max(value, params) {
-    return this.check(_lte(value, params));
-  },
-  int(params) {
-    return this.check(int(params));
-  },
-  safe(params) {
-    return this.check(int(params));
-  },
-  positive(params) {
-    return this.check(_gt(0, params));
-  },
-  nonnegative(params) {
-    return this.check(_gte(0, params));
-  },
-  negative(params) {
-    return this.check(_lt(0, params));
-  },
-  nonpositive(params) {
-    return this.check(_lte(0, params));
-  },
-  multipleOf(value, params) {
-    return this.check(_multipleOf(value, params));
-  },
-  step(value, params) {
-    return this.check(_multipleOf(value, params));
-  },
-  finite() {
-    return this;
-  }
-}));
-function number2(params) {
-  return _number(ZodNumber, params);
-}
-var ZodNumberFormat = /* @__PURE__ */ $constructor("ZodNumberFormat", (inst, def) => {
-  $ZodNumberFormat.init(inst, def);
-  ZodNumber.init(inst, def);
-});
-function int(params) {
-  return _int(ZodNumberFormat, params);
-}
-var ZodBoolean = /* @__PURE__ */ $constructor("ZodBoolean", (inst, def) => {
-  $ZodBoolean.init(inst, def);
-  ZodType.init(inst, def);
-  inst._zod.processJSONSchema = (ctx, json, params) => booleanProcessor(inst, ctx, json, params);
-});
-function boolean2(params) {
-  return _boolean(ZodBoolean, params);
-}
-var ZodNull = /* @__PURE__ */ $constructor("ZodNull", (inst, def) => {
-  $ZodNull.init(inst, def);
-  ZodType.init(inst, def);
-  inst._zod.processJSONSchema = (ctx, json, params) => nullProcessor(inst, ctx, json, params);
-});
-function _null3(params) {
-  return _null2(ZodNull, params);
-}
-var ZodUnknown = /* @__PURE__ */ $constructor("ZodUnknown", (inst, def) => {
-  $ZodUnknown.init(inst, def);
-  ZodType.init(inst, def);
-  inst._zod.processJSONSchema = (ctx, json, params) => unknownProcessor(inst, ctx, json, params);
-});
-function unknown() {
-  return _unknown(ZodUnknown);
-}
-var ZodNever = /* @__PURE__ */ $constructor("ZodNever", (inst, def) => {
-  $ZodNever.init(inst, def);
-  ZodType.init(inst, def);
-  inst._zod.processJSONSchema = (ctx, json, params) => neverProcessor(inst, ctx, json, params);
-});
-function never(params) {
-  return _never(ZodNever, params);
-}
-var ZodArray = /* @__PURE__ */ $constructor("ZodArray", (inst, def) => {
-  _ensureDefaultMemoizer();
-  $ZodArray.init(inst, def);
-  ZodType.init(inst, def);
-  inst._zod.processJSONSchema = (ctx, json, params) => arrayProcessor(inst, ctx, json, params);
-  inst.element = def.element;
-}, {
-  min(n, params) {
-    return this.check(_minLength(n, params));
-  },
-  nonempty(params) {
-    return this.check(_minLength(1, params));
-  },
-  max(n, params) {
-    return this.check(_maxLength(n, params));
-  },
-  length(n, params) {
-    return this.check(_length(n, params));
-  },
-  unwrap() {
-    return this.element;
-  }
-});
-function array(element, params) {
-  return _array(ZodArray, element, params);
-}
-var ZodObject = /* @__PURE__ */ $constructor("ZodObject", (inst, def) => {
-  _ensureDefaultMemoizer();
-  $ZodObjectJIT.init(inst, def);
-  ZodType.init(inst, def);
-  inst._zod.processJSONSchema = (ctx, json, params) => objectProcessor(inst, ctx, json, params);
-  installLazyProp(inst, "shape", (self) => self._zod.def.shape, false);
-}, {
-  keyof() {
-    return _enum(Object.keys(this._zod.def.shape));
-  },
-  catchall(catchall) {
-    return this.clone(mergeDefs(this._zod.def, { catchall }));
-  },
-  passthrough() {
-    return this.clone(mergeDefs(this._zod.def, { catchall: unknown() }));
-  },
-  loose() {
-    return this.clone(mergeDefs(this._zod.def, { catchall: unknown() }));
-  },
-  strict() {
-    return this.clone(mergeDefs(this._zod.def, { catchall: never() }));
-  },
-  strip() {
-    return this.clone(mergeDefs(this._zod.def, { catchall: undefined }));
-  },
-  extend(incoming) {
-    return extend(this, incoming);
-  },
-  safeExtend(incoming) {
-    return safeExtend(this, incoming);
-  },
-  merge(other) {
-    return merge(this, other);
-  },
-  pick(mask) {
-    return pick(this, mask);
-  },
-  omit(mask) {
-    return omit(this, mask);
-  },
-  partial(...args) {
-    return partial(ZodOptional, this, args[0]);
-  },
-  exactPartial(...args) {
-    return partial(ZodExactOptional, this, args[0], "exactPartial");
-  },
-  required(...args) {
-    return required(ZodNonOptional, this, args[0]);
-  }
-});
-function object2(shape, params) {
-  const def = {
-    type: "object",
-    shape: shape ?? {},
-    ...normalizeParams(params)
-  };
-  return new ZodObject(def);
-}
-function looseObject(shape, params) {
-  return new ZodObject({
-    type: "object",
-    shape,
-    catchall: unknown(),
-    ...normalizeParams(params)
-  });
-}
-var ZodUnion = /* @__PURE__ */ $constructor("ZodUnion", (inst, def) => {
-  $ZodUnion.init(inst, def);
-  ZodType.init(inst, def);
-  inst._zod.processJSONSchema = (ctx, json, params) => unionProcessor(inst, ctx, json, params);
-  inst.options = def.options;
-});
-function union(options, params) {
-  return new ZodUnion({
-    type: "union",
-    options,
-    ...normalizeParams(params)
-  });
-}
-var ZodDiscriminatedUnion = /* @__PURE__ */ $constructor("ZodDiscriminatedUnion", (inst, def) => {
-  ZodUnion.init(inst, def);
-  $ZodDiscriminatedUnion.init(inst, def);
-});
-function discriminatedUnion(discriminator, options, params) {
-  return new ZodDiscriminatedUnion({
-    type: "union",
-    options,
-    discriminator,
-    ...normalizeParams(params)
-  });
-}
-var ZodIntersection = /* @__PURE__ */ $constructor("ZodIntersection", (inst, def) => {
-  $ZodIntersection.init(inst, def);
-  ZodType.init(inst, def);
-  inst._zod.processJSONSchema = (ctx, json, params) => intersectionProcessor(inst, ctx, json, params);
-});
-function intersection(left, right) {
-  return new ZodIntersection({
-    type: "intersection",
-    left,
-    right
-  });
-}
-var ZodRecord = /* @__PURE__ */ $constructor("ZodRecord", (inst, def) => {
-  _ensureDefaultMemoizer();
-  $ZodRecord.init(inst, def);
-  ZodType.init(inst, def);
-  inst._zod.processJSONSchema = (ctx, json, params) => recordProcessor(inst, ctx, json, params);
-  inst.keyType = def.keyType;
-  inst.valueType = def.valueType;
-});
-function record(keyType, valueType, params) {
-  if (!valueType || !valueType._zod) {
-    return new ZodRecord({
-      type: "record",
-      keyType: string2(),
-      valueType: keyType,
-      ...normalizeParams(valueType)
-    });
-  }
-  return new ZodRecord({
-    type: "record",
-    keyType,
-    valueType,
-    ...normalizeParams(params)
-  });
-}
-var ZodEnum = /* @__PURE__ */ $constructor("ZodEnum", (inst, def) => {
-  $ZodEnum.init(inst, def);
-  ZodType.init(inst, def);
-  inst._zod.processJSONSchema = (ctx, json, params) => enumProcessor(inst, ctx, json, params);
-  inst.enum = def.entries;
-  inst.options = [...inst._zod.values];
-  const keys = new Set(Object.keys(def.entries));
-  inst.extract = (values, params) => {
-    const newEntries = {};
-    for (const value of values) {
-      if (keys.has(value)) {
-        newEntries[value] = def.entries[value];
-      } else
-        throw new Error(`Key ${value} not found in enum`);
-    }
-    return new ZodEnum({
-      ...def,
-      checks: [],
-      ...normalizeParams(params),
-      entries: newEntries
-    });
-  };
-  inst.exclude = (values, params) => {
-    const newEntries = { ...def.entries };
-    for (const value of values) {
-      if (keys.has(value)) {
-        delete newEntries[value];
-      } else
-        throw new Error(`Key ${value} not found in enum`);
-    }
-    return new ZodEnum({
-      ...def,
-      checks: [],
-      ...normalizeParams(params),
-      entries: newEntries
-    });
-  };
-});
-function _enum(values, params) {
-  const entries = Array.isArray(values) ? Object.fromEntries(values.map((v) => [v, v])) : values;
-  return new ZodEnum({
-    type: "enum",
-    entries,
-    ...normalizeParams(params)
-  });
-}
-var ZodLiteral = /* @__PURE__ */ $constructor("ZodLiteral", (inst, def) => {
-  $ZodLiteral.init(inst, def);
-  ZodType.init(inst, def);
-  inst._zod.processJSONSchema = (ctx, json, params) => literalProcessor(inst, ctx, json, params);
-  inst.values = new Set(def.values);
-  Object.defineProperty(inst, "value", {
-    get() {
-      if (def.values.length > 1) {
-        throw new Error("This schema contains multiple valid literal values. Use `.values` instead.");
-      }
-      return def.values[0];
-    }
-  });
-});
-function literal(value, params) {
-  return new ZodLiteral({
-    type: "literal",
-    values: Array.isArray(value) ? value : [value],
-    ...normalizeParams(params)
-  });
-}
-var ZodTransform = /* @__PURE__ */ $constructor("ZodTransform", (inst, def) => {
-  _ensureDefaultMemoizer();
-  $ZodTransform.init(inst, def);
-  ZodType.init(inst, def);
-  inst._zod.processJSONSchema = (ctx, json, params) => transformProcessor(inst, ctx, json, params);
-  inst._zod.parse = (payload, _ctx) => {
-    if (_ctx.direction === "backward") {
-      throw new $ZodEncodeError(inst.constructor.name);
-    }
-    payload.addIssue = (issue2) => {
-      if (typeof issue2 === "string") {
-        payload.issues.push(issue(issue2, payload.value, def));
-      } else {
-        const _issue = issue2;
-        if (_issue.fatal)
-          _issue.continue = false;
-        _issue.code ?? (_issue.code = "custom");
-        if (!("input" in _issue))
-          _issue.input = payload.value;
-        _issue.inst ?? (_issue.inst = inst);
-        payload.issues.push(issue(_issue));
-      }
-    };
-    const output = def.transform(payload.value, payload);
-    if (output instanceof Promise) {
-      return output.then((output) => {
-        payload.value = output;
-        return payload;
-      });
-    }
-    payload.value = output;
-    return payload;
-  };
-});
-function transform(fn) {
-  return new ZodTransform({
-    type: "transform",
-    transform: fn
-  });
-}
-var ZodOptional = /* @__PURE__ */ $constructor("ZodOptional", (inst, def) => {
-  $ZodOptional.init(inst, def);
-  ZodType.init(inst, def);
-  inst._zod.processJSONSchema = (ctx, json, params) => optionalProcessor(inst, ctx, json, params);
-  inst.unwrap = () => inst._zod.def.innerType;
-});
-function optional(innerType) {
-  return new ZodOptional({
-    type: "optional",
-    innerType
-  });
-}
-var ZodExactOptional = /* @__PURE__ */ $constructor("ZodExactOptional", (inst, def) => {
-  $ZodExactOptional.init(inst, def);
-  ZodType.init(inst, def);
-  inst._zod.processJSONSchema = (ctx, json, params) => optionalProcessor(inst, ctx, json, params);
-  inst.unwrap = () => inst._zod.def.innerType;
-});
-function exactOptional(innerType) {
-  return new ZodExactOptional({
-    type: "optional",
-    innerType
-  });
-}
-var ZodNullable = /* @__PURE__ */ $constructor("ZodNullable", (inst, def) => {
-  $ZodNullable.init(inst, def);
-  ZodType.init(inst, def);
-  inst._zod.processJSONSchema = (ctx, json, params) => nullableProcessor(inst, ctx, json, params);
-  inst.unwrap = () => inst._zod.def.innerType;
-});
-function nullable(innerType) {
-  return new ZodNullable({
-    type: "nullable",
-    innerType
-  });
-}
-var ZodDefault = /* @__PURE__ */ $constructor("ZodDefault", (inst, def) => {
-  $ZodDefault.init(inst, def);
-  ZodType.init(inst, def);
-  inst._zod.processJSONSchema = (ctx, json, params) => defaultProcessor(inst, ctx, json, params);
-  inst.unwrap = () => inst._zod.def.innerType;
-  inst.removeDefault = inst.unwrap;
-});
-function _default(innerType, defaultValue) {
-  return new ZodDefault({
-    type: "default",
-    innerType,
-    get defaultValue() {
-      return typeof defaultValue === "function" ? defaultValue() : shallowClone(defaultValue);
-    }
-  });
-}
-var ZodPrefault = /* @__PURE__ */ $constructor("ZodPrefault", (inst, def) => {
-  $ZodPrefault.init(inst, def);
-  ZodType.init(inst, def);
-  inst._zod.processJSONSchema = (ctx, json, params) => prefaultProcessor(inst, ctx, json, params);
-  inst.unwrap = () => inst._zod.def.innerType;
-});
-function prefault(innerType, defaultValue) {
-  return new ZodPrefault({
-    type: "prefault",
-    innerType,
-    get defaultValue() {
-      return typeof defaultValue === "function" ? defaultValue() : shallowClone(defaultValue);
-    }
-  });
-}
-var ZodNonOptional = /* @__PURE__ */ $constructor("ZodNonOptional", (inst, def) => {
-  $ZodNonOptional.init(inst, def);
-  ZodType.init(inst, def);
-  inst._zod.processJSONSchema = (ctx, json, params) => nonoptionalProcessor(inst, ctx, json, params);
-  inst.unwrap = () => inst._zod.def.innerType;
-});
-function nonoptional(innerType, params) {
-  return new ZodNonOptional({
-    type: "nonoptional",
-    innerType,
-    ...normalizeParams(params)
-  });
-}
-var ZodCatch = /* @__PURE__ */ $constructor("ZodCatch", (inst, def) => {
-  $ZodCatch.init(inst, def);
-  ZodType.init(inst, def);
-  inst._zod.processJSONSchema = (ctx, json, params) => catchProcessor(inst, ctx, json, params);
-  inst.unwrap = () => inst._zod.def.innerType;
-  inst.removeCatch = inst.unwrap;
-});
-function _catch(innerType, catchValue) {
-  return new ZodCatch({
-    type: "catch",
-    innerType,
-    catchValue: typeof catchValue === "function" ? catchValue : constantCatch(catchValue)
-  });
-}
-var ZodPipe = /* @__PURE__ */ $constructor("ZodPipe", (inst, def) => {
-  $ZodPipe.init(inst, def);
-  ZodType.init(inst, def);
-  inst._zod.processJSONSchema = (ctx, json, params) => pipeProcessor(inst, ctx, json, params);
-  inst.in = def.in;
-  inst.out = def.out;
-});
-function pipe(in_, out) {
-  return new ZodPipe({
-    type: "pipe",
-    in: in_,
-    out
-  });
-}
-var ZodPreprocess = /* @__PURE__ */ $constructor("ZodPreprocess", (inst, def) => {
-  ZodPipe.init(inst, def);
-  $ZodPreprocess.init(inst, def);
-});
-var ZodReadonly = /* @__PURE__ */ $constructor("ZodReadonly", (inst, def) => {
-  $ZodReadonly.init(inst, def);
-  ZodType.init(inst, def);
-  inst._zod.processJSONSchema = (ctx, json, params) => readonlyProcessor(inst, ctx, json, params);
-  inst.unwrap = () => inst._zod.def.innerType;
-});
-function readonly(innerType) {
-  return new ZodReadonly({
-    type: "readonly",
-    innerType
-  });
-}
-var ZodCustom = /* @__PURE__ */ $constructor("ZodCustom", (inst, def) => {
-  $ZodCustom.init(inst, def);
-  ZodType.init(inst, def);
-  inst._zod.processJSONSchema = (ctx, json, params) => customProcessor(inst, ctx, json, params);
-});
-function custom(fn, _params) {
-  return _custom(ZodCustom, fn ?? (() => true), _params);
-}
-function refine(fn, _params = {}) {
-  return _refine(ZodCustom, fn, _params);
-}
-function superRefine(fn, params) {
-  return _superRefine(fn, params);
-}
-function preprocess(fn, schema) {
-  return new ZodPreprocess({
-    type: "pipe",
-    in: transform(fn),
-    out: schema
-  });
-}
-// node_modules/zod/v4/classic/iso.js
-function datetime2(params) {
-  return _isoDateTime(ZodISODateTime, params);
-}
-// node_modules/@modelcontextprotocol/sdk/dist/esm/types.js
-var LATEST_PROTOCOL_VERSION = "2025-11-25";
-var SUPPORTED_PROTOCOL_VERSIONS = [LATEST_PROTOCOL_VERSION, "2025-06-18", "2025-03-26", "2024-11-05", "2024-10-07"];
-var RELATED_TASK_META_KEY = "io.modelcontextprotocol/related-task";
-var JSONRPC_VERSION = "2.0";
-var AssertObjectSchema = custom((v) => v !== null && (typeof v === "object" || typeof v === "function"));
-var ProgressTokenSchema = union([string2(), number2().int()]);
-var CursorSchema = string2();
-var TaskCreationParamsSchema = looseObject({
-  ttl: number2().optional(),
-  pollInterval: number2().optional()
-});
-var TaskMetadataSchema = object2({
-  ttl: number2().optional()
-});
-var RelatedTaskMetadataSchema = object2({
-  taskId: string2()
-});
-var RequestMetaSchema = looseObject({
-  progressToken: ProgressTokenSchema.optional(),
-  [RELATED_TASK_META_KEY]: RelatedTaskMetadataSchema.optional()
-});
-var BaseRequestParamsSchema = object2({
-  _meta: RequestMetaSchema.optional()
-});
-var TaskAugmentedRequestParamsSchema = BaseRequestParamsSchema.extend({
-  task: TaskMetadataSchema.optional()
-});
-var isTaskAugmentedRequestParams = (value) => TaskAugmentedRequestParamsSchema.safeParse(value).success;
-var RequestSchema = object2({
-  method: string2(),
-  params: BaseRequestParamsSchema.loose().optional()
-});
-var NotificationsParamsSchema = object2({
-  _meta: RequestMetaSchema.optional()
-});
-var NotificationSchema = object2({
-  method: string2(),
-  params: NotificationsParamsSchema.loose().optional()
-});
-var ResultSchema = looseObject({
-  _meta: RequestMetaSchema.optional()
-});
-var RequestIdSchema = union([string2(), number2().int()]);
-var JSONRPCRequestSchema = object2({
-  jsonrpc: literal(JSONRPC_VERSION),
-  id: RequestIdSchema,
-  ...RequestSchema.shape
-}).strict();
-var isJSONRPCRequest = (value) => JSONRPCRequestSchema.safeParse(value).success;
-var JSONRPCNotificationSchema = object2({
-  jsonrpc: literal(JSONRPC_VERSION),
-  ...NotificationSchema.shape
-}).strict();
-var isJSONRPCNotification = (value) => JSONRPCNotificationSchema.safeParse(value).success;
-var JSONRPCResultResponseSchema = object2({
-  jsonrpc: literal(JSONRPC_VERSION),
-  id: RequestIdSchema,
-  result: ResultSchema
-}).strict();
-var isJSONRPCResultResponse = (value) => JSONRPCResultResponseSchema.safeParse(value).success;
-var ErrorCode;
-(function(ErrorCode) {
-  ErrorCode[ErrorCode["ConnectionClosed"] = -32000] = "ConnectionClosed";
-  ErrorCode[ErrorCode["RequestTimeout"] = -32001] = "RequestTimeout";
-  ErrorCode[ErrorCode["ParseError"] = -32700] = "ParseError";
-  ErrorCode[ErrorCode["InvalidRequest"] = -32600] = "InvalidRequest";
-  ErrorCode[ErrorCode["MethodNotFound"] = -32601] = "MethodNotFound";
-  ErrorCode[ErrorCode["InvalidParams"] = -32602] = "InvalidParams";
-  ErrorCode[ErrorCode["InternalError"] = -32603] = "InternalError";
-  ErrorCode[ErrorCode["UrlElicitationRequired"] = -32042] = "UrlElicitationRequired";
-})(ErrorCode || (ErrorCode = {}));
-var JSONRPCErrorResponseSchema = object2({
-  jsonrpc: literal(JSONRPC_VERSION),
-  id: RequestIdSchema.optional(),
-  error: object2({
-    code: number2().int(),
-    message: string2(),
-    data: unknown().optional()
-  })
-}).strict();
-var isJSONRPCErrorResponse = (value) => JSONRPCErrorResponseSchema.safeParse(value).success;
-var JSONRPCMessageSchema = union([
-  JSONRPCRequestSchema,
-  JSONRPCNotificationSchema,
-  JSONRPCResultResponseSchema,
-  JSONRPCErrorResponseSchema
-]);
-var JSONRPCResponseSchema = union([JSONRPCResultResponseSchema, JSONRPCErrorResponseSchema]);
-var EmptyResultSchema = ResultSchema.strict();
-var CancelledNotificationParamsSchema = NotificationsParamsSchema.extend({
-  requestId: RequestIdSchema.optional(),
-  reason: string2().optional()
-});
-var CancelledNotificationSchema = NotificationSchema.extend({
-  method: literal("notifications/cancelled"),
-  params: CancelledNotificationParamsSchema
-});
-var IconSchema = object2({
-  src: string2(),
-  mimeType: string2().optional(),
-  sizes: array(string2()).optional(),
-  theme: _enum(["light", "dark"]).optional()
-});
-var IconsSchema = object2({
-  icons: array(IconSchema).optional()
-});
-var BaseMetadataSchema = object2({
-  name: string2(),
-  title: string2().optional()
-});
-var ImplementationSchema = BaseMetadataSchema.extend({
-  ...BaseMetadataSchema.shape,
-  ...IconsSchema.shape,
-  version: string2(),
-  websiteUrl: string2().optional(),
-  description: string2().optional()
-});
-var FormElicitationCapabilitySchema = intersection(object2({
-  applyDefaults: boolean2().optional()
-}), record(string2(), unknown()));
-var ElicitationCapabilitySchema = preprocess((value) => {
-  if (value && typeof value === "object" && !Array.isArray(value)) {
-    if (Object.keys(value).length === 0) {
-      return { form: {} };
-    }
-  }
-  return value;
-}, intersection(object2({
-  form: FormElicitationCapabilitySchema.optional(),
-  url: AssertObjectSchema.optional()
-}), record(string2(), unknown()).optional()));
-var ClientTasksCapabilitySchema = looseObject({
-  list: AssertObjectSchema.optional(),
-  cancel: AssertObjectSchema.optional(),
-  requests: looseObject({
-    sampling: looseObject({
-      createMessage: AssertObjectSchema.optional()
-    }).optional(),
-    elicitation: looseObject({
-      create: AssertObjectSchema.optional()
-    }).optional()
-  }).optional()
-});
-var ServerTasksCapabilitySchema = looseObject({
-  list: AssertObjectSchema.optional(),
-  cancel: AssertObjectSchema.optional(),
-  requests: looseObject({
-    tools: looseObject({
-      call: AssertObjectSchema.optional()
-    }).optional()
-  }).optional()
-});
-var ClientCapabilitiesSchema = object2({
-  experimental: record(string2(), AssertObjectSchema).optional(),
-  sampling: object2({
-    context: AssertObjectSchema.optional(),
-    tools: AssertObjectSchema.optional()
-  }).optional(),
-  elicitation: ElicitationCapabilitySchema.optional(),
-  roots: object2({
-    listChanged: boolean2().optional()
-  }).optional(),
-  tasks: ClientTasksCapabilitySchema.optional(),
-  extensions: record(string2(), AssertObjectSchema).optional()
-});
-var InitializeRequestParamsSchema = BaseRequestParamsSchema.extend({
-  protocolVersion: string2(),
-  capabilities: ClientCapabilitiesSchema,
-  clientInfo: ImplementationSchema
-});
-var InitializeRequestSchema = RequestSchema.extend({
-  method: literal("initialize"),
-  params: InitializeRequestParamsSchema
-});
-var ServerCapabilitiesSchema = object2({
-  experimental: record(string2(), AssertObjectSchema).optional(),
-  logging: AssertObjectSchema.optional(),
-  completions: AssertObjectSchema.optional(),
-  prompts: object2({
-    listChanged: boolean2().optional()
-  }).optional(),
-  resources: object2({
-    subscribe: boolean2().optional(),
-    listChanged: boolean2().optional()
-  }).optional(),
-  tools: object2({
-    listChanged: boolean2().optional()
-  }).optional(),
-  tasks: ServerTasksCapabilitySchema.optional(),
-  extensions: record(string2(), AssertObjectSchema).optional()
-});
-var InitializeResultSchema = ResultSchema.extend({
-  protocolVersion: string2(),
-  capabilities: ServerCapabilitiesSchema,
-  serverInfo: ImplementationSchema,
-  instructions: string2().optional()
-});
-var InitializedNotificationSchema = NotificationSchema.extend({
-  method: literal("notifications/initialized"),
-  params: NotificationsParamsSchema.optional()
-});
-var PingRequestSchema = RequestSchema.extend({
-  method: literal("ping"),
-  params: BaseRequestParamsSchema.optional()
-});
-var ProgressSchema = object2({
-  progress: number2(),
-  total: optional(number2()),
-  message: optional(string2())
-});
-var ProgressNotificationParamsSchema = object2({
-  ...NotificationsParamsSchema.shape,
-  ...ProgressSchema.shape,
-  progressToken: ProgressTokenSchema
-});
-var ProgressNotificationSchema = NotificationSchema.extend({
-  method: literal("notifications/progress"),
-  params: ProgressNotificationParamsSchema
-});
-var PaginatedRequestParamsSchema = BaseRequestParamsSchema.extend({
-  cursor: CursorSchema.optional()
-});
-var PaginatedRequestSchema = RequestSchema.extend({
-  params: PaginatedRequestParamsSchema.optional()
-});
-var PaginatedResultSchema = ResultSchema.extend({
-  nextCursor: CursorSchema.optional()
-});
-var TaskStatusSchema = _enum(["working", "input_required", "completed", "failed", "cancelled"]);
-var TaskSchema = object2({
-  taskId: string2(),
-  status: TaskStatusSchema,
-  ttl: union([number2(), _null3()]),
-  createdAt: string2(),
-  lastUpdatedAt: string2(),
-  pollInterval: optional(number2()),
-  statusMessage: optional(string2())
-});
-var CreateTaskResultSchema = ResultSchema.extend({
-  task: TaskSchema
-});
-var TaskStatusNotificationParamsSchema = NotificationsParamsSchema.merge(TaskSchema);
-var TaskStatusNotificationSchema = NotificationSchema.extend({
-  method: literal("notifications/tasks/status"),
-  params: TaskStatusNotificationParamsSchema
-});
-var GetTaskRequestSchema = RequestSchema.extend({
-  method: literal("tasks/get"),
-  params: BaseRequestParamsSchema.extend({
-    taskId: string2()
-  })
-});
-var GetTaskResultSchema = ResultSchema.merge(TaskSchema);
-var GetTaskPayloadRequestSchema = RequestSchema.extend({
-  method: literal("tasks/result"),
-  params: BaseRequestParamsSchema.extend({
-    taskId: string2()
-  })
-});
-var GetTaskPayloadResultSchema = ResultSchema.loose();
-var ListTasksRequestSchema = PaginatedRequestSchema.extend({
-  method: literal("tasks/list")
-});
-var ListTasksResultSchema = PaginatedResultSchema.extend({
-  tasks: array(TaskSchema)
-});
-var CancelTaskRequestSchema = RequestSchema.extend({
-  method: literal("tasks/cancel"),
-  params: BaseRequestParamsSchema.extend({
-    taskId: string2()
-  })
-});
-var CancelTaskResultSchema = ResultSchema.merge(TaskSchema);
-var ResourceContentsSchema = object2({
-  uri: string2(),
-  mimeType: optional(string2()),
-  _meta: record(string2(), unknown()).optional()
-});
-var TextResourceContentsSchema = ResourceContentsSchema.extend({
-  text: string2()
-});
-var Base64Schema = string2().refine((val) => {
-  try {
-    atob(val);
-    return true;
-  } catch {
-    return false;
-  }
-}, { message: "Invalid Base64 string" });
-var BlobResourceContentsSchema = ResourceContentsSchema.extend({
-  blob: Base64Schema
-});
-var RoleSchema = _enum(["user", "assistant"]);
-var AnnotationsSchema = object2({
-  audience: array(RoleSchema).optional(),
-  priority: number2().min(0).max(1).optional(),
-  lastModified: datetime2({ offset: true }).optional()
-});
-var ResourceSchema = object2({
-  ...BaseMetadataSchema.shape,
-  ...IconsSchema.shape,
-  uri: string2(),
-  description: optional(string2()),
-  mimeType: optional(string2()),
-  size: optional(number2()),
-  annotations: AnnotationsSchema.optional(),
-  _meta: optional(looseObject({}))
-});
-var ResourceTemplateSchema = object2({
-  ...BaseMetadataSchema.shape,
-  ...IconsSchema.shape,
-  uriTemplate: string2(),
-  description: optional(string2()),
-  mimeType: optional(string2()),
-  annotations: AnnotationsSchema.optional(),
-  _meta: optional(looseObject({}))
-});
-var ListResourcesRequestSchema = PaginatedRequestSchema.extend({
-  method: literal("resources/list")
-});
-var ListResourcesResultSchema = PaginatedResultSchema.extend({
-  resources: array(ResourceSchema)
-});
-var ListResourceTemplatesRequestSchema = PaginatedRequestSchema.extend({
-  method: literal("resources/templates/list")
-});
-var ListResourceTemplatesResultSchema = PaginatedResultSchema.extend({
-  resourceTemplates: array(ResourceTemplateSchema)
-});
-var ResourceRequestParamsSchema = BaseRequestParamsSchema.extend({
-  uri: string2()
-});
-var ReadResourceRequestParamsSchema = ResourceRequestParamsSchema;
-var ReadResourceRequestSchema = RequestSchema.extend({
-  method: literal("resources/read"),
-  params: ReadResourceRequestParamsSchema
-});
-var ReadResourceResultSchema = ResultSchema.extend({
-  contents: array(union([TextResourceContentsSchema, BlobResourceContentsSchema]))
-});
-var ResourceListChangedNotificationSchema = NotificationSchema.extend({
-  method: literal("notifications/resources/list_changed"),
-  params: NotificationsParamsSchema.optional()
-});
-var SubscribeRequestParamsSchema = ResourceRequestParamsSchema;
-var SubscribeRequestSchema = RequestSchema.extend({
-  method: literal("resources/subscribe"),
-  params: SubscribeRequestParamsSchema
-});
-var UnsubscribeRequestParamsSchema = ResourceRequestParamsSchema;
-var UnsubscribeRequestSchema = RequestSchema.extend({
-  method: literal("resources/unsubscribe"),
-  params: UnsubscribeRequestParamsSchema
-});
-var ResourceUpdatedNotificationParamsSchema = NotificationsParamsSchema.extend({
-  uri: string2()
-});
-var ResourceUpdatedNotificationSchema = NotificationSchema.extend({
-  method: literal("notifications/resources/updated"),
-  params: ResourceUpdatedNotificationParamsSchema
-});
-var PromptArgumentSchema = object2({
-  name: string2(),
-  description: optional(string2()),
-  required: optional(boolean2())
-});
-var PromptSchema = object2({
-  ...BaseMetadataSchema.shape,
-  ...IconsSchema.shape,
-  description: optional(string2()),
-  arguments: optional(array(PromptArgumentSchema)),
-  _meta: optional(looseObject({}))
-});
-var ListPromptsRequestSchema = PaginatedRequestSchema.extend({
-  method: literal("prompts/list")
-});
-var ListPromptsResultSchema = PaginatedResultSchema.extend({
-  prompts: array(PromptSchema)
-});
-var GetPromptRequestParamsSchema = BaseRequestParamsSchema.extend({
-  name: string2(),
-  arguments: record(string2(), string2()).optional()
-});
-var GetPromptRequestSchema = RequestSchema.extend({
-  method: literal("prompts/get"),
-  params: GetPromptRequestParamsSchema
-});
-var TextContentSchema = object2({
-  type: literal("text"),
-  text: string2(),
-  annotations: AnnotationsSchema.optional(),
-  _meta: record(string2(), unknown()).optional()
-});
-var ImageContentSchema = object2({
-  type: literal("image"),
-  data: Base64Schema,
-  mimeType: string2(),
-  annotations: AnnotationsSchema.optional(),
-  _meta: record(string2(), unknown()).optional()
-});
-var AudioContentSchema = object2({
-  type: literal("audio"),
-  data: Base64Schema,
-  mimeType: string2(),
-  annotations: AnnotationsSchema.optional(),
-  _meta: record(string2(), unknown()).optional()
-});
-var ToolUseContentSchema = object2({
-  type: literal("tool_use"),
-  name: string2(),
-  id: string2(),
-  input: record(string2(), unknown()),
-  _meta: record(string2(), unknown()).optional()
-});
-var EmbeddedResourceSchema = object2({
-  type: literal("resource"),
-  resource: union([TextResourceContentsSchema, BlobResourceContentsSchema]),
-  annotations: AnnotationsSchema.optional(),
-  _meta: record(string2(), unknown()).optional()
-});
-var ResourceLinkSchema = ResourceSchema.extend({
-  type: literal("resource_link")
-});
-var ContentBlockSchema = union([
-  TextContentSchema,
-  ImageContentSchema,
-  AudioContentSchema,
-  ResourceLinkSchema,
-  EmbeddedResourceSchema
-]);
-var PromptMessageSchema = object2({
-  role: RoleSchema,
-  content: ContentBlockSchema
-});
-var GetPromptResultSchema = ResultSchema.extend({
-  description: string2().optional(),
-  messages: array(PromptMessageSchema)
-});
-var PromptListChangedNotificationSchema = NotificationSchema.extend({
-  method: literal("notifications/prompts/list_changed"),
-  params: NotificationsParamsSchema.optional()
-});
-var ToolAnnotationsSchema = object2({
-  title: string2().optional(),
-  readOnlyHint: boolean2().optional(),
-  destructiveHint: boolean2().optional(),
-  idempotentHint: boolean2().optional(),
-  openWorldHint: boolean2().optional()
-});
-var ToolExecutionSchema = object2({
-  taskSupport: _enum(["required", "optional", "forbidden"]).optional()
-});
-var ToolSchema = object2({
-  ...BaseMetadataSchema.shape,
-  ...IconsSchema.shape,
-  description: string2().optional(),
-  inputSchema: object2({
-    type: literal("object"),
-    properties: record(string2(), AssertObjectSchema).optional(),
-    required: array(string2()).optional()
-  }).catchall(unknown()),
-  outputSchema: object2({
-    type: literal("object"),
-    properties: record(string2(), AssertObjectSchema).optional(),
-    required: array(string2()).optional()
-  }).catchall(unknown()).optional(),
-  annotations: ToolAnnotationsSchema.optional(),
-  execution: ToolExecutionSchema.optional(),
-  _meta: record(string2(), unknown()).optional()
-});
-var ListToolsRequestSchema = PaginatedRequestSchema.extend({
-  method: literal("tools/list")
-});
-var ListToolsResultSchema = PaginatedResultSchema.extend({
-  tools: array(ToolSchema)
-});
-var CallToolResultSchema = ResultSchema.extend({
-  content: array(ContentBlockSchema).default([]),
-  structuredContent: record(string2(), unknown()).optional(),
-  isError: boolean2().optional()
-});
-var CompatibilityCallToolResultSchema = CallToolResultSchema.or(ResultSchema.extend({
-  toolResult: unknown()
-}));
-var CallToolRequestParamsSchema = TaskAugmentedRequestParamsSchema.extend({
-  name: string2(),
-  arguments: record(string2(), unknown()).optional()
-});
-var CallToolRequestSchema = RequestSchema.extend({
-  method: literal("tools/call"),
-  params: CallToolRequestParamsSchema
-});
-var ToolListChangedNotificationSchema = NotificationSchema.extend({
-  method: literal("notifications/tools/list_changed"),
-  params: NotificationsParamsSchema.optional()
-});
-var ListChangedOptionsBaseSchema = object2({
-  autoRefresh: boolean2().default(true),
-  debounceMs: number2().int().nonnegative().default(300)
-});
-var LoggingLevelSchema = _enum(["debug", "info", "notice", "warning", "error", "critical", "alert", "emergency"]);
-var SetLevelRequestParamsSchema = BaseRequestParamsSchema.extend({
-  level: LoggingLevelSchema
-});
-var SetLevelRequestSchema = RequestSchema.extend({
-  method: literal("logging/setLevel"),
-  params: SetLevelRequestParamsSchema
-});
-var LoggingMessageNotificationParamsSchema = NotificationsParamsSchema.extend({
-  level: LoggingLevelSchema,
-  logger: string2().optional(),
-  data: unknown()
-});
-var LoggingMessageNotificationSchema = NotificationSchema.extend({
-  method: literal("notifications/message"),
-  params: LoggingMessageNotificationParamsSchema
-});
-var ModelHintSchema = object2({
-  name: string2().optional()
-});
-var ModelPreferencesSchema = object2({
-  hints: array(ModelHintSchema).optional(),
-  costPriority: number2().min(0).max(1).optional(),
-  speedPriority: number2().min(0).max(1).optional(),
-  intelligencePriority: number2().min(0).max(1).optional()
-});
-var ToolChoiceSchema = object2({
-  mode: _enum(["auto", "required", "none"]).optional()
-});
-var ToolResultContentSchema = object2({
-  type: literal("tool_result"),
-  toolUseId: string2().describe("The unique identifier for the corresponding tool call."),
-  content: array(ContentBlockSchema).default([]),
-  structuredContent: object2({}).loose().optional(),
-  isError: boolean2().optional(),
-  _meta: record(string2(), unknown()).optional()
-});
-var SamplingContentSchema = discriminatedUnion("type", [TextContentSchema, ImageContentSchema, AudioContentSchema]);
-var SamplingMessageContentBlockSchema = discriminatedUnion("type", [
-  TextContentSchema,
-  ImageContentSchema,
-  AudioContentSchema,
-  ToolUseContentSchema,
-  ToolResultContentSchema
-]);
-var SamplingMessageSchema = object2({
-  role: RoleSchema,
-  content: union([SamplingMessageContentBlockSchema, array(SamplingMessageContentBlockSchema)]),
-  _meta: record(string2(), unknown()).optional()
-});
-var CreateMessageRequestParamsSchema = TaskAugmentedRequestParamsSchema.extend({
-  messages: array(SamplingMessageSchema),
-  modelPreferences: ModelPreferencesSchema.optional(),
-  systemPrompt: string2().optional(),
-  includeContext: _enum(["none", "thisServer", "allServers"]).optional(),
-  temperature: number2().optional(),
-  maxTokens: number2().int(),
-  stopSequences: array(string2()).optional(),
-  metadata: AssertObjectSchema.optional(),
-  tools: array(ToolSchema).optional(),
-  toolChoice: ToolChoiceSchema.optional()
-});
-var CreateMessageRequestSchema = RequestSchema.extend({
-  method: literal("sampling/createMessage"),
-  params: CreateMessageRequestParamsSchema
-});
-var CreateMessageResultSchema = ResultSchema.extend({
-  model: string2(),
-  stopReason: optional(_enum(["endTurn", "stopSequence", "maxTokens"]).or(string2())),
-  role: RoleSchema,
-  content: SamplingContentSchema
-});
-var CreateMessageResultWithToolsSchema = ResultSchema.extend({
-  model: string2(),
-  stopReason: optional(_enum(["endTurn", "stopSequence", "maxTokens", "toolUse"]).or(string2())),
-  role: RoleSchema,
-  content: union([SamplingMessageContentBlockSchema, array(SamplingMessageContentBlockSchema)])
-});
-var BooleanSchemaSchema = object2({
-  type: literal("boolean"),
-  title: string2().optional(),
-  description: string2().optional(),
-  default: boolean2().optional()
-});
-var StringSchemaSchema = object2({
-  type: literal("string"),
-  title: string2().optional(),
-  description: string2().optional(),
-  minLength: number2().optional(),
-  maxLength: number2().optional(),
-  format: _enum(["email", "uri", "date", "date-time"]).optional(),
-  default: string2().optional()
-});
-var NumberSchemaSchema = object2({
-  type: _enum(["number", "integer"]),
-  title: string2().optional(),
-  description: string2().optional(),
-  minimum: number2().optional(),
-  maximum: number2().optional(),
-  default: number2().optional()
-});
-var UntitledSingleSelectEnumSchemaSchema = object2({
-  type: literal("string"),
-  title: string2().optional(),
-  description: string2().optional(),
-  enum: array(string2()),
-  default: string2().optional()
-});
-var TitledSingleSelectEnumSchemaSchema = object2({
-  type: literal("string"),
-  title: string2().optional(),
-  description: string2().optional(),
-  oneOf: array(object2({
-    const: string2(),
-    title: string2()
-  })),
-  default: string2().optional()
-});
-var LegacyTitledEnumSchemaSchema = object2({
-  type: literal("string"),
-  title: string2().optional(),
-  description: string2().optional(),
-  enum: array(string2()),
-  enumNames: array(string2()).optional(),
-  default: string2().optional()
-});
-var SingleSelectEnumSchemaSchema = union([UntitledSingleSelectEnumSchemaSchema, TitledSingleSelectEnumSchemaSchema]);
-var UntitledMultiSelectEnumSchemaSchema = object2({
-  type: literal("array"),
-  title: string2().optional(),
-  description: string2().optional(),
-  minItems: number2().optional(),
-  maxItems: number2().optional(),
-  items: object2({
-    type: literal("string"),
-    enum: array(string2())
-  }),
-  default: array(string2()).optional()
-});
-var TitledMultiSelectEnumSchemaSchema = object2({
-  type: literal("array"),
-  title: string2().optional(),
-  description: string2().optional(),
-  minItems: number2().optional(),
-  maxItems: number2().optional(),
-  items: object2({
-    anyOf: array(object2({
-      const: string2(),
-      title: string2()
-    }))
-  }),
-  default: array(string2()).optional()
-});
-var MultiSelectEnumSchemaSchema = union([UntitledMultiSelectEnumSchemaSchema, TitledMultiSelectEnumSchemaSchema]);
-var EnumSchemaSchema = union([LegacyTitledEnumSchemaSchema, SingleSelectEnumSchemaSchema, MultiSelectEnumSchemaSchema]);
-var PrimitiveSchemaDefinitionSchema = union([EnumSchemaSchema, BooleanSchemaSchema, StringSchemaSchema, NumberSchemaSchema]);
-var ElicitRequestFormParamsSchema = TaskAugmentedRequestParamsSchema.extend({
-  mode: literal("form").optional(),
-  message: string2(),
-  requestedSchema: object2({
-    type: literal("object"),
-    properties: record(string2(), PrimitiveSchemaDefinitionSchema),
-    required: array(string2()).optional()
-  })
-});
-var ElicitRequestURLParamsSchema = TaskAugmentedRequestParamsSchema.extend({
-  mode: literal("url"),
-  message: string2(),
-  elicitationId: string2(),
-  url: string2().url()
-});
-var ElicitRequestParamsSchema = union([ElicitRequestFormParamsSchema, ElicitRequestURLParamsSchema]);
-var ElicitRequestSchema = RequestSchema.extend({
-  method: literal("elicitation/create"),
-  params: ElicitRequestParamsSchema
-});
-var ElicitationCompleteNotificationParamsSchema = NotificationsParamsSchema.extend({
-  elicitationId: string2()
-});
-var ElicitationCompleteNotificationSchema = NotificationSchema.extend({
-  method: literal("notifications/elicitation/complete"),
-  params: ElicitationCompleteNotificationParamsSchema
-});
-var ElicitResultSchema = ResultSchema.extend({
-  action: _enum(["accept", "decline", "cancel"]),
-  content: preprocess((val) => val === null ? undefined : val, record(string2(), union([string2(), number2(), boolean2(), array(string2())])).optional())
-});
-var ResourceTemplateReferenceSchema = object2({
-  type: literal("ref/resource"),
-  uri: string2()
-});
-var PromptReferenceSchema = object2({
-  type: literal("ref/prompt"),
-  name: string2()
-});
-var CompleteRequestParamsSchema = BaseRequestParamsSchema.extend({
-  ref: union([PromptReferenceSchema, ResourceTemplateReferenceSchema]),
-  argument: object2({
-    name: string2(),
-    value: string2()
-  }),
-  context: object2({
-    arguments: record(string2(), string2()).optional()
-  }).optional()
-});
-var CompleteRequestSchema = RequestSchema.extend({
-  method: literal("completion/complete"),
-  params: CompleteRequestParamsSchema
-});
-var CompleteResultSchema = ResultSchema.extend({
-  completion: looseObject({
-    values: array(string2()).max(100),
-    total: optional(number2().int()),
-    hasMore: optional(boolean2())
-  })
-});
-var RootSchema = object2({
-  uri: string2().startsWith("file://"),
-  name: string2().optional(),
-  _meta: record(string2(), unknown()).optional()
-});
-var ListRootsRequestSchema = RequestSchema.extend({
-  method: literal("roots/list"),
-  params: BaseRequestParamsSchema.optional()
-});
-var ListRootsResultSchema = ResultSchema.extend({
-  roots: array(RootSchema)
-});
-var RootsListChangedNotificationSchema = NotificationSchema.extend({
-  method: literal("notifications/roots/list_changed"),
-  params: NotificationsParamsSchema.optional()
-});
-var ClientRequestSchema = union([
-  PingRequestSchema,
-  InitializeRequestSchema,
-  CompleteRequestSchema,
-  SetLevelRequestSchema,
-  GetPromptRequestSchema,
-  ListPromptsRequestSchema,
-  ListResourcesRequestSchema,
-  ListResourceTemplatesRequestSchema,
-  ReadResourceRequestSchema,
-  SubscribeRequestSchema,
-  UnsubscribeRequestSchema,
-  CallToolRequestSchema,
-  ListToolsRequestSchema,
-  GetTaskRequestSchema,
-  GetTaskPayloadRequestSchema,
-  ListTasksRequestSchema,
-  CancelTaskRequestSchema
-]);
-var ClientNotificationSchema = union([
-  CancelledNotificationSchema,
-  ProgressNotificationSchema,
-  InitializedNotificationSchema,
-  RootsListChangedNotificationSchema,
-  TaskStatusNotificationSchema
-]);
-var ClientResultSchema = union([
-  EmptyResultSchema,
-  CreateMessageResultSchema,
-  CreateMessageResultWithToolsSchema,
-  ElicitResultSchema,
-  ListRootsResultSchema,
-  GetTaskResultSchema,
-  ListTasksResultSchema,
-  CreateTaskResultSchema
-]);
-var ServerRequestSchema = union([
-  PingRequestSchema,
-  CreateMessageRequestSchema,
-  ElicitRequestSchema,
-  ListRootsRequestSchema,
-  GetTaskRequestSchema,
-  GetTaskPayloadRequestSchema,
-  ListTasksRequestSchema,
-  CancelTaskRequestSchema
-]);
-var ServerNotificationSchema = union([
-  CancelledNotificationSchema,
-  ProgressNotificationSchema,
-  LoggingMessageNotificationSchema,
-  ResourceUpdatedNotificationSchema,
-  ResourceListChangedNotificationSchema,
-  ToolListChangedNotificationSchema,
-  PromptListChangedNotificationSchema,
-  TaskStatusNotificationSchema,
-  ElicitationCompleteNotificationSchema
-]);
-var ServerResultSchema = union([
-  EmptyResultSchema,
-  InitializeResultSchema,
-  CompleteResultSchema,
-  GetPromptResultSchema,
-  ListPromptsResultSchema,
-  ListResourcesResultSchema,
-  ListResourceTemplatesResultSchema,
-  ReadResourceResultSchema,
-  CallToolResultSchema,
-  ListToolsResultSchema,
-  GetTaskResultSchema,
-  ListTasksResultSchema,
-  CreateTaskResultSchema
-]);
-
-class McpError extends Error {
-  constructor(code, message, data) {
-    super(`MCP error ${code}: ${message}`);
-    this.code = code;
-    this.data = data;
-    this.name = "McpError";
-  }
-  static fromError(code, message, data) {
-    if (code === ErrorCode.UrlElicitationRequired && data) {
-      const errorData = data;
-      if (errorData.elicitations) {
-        return new UrlElicitationRequiredError(errorData.elicitations, message);
-      }
-    }
-    return new McpError(code, message, data);
-  }
-}
-
-class UrlElicitationRequiredError extends McpError {
-  constructor(elicitations, message = `URL elicitation${elicitations.length > 1 ? "s" : ""} required`) {
-    super(ErrorCode.UrlElicitationRequired, message, {
-      elicitations
-    });
-  }
-  get elicitations() {
-    return this.data?.elicitations ?? [];
-  }
-}
-
-// node_modules/@modelcontextprotocol/sdk/dist/esm/experimental/tasks/interfaces.js
-function isTerminal(status) {
-  return status === "completed" || status === "failed" || status === "cancelled";
-}
-
-// node_modules/zod-to-json-schema/dist/esm/Options.js
-var ignoreOverride = Symbol("Let zodToJsonSchema decide on which parser to use");
-// node_modules/zod-to-json-schema/dist/esm/parsers/string.js
-var ALPHA_NUMERIC = new Set("ABCDEFGHIJKLMNOPQRSTUVXYZabcdefghijklmnopqrstuvxyz0123456789");
-// node_modules/@modelcontextprotocol/sdk/dist/esm/server/zod-json-schema-compat.js
-function getMethodLiteral(schema) {
-  const shape = getObjectShape(schema);
-  const methodSchema = shape?.method;
-  if (!methodSchema) {
-    throw new Error("Schema is missing a method literal");
-  }
-  const value = getLiteralValue(methodSchema);
-  if (typeof value !== "string") {
-    throw new Error("Schema method literal must be a string");
-  }
-  return value;
-}
-function parseWithCompat(schema, data) {
-  const result = safeParse2(schema, data);
-  if (!result.success) {
-    throw result.error;
-  }
-  return result.data;
-}
-
-// node_modules/@modelcontextprotocol/sdk/dist/esm/shared/protocol.js
-var DEFAULT_REQUEST_TIMEOUT_MSEC = 60000;
-
-class Protocol {
-  constructor(_options) {
-    this._options = _options;
-    this._requestMessageId = 0;
-    this._requestHandlers = new Map;
-    this._requestHandlerAbortControllers = new Map;
-    this._notificationHandlers = new Map;
-    this._responseHandlers = new Map;
-    this._progressHandlers = new Map;
-    this._timeoutInfo = new Map;
-    this._pendingDebouncedNotifications = new Set;
-    this._taskProgressTokens = new Map;
-    this._requestResolvers = new Map;
-    this.setNotificationHandler(CancelledNotificationSchema, (notification) => {
-      this._oncancel(notification);
-    });
-    this.setNotificationHandler(ProgressNotificationSchema, (notification) => {
-      this._onprogress(notification);
-    });
-    this.setRequestHandler(PingRequestSchema, (_request) => ({}));
-    this._taskStore = _options?.taskStore;
-    this._taskMessageQueue = _options?.taskMessageQueue;
-    if (this._taskStore) {
-      this.setRequestHandler(GetTaskRequestSchema, async (request, extra) => {
-        const task = await this._taskStore.getTask(request.params.taskId, extra.sessionId);
-        if (!task) {
-          throw new McpError(ErrorCode.InvalidParams, "Failed to retrieve task: Task not found");
-        }
-        return {
-          ...task
-        };
-      });
-      this.setRequestHandler(GetTaskPayloadRequestSchema, async (request, extra) => {
-        const handleTaskResult = async () => {
-          const taskId = request.params.taskId;
-          if (this._taskMessageQueue) {
-            let queuedMessage;
-            while (queuedMessage = await this._taskMessageQueue.dequeue(taskId, extra.sessionId)) {
-              if (queuedMessage.type === "response" || queuedMessage.type === "error") {
-                const message = queuedMessage.message;
-                const requestId = message.id;
-                const resolver = this._requestResolvers.get(requestId);
-                if (resolver) {
-                  this._requestResolvers.delete(requestId);
-                  if (queuedMessage.type === "response") {
-                    resolver(message);
-                  } else {
-                    const errorMessage = message;
-                    const error = new McpError(errorMessage.error.code, errorMessage.error.message, errorMessage.error.data);
-                    resolver(error);
-                  }
-                } else {
-                  const messageType = queuedMessage.type === "response" ? "Response" : "Error";
-                  this._onerror(new Error(`${messageType} handler missing for request ${requestId}`));
-                }
-                continue;
-              }
-              await this._transport?.send(queuedMessage.message, { relatedRequestId: extra.requestId });
-            }
-          }
-          const task = await this._taskStore.getTask(taskId, extra.sessionId);
-          if (!task) {
-            throw new McpError(ErrorCode.InvalidParams, `Task not found: ${taskId}`);
-          }
-          if (!isTerminal(task.status)) {
-            await this._waitForTaskUpdate(taskId, extra.signal);
-            return await handleTaskResult();
-          }
-          if (isTerminal(task.status)) {
-            const result = await this._taskStore.getTaskResult(taskId, extra.sessionId);
-            this._clearTaskQueue(taskId);
-            return {
-              ...result,
-              _meta: {
-                ...result._meta,
-                [RELATED_TASK_META_KEY]: {
-                  taskId
-                }
-              }
-            };
-          }
-          return await handleTaskResult();
-        };
-        return await handleTaskResult();
-      });
-      this.setRequestHandler(ListTasksRequestSchema, async (request, extra) => {
-        try {
-          const { tasks, nextCursor } = await this._taskStore.listTasks(request.params?.cursor, extra.sessionId);
-          return {
-            tasks,
-            nextCursor,
-            _meta: {}
-          };
-        } catch (error) {
-          throw new McpError(ErrorCode.InvalidParams, `Failed to list tasks: ${error instanceof Error ? error.message : String(error)}`);
-        }
-      });
-      this.setRequestHandler(CancelTaskRequestSchema, async (request, extra) => {
-        try {
-          const task = await this._taskStore.getTask(request.params.taskId, extra.sessionId);
-          if (!task) {
-            throw new McpError(ErrorCode.InvalidParams, `Task not found: ${request.params.taskId}`);
-          }
-          if (isTerminal(task.status)) {
-            throw new McpError(ErrorCode.InvalidParams, `Cannot cancel task in terminal status: ${task.status}`);
-          }
-          await this._taskStore.updateTaskStatus(request.params.taskId, "cancelled", "Client cancelled task execution.", extra.sessionId);
-          this._clearTaskQueue(request.params.taskId);
-          const cancelledTask = await this._taskStore.getTask(request.params.taskId, extra.sessionId);
-          if (!cancelledTask) {
-            throw new McpError(ErrorCode.InvalidParams, `Task not found after cancellation: ${request.params.taskId}`);
-          }
-          return {
-            _meta: {},
-            ...cancelledTask
-          };
-        } catch (error) {
-          if (error instanceof McpError) {
-            throw error;
-          }
-          throw new McpError(ErrorCode.InvalidRequest, `Failed to cancel task: ${error instanceof Error ? error.message : String(error)}`);
-        }
-      });
-    }
-  }
-  async _oncancel(notification) {
-    if (!notification.params.requestId) {
-      return;
-    }
-    const controller = this._requestHandlerAbortControllers.get(notification.params.requestId);
-    controller?.abort(notification.params.reason);
-  }
-  _setupTimeout(messageId, timeout, maxTotalTimeout, onTimeout, resetTimeoutOnProgress = false) {
-    this._timeoutInfo.set(messageId, {
-      timeoutId: setTimeout(onTimeout, timeout),
-      startTime: Date.now(),
-      timeout,
-      maxTotalTimeout,
-      resetTimeoutOnProgress,
-      onTimeout
-    });
-  }
-  _resetTimeout(messageId) {
-    const info = this._timeoutInfo.get(messageId);
-    if (!info)
-      return false;
-    const totalElapsed = Date.now() - info.startTime;
-    if (info.maxTotalTimeout && totalElapsed >= info.maxTotalTimeout) {
-      this._timeoutInfo.delete(messageId);
-      throw McpError.fromError(ErrorCode.RequestTimeout, "Maximum total timeout exceeded", {
-        maxTotalTimeout: info.maxTotalTimeout,
-        totalElapsed
-      });
-    }
-    clearTimeout(info.timeoutId);
-    info.timeoutId = setTimeout(info.onTimeout, info.timeout);
-    return true;
-  }
-  _cleanupTimeout(messageId) {
-    const info = this._timeoutInfo.get(messageId);
-    if (info) {
-      clearTimeout(info.timeoutId);
-      this._timeoutInfo.delete(messageId);
-    }
-  }
-  async connect(transport) {
-    if (this._transport) {
-      throw new Error("Already connected to a transport. Call close() before connecting to a new transport, or use a separate Protocol instance per connection.");
-    }
-    this._transport = transport;
-    const _onclose = this.transport?.onclose;
-    this._transport.onclose = () => {
-      _onclose?.();
-      this._onclose();
-    };
-    const _onerror = this.transport?.onerror;
-    this._transport.onerror = (error) => {
-      _onerror?.(error);
-      this._onerror(error);
-    };
-    const _onmessage = this._transport?.onmessage;
-    this._transport.onmessage = (message, extra) => {
-      _onmessage?.(message, extra);
-      if (isJSONRPCResultResponse(message) || isJSONRPCErrorResponse(message)) {
-        this._onresponse(message);
-      } else if (isJSONRPCRequest(message)) {
-        this._onrequest(message, extra);
-      } else if (isJSONRPCNotification(message)) {
-        this._onnotification(message);
-      } else {
-        this._onerror(new Error(`Unknown message type: ${JSON.stringify(message)}`));
-      }
-    };
-    await this._transport.start();
-  }
-  _onclose() {
-    const responseHandlers = this._responseHandlers;
-    this._responseHandlers = new Map;
-    this._progressHandlers.clear();
-    this._taskProgressTokens.clear();
-    this._pendingDebouncedNotifications.clear();
-    for (const info of this._timeoutInfo.values()) {
-      clearTimeout(info.timeoutId);
-    }
-    this._timeoutInfo.clear();
-    for (const controller of this._requestHandlerAbortControllers.values()) {
-      controller.abort();
-    }
-    this._requestHandlerAbortControllers.clear();
-    const error = McpError.fromError(ErrorCode.ConnectionClosed, "Connection closed");
-    this._transport = undefined;
-    this.onclose?.();
-    for (const handler of responseHandlers.values()) {
-      handler(error);
-    }
-  }
-  _onerror(error) {
-    this.onerror?.(error);
-  }
-  _onnotification(notification) {
-    const handler = this._notificationHandlers.get(notification.method) ?? this.fallbackNotificationHandler;
-    if (handler === undefined) {
-      return;
-    }
-    Promise.resolve().then(() => handler(notification)).catch((error) => this._onerror(new Error(`Uncaught error in notification handler: ${error}`)));
-  }
-  _onrequest(request, extra) {
-    const handler = this._requestHandlers.get(request.method) ?? this.fallbackRequestHandler;
-    const capturedTransport = this._transport;
-    const relatedTaskId = request.params?._meta?.[RELATED_TASK_META_KEY]?.taskId;
-    if (handler === undefined) {
-      const errorResponse = {
-        jsonrpc: "2.0",
-        id: request.id,
-        error: {
-          code: ErrorCode.MethodNotFound,
-          message: "Method not found"
-        }
-      };
-      if (relatedTaskId && this._taskMessageQueue) {
-        this._enqueueTaskMessage(relatedTaskId, {
-          type: "error",
-          message: errorResponse,
-          timestamp: Date.now()
-        }, capturedTransport?.sessionId).catch((error) => this._onerror(new Error(`Failed to enqueue error response: ${error}`)));
-      } else {
-        capturedTransport?.send(errorResponse).catch((error) => this._onerror(new Error(`Failed to send an error response: ${error}`)));
-      }
-      return;
-    }
-    const abortController = new AbortController;
-    this._requestHandlerAbortControllers.set(request.id, abortController);
-    const taskCreationParams = isTaskAugmentedRequestParams(request.params) ? request.params.task : undefined;
-    const taskStore = this._taskStore ? this.requestTaskStore(request, capturedTransport?.sessionId) : undefined;
-    const fullExtra = {
-      signal: abortController.signal,
-      sessionId: capturedTransport?.sessionId,
-      _meta: request.params?._meta,
-      sendNotification: async (notification) => {
-        if (abortController.signal.aborted)
-          return;
-        const notificationOptions = { relatedRequestId: request.id };
-        if (relatedTaskId) {
-          notificationOptions.relatedTask = { taskId: relatedTaskId };
-        }
-        await this.notification(notification, notificationOptions);
-      },
-      sendRequest: async (r, resultSchema, options) => {
-        if (abortController.signal.aborted) {
-          throw new McpError(ErrorCode.ConnectionClosed, "Request was cancelled");
-        }
-        const requestOptions = { ...options, relatedRequestId: request.id };
-        if (relatedTaskId && !requestOptions.relatedTask) {
-          requestOptions.relatedTask = { taskId: relatedTaskId };
-        }
-        const effectiveTaskId = requestOptions.relatedTask?.taskId ?? relatedTaskId;
-        if (effectiveTaskId && taskStore) {
-          await taskStore.updateTaskStatus(effectiveTaskId, "input_required");
-        }
-        return await this.request(r, resultSchema, requestOptions);
-      },
-      authInfo: extra?.authInfo,
-      requestId: request.id,
-      requestInfo: extra?.requestInfo,
-      taskId: relatedTaskId,
-      taskStore,
-      taskRequestedTtl: taskCreationParams?.ttl,
-      closeSSEStream: extra?.closeSSEStream,
-      closeStandaloneSSEStream: extra?.closeStandaloneSSEStream
-    };
-    Promise.resolve().then(() => {
-      if (taskCreationParams) {
-        this.assertTaskHandlerCapability(request.method);
-      }
-    }).then(() => handler(request, fullExtra)).then(async (result) => {
-      if (abortController.signal.aborted) {
-        return;
-      }
-      const response = {
-        result,
-        jsonrpc: "2.0",
-        id: request.id
-      };
-      if (relatedTaskId && this._taskMessageQueue) {
-        await this._enqueueTaskMessage(relatedTaskId, {
-          type: "response",
-          message: response,
-          timestamp: Date.now()
-        }, capturedTransport?.sessionId);
-      } else {
-        await capturedTransport?.send(response);
-      }
-    }, async (error) => {
-      if (abortController.signal.aborted) {
-        return;
-      }
-      const errorResponse = {
-        jsonrpc: "2.0",
-        id: request.id,
-        error: {
-          code: Number.isSafeInteger(error["code"]) ? error["code"] : ErrorCode.InternalError,
-          message: error.message ?? "Internal error",
-          ...error["data"] !== undefined && { data: error["data"] }
-        }
-      };
-      if (relatedTaskId && this._taskMessageQueue) {
-        await this._enqueueTaskMessage(relatedTaskId, {
-          type: "error",
-          message: errorResponse,
-          timestamp: Date.now()
-        }, capturedTransport?.sessionId);
-      } else {
-        await capturedTransport?.send(errorResponse);
-      }
-    }).catch((error) => this._onerror(new Error(`Failed to send response: ${error}`))).finally(() => {
-      if (this._requestHandlerAbortControllers.get(request.id) === abortController) {
-        this._requestHandlerAbortControllers.delete(request.id);
-      }
-    });
-  }
-  _onprogress(notification) {
-    const { progressToken, ...params } = notification.params;
-    const messageId = Number(progressToken);
-    const handler = this._progressHandlers.get(messageId);
-    if (!handler) {
-      this._onerror(new Error(`Received a progress notification for an unknown token: ${JSON.stringify(notification)}`));
-      return;
-    }
-    const responseHandler = this._responseHandlers.get(messageId);
-    const timeoutInfo = this._timeoutInfo.get(messageId);
-    if (timeoutInfo && responseHandler && timeoutInfo.resetTimeoutOnProgress) {
-      try {
-        this._resetTimeout(messageId);
-      } catch (error) {
-        this._responseHandlers.delete(messageId);
-        this._progressHandlers.delete(messageId);
-        this._cleanupTimeout(messageId);
-        responseHandler(error);
-        return;
-      }
-    }
-    handler(params);
-  }
-  _onresponse(response) {
-    const messageId = Number(response.id);
-    const resolver = this._requestResolvers.get(messageId);
-    if (resolver) {
-      this._requestResolvers.delete(messageId);
-      if (isJSONRPCResultResponse(response)) {
-        resolver(response);
-      } else {
-        const error = new McpError(response.error.code, response.error.message, response.error.data);
-        resolver(error);
-      }
-      return;
-    }
-    const handler = this._responseHandlers.get(messageId);
-    if (handler === undefined) {
-      this._onerror(new Error(`Received a response for an unknown message ID: ${JSON.stringify(response)}`));
-      return;
-    }
-    this._responseHandlers.delete(messageId);
-    this._cleanupTimeout(messageId);
-    let isTaskResponse = false;
-    if (isJSONRPCResultResponse(response) && response.result && typeof response.result === "object") {
-      const result = response.result;
-      if (result.task && typeof result.task === "object") {
-        const task = result.task;
-        if (typeof task.taskId === "string") {
-          isTaskResponse = true;
-          this._taskProgressTokens.set(task.taskId, messageId);
-        }
-      }
-    }
-    if (!isTaskResponse) {
-      this._progressHandlers.delete(messageId);
-    }
-    if (isJSONRPCResultResponse(response)) {
-      handler(response);
-    } else {
-      const error = McpError.fromError(response.error.code, response.error.message, response.error.data);
-      handler(error);
-    }
-  }
-  get transport() {
-    return this._transport;
-  }
-  async close() {
-    await this._transport?.close();
-  }
-  async* requestStream(request, resultSchema, options) {
-    const { task } = options ?? {};
-    if (!task) {
-      try {
-        const result = await this.request(request, resultSchema, options);
-        yield { type: "result", result };
-      } catch (error) {
-        yield {
-          type: "error",
-          error: error instanceof McpError ? error : new McpError(ErrorCode.InternalError, String(error))
-        };
-      }
-      return;
-    }
-    let taskId;
-    try {
-      const createResult = await this.request(request, CreateTaskResultSchema, options);
-      if (createResult.task) {
-        taskId = createResult.task.taskId;
-        yield { type: "taskCreated", task: createResult.task };
-      } else {
-        throw new McpError(ErrorCode.InternalError, "Task creation did not return a task");
-      }
-      while (true) {
-        const task = await this.getTask({ taskId }, options);
-        yield { type: "taskStatus", task };
-        if (isTerminal(task.status)) {
-          if (task.status === "completed") {
-            const result = await this.getTaskResult({ taskId }, resultSchema, options);
-            yield { type: "result", result };
-          } else if (task.status === "failed") {
-            yield {
-              type: "error",
-              error: new McpError(ErrorCode.InternalError, `Task ${taskId} failed`)
-            };
-          } else if (task.status === "cancelled") {
-            yield {
-              type: "error",
-              error: new McpError(ErrorCode.InternalError, `Task ${taskId} was cancelled`)
-            };
-          }
-          return;
-        }
-        if (task.status === "input_required") {
-          const result = await this.getTaskResult({ taskId }, resultSchema, options);
-          yield { type: "result", result };
-          return;
-        }
-        const pollInterval = task.pollInterval ?? this._options?.defaultTaskPollInterval ?? 1000;
-        await new Promise((resolve) => setTimeout(resolve, pollInterval));
-        options?.signal?.throwIfAborted();
-      }
-    } catch (error) {
-      yield {
-        type: "error",
-        error: error instanceof McpError ? error : new McpError(ErrorCode.InternalError, String(error))
-      };
-    }
-  }
-  request(request, resultSchema, options) {
-    const { relatedRequestId, resumptionToken, onresumptiontoken, task, relatedTask } = options ?? {};
-    return new Promise((resolve, reject) => {
-      const earlyReject = (error) => {
-        reject(error);
-      };
-      if (!this._transport) {
-        earlyReject(new Error("Not connected"));
-        return;
-      }
-      if (this._options?.enforceStrictCapabilities === true) {
-        try {
-          this.assertCapabilityForMethod(request.method);
-          if (task) {
-            this.assertTaskCapability(request.method);
-          }
-        } catch (e) {
-          earlyReject(e);
-          return;
-        }
-      }
-      options?.signal?.throwIfAborted();
-      const messageId = this._requestMessageId++;
-      const jsonrpcRequest = {
-        ...request,
-        jsonrpc: "2.0",
-        id: messageId
-      };
-      if (options?.onprogress) {
-        this._progressHandlers.set(messageId, options.onprogress);
-        jsonrpcRequest.params = {
-          ...request.params,
-          _meta: {
-            ...request.params?._meta || {},
-            progressToken: messageId
-          }
-        };
-      }
-      if (task) {
-        jsonrpcRequest.params = {
-          ...jsonrpcRequest.params,
-          task
-        };
-      }
-      if (relatedTask) {
-        jsonrpcRequest.params = {
-          ...jsonrpcRequest.params,
-          _meta: {
-            ...jsonrpcRequest.params?._meta || {},
-            [RELATED_TASK_META_KEY]: relatedTask
-          }
-        };
-      }
-      const cancel = (reason) => {
-        this._responseHandlers.delete(messageId);
-        this._progressHandlers.delete(messageId);
-        this._cleanupTimeout(messageId);
-        this._transport?.send({
-          jsonrpc: "2.0",
-          method: "notifications/cancelled",
-          params: {
-            requestId: messageId,
-            reason: String(reason)
-          }
-        }, { relatedRequestId, resumptionToken, onresumptiontoken }).catch((error) => this._onerror(new Error(`Failed to send cancellation: ${error}`)));
-        const error = reason instanceof McpError ? reason : new McpError(ErrorCode.RequestTimeout, String(reason));
-        reject(error);
-      };
-      this._responseHandlers.set(messageId, (response) => {
-        if (options?.signal?.aborted) {
-          return;
-        }
-        if (response instanceof Error) {
-          return reject(response);
-        }
-        try {
-          const parseResult = safeParse2(resultSchema, response.result);
-          if (!parseResult.success) {
-            reject(parseResult.error);
-          } else {
-            resolve(parseResult.data);
-          }
-        } catch (error) {
-          reject(error);
-        }
-      });
-      options?.signal?.addEventListener("abort", () => {
-        cancel(options?.signal?.reason);
-      });
-      const timeout = options?.timeout ?? DEFAULT_REQUEST_TIMEOUT_MSEC;
-      const timeoutHandler = () => cancel(McpError.fromError(ErrorCode.RequestTimeout, "Request timed out", { timeout }));
-      this._setupTimeout(messageId, timeout, options?.maxTotalTimeout, timeoutHandler, options?.resetTimeoutOnProgress ?? false);
-      const relatedTaskId = relatedTask?.taskId;
-      if (relatedTaskId) {
-        const responseResolver = (response) => {
-          const handler = this._responseHandlers.get(messageId);
-          if (handler) {
-            handler(response);
-          } else {
-            this._onerror(new Error(`Response handler missing for side-channeled request ${messageId}`));
-          }
-        };
-        this._requestResolvers.set(messageId, responseResolver);
-        this._enqueueTaskMessage(relatedTaskId, {
-          type: "request",
-          message: jsonrpcRequest,
-          timestamp: Date.now()
-        }).catch((error) => {
-          this._cleanupTimeout(messageId);
-          reject(error);
-        });
-      } else {
-        this._transport.send(jsonrpcRequest, { relatedRequestId, resumptionToken, onresumptiontoken }).catch((error) => {
-          this._cleanupTimeout(messageId);
-          reject(error);
-        });
-      }
-    });
-  }
-  async getTask(params, options) {
-    return this.request({ method: "tasks/get", params }, GetTaskResultSchema, options);
-  }
-  async getTaskResult(params, resultSchema, options) {
-    return this.request({ method: "tasks/result", params }, resultSchema, options);
-  }
-  async listTasks(params, options) {
-    return this.request({ method: "tasks/list", params }, ListTasksResultSchema, options);
-  }
-  async cancelTask(params, options) {
-    return this.request({ method: "tasks/cancel", params }, CancelTaskResultSchema, options);
-  }
-  async notification(notification, options) {
-    if (!this._transport) {
-      throw new Error("Not connected");
-    }
-    this.assertNotificationCapability(notification.method);
-    const relatedTaskId = options?.relatedTask?.taskId;
-    if (relatedTaskId) {
-      const jsonrpcNotification = {
-        ...notification,
-        jsonrpc: "2.0",
-        params: {
-          ...notification.params,
-          _meta: {
-            ...notification.params?._meta || {},
-            [RELATED_TASK_META_KEY]: options.relatedTask
-          }
-        }
-      };
-      await this._enqueueTaskMessage(relatedTaskId, {
-        type: "notification",
-        message: jsonrpcNotification,
-        timestamp: Date.now()
-      });
-      return;
-    }
-    const debouncedMethods = this._options?.debouncedNotificationMethods ?? [];
-    const canDebounce = debouncedMethods.includes(notification.method) && !notification.params && !options?.relatedRequestId && !options?.relatedTask;
-    if (canDebounce) {
-      if (this._pendingDebouncedNotifications.has(notification.method)) {
-        return;
-      }
-      this._pendingDebouncedNotifications.add(notification.method);
-      Promise.resolve().then(() => {
-        this._pendingDebouncedNotifications.delete(notification.method);
-        if (!this._transport) {
-          return;
-        }
-        let jsonrpcNotification = {
-          ...notification,
-          jsonrpc: "2.0"
-        };
-        if (options?.relatedTask) {
-          jsonrpcNotification = {
-            ...jsonrpcNotification,
-            params: {
-              ...jsonrpcNotification.params,
-              _meta: {
-                ...jsonrpcNotification.params?._meta || {},
-                [RELATED_TASK_META_KEY]: options.relatedTask
-              }
-            }
-          };
-        }
-        this._transport?.send(jsonrpcNotification, options).catch((error) => this._onerror(error));
-      });
-      return;
-    }
-    let jsonrpcNotification = {
-      ...notification,
-      jsonrpc: "2.0"
-    };
-    if (options?.relatedTask) {
-      jsonrpcNotification = {
-        ...jsonrpcNotification,
-        params: {
-          ...jsonrpcNotification.params,
-          _meta: {
-            ...jsonrpcNotification.params?._meta || {},
-            [RELATED_TASK_META_KEY]: options.relatedTask
-          }
-        }
-      };
-    }
-    await this._transport.send(jsonrpcNotification, options);
-  }
-  setRequestHandler(requestSchema, handler) {
-    const method = getMethodLiteral(requestSchema);
-    this.assertRequestHandlerCapability(method);
-    this._requestHandlers.set(method, (request, extra) => {
-      const parsed = parseWithCompat(requestSchema, request);
-      return Promise.resolve(handler(parsed, extra));
-    });
-  }
-  removeRequestHandler(method) {
-    this._requestHandlers.delete(method);
-  }
-  assertCanSetRequestHandler(method) {
-    if (this._requestHandlers.has(method)) {
-      throw new Error(`A request handler for ${method} already exists, which would be overridden`);
-    }
-  }
-  setNotificationHandler(notificationSchema, handler) {
-    const method = getMethodLiteral(notificationSchema);
-    this._notificationHandlers.set(method, (notification) => {
-      const parsed = parseWithCompat(notificationSchema, notification);
-      return Promise.resolve(handler(parsed));
-    });
-  }
-  removeNotificationHandler(method) {
-    this._notificationHandlers.delete(method);
-  }
-  _cleanupTaskProgressHandler(taskId) {
-    const progressToken = this._taskProgressTokens.get(taskId);
-    if (progressToken !== undefined) {
-      this._progressHandlers.delete(progressToken);
-      this._taskProgressTokens.delete(taskId);
-    }
-  }
-  async _enqueueTaskMessage(taskId, message, sessionId) {
-    if (!this._taskStore || !this._taskMessageQueue) {
-      throw new Error("Cannot enqueue task message: taskStore and taskMessageQueue are not configured");
-    }
-    const maxQueueSize = this._options?.maxTaskQueueSize;
-    await this._taskMessageQueue.enqueue(taskId, message, sessionId, maxQueueSize);
-  }
-  async _clearTaskQueue(taskId, sessionId) {
-    if (this._taskMessageQueue) {
-      const messages = await this._taskMessageQueue.dequeueAll(taskId, sessionId);
-      for (const message of messages) {
-        if (message.type === "request" && isJSONRPCRequest(message.message)) {
-          const requestId = message.message.id;
-          const resolver = this._requestResolvers.get(requestId);
-          if (resolver) {
-            resolver(new McpError(ErrorCode.InternalError, "Task cancelled or completed"));
-            this._requestResolvers.delete(requestId);
-          } else {
-            this._onerror(new Error(`Resolver missing for request ${requestId} during task ${taskId} cleanup`));
-          }
-        }
-      }
-    }
-  }
-  async _waitForTaskUpdate(taskId, signal) {
-    let interval = this._options?.defaultTaskPollInterval ?? 1000;
-    try {
-      const task = await this._taskStore?.getTask(taskId);
-      if (task?.pollInterval) {
-        interval = task.pollInterval;
-      }
-    } catch {}
-    return new Promise((resolve, reject) => {
-      if (signal.aborted) {
-        reject(new McpError(ErrorCode.InvalidRequest, "Request cancelled"));
-        return;
-      }
-      const timeoutId = setTimeout(resolve, interval);
-      signal.addEventListener("abort", () => {
-        clearTimeout(timeoutId);
-        reject(new McpError(ErrorCode.InvalidRequest, "Request cancelled"));
-      }, { once: true });
-    });
-  }
-  requestTaskStore(request, sessionId) {
-    const taskStore = this._taskStore;
-    if (!taskStore) {
-      throw new Error("No task store configured");
-    }
-    return {
-      createTask: async (taskParams) => {
-        if (!request) {
-          throw new Error("No request provided");
-        }
-        return await taskStore.createTask(taskParams, request.id, {
-          method: request.method,
-          params: request.params
-        }, sessionId);
-      },
-      getTask: async (taskId) => {
-        const task = await taskStore.getTask(taskId, sessionId);
-        if (!task) {
-          throw new McpError(ErrorCode.InvalidParams, "Failed to retrieve task: Task not found");
-        }
-        return task;
-      },
-      storeTaskResult: async (taskId, status, result) => {
-        await taskStore.storeTaskResult(taskId, status, result, sessionId);
-        const task = await taskStore.getTask(taskId, sessionId);
-        if (task) {
-          const notification = TaskStatusNotificationSchema.parse({
-            method: "notifications/tasks/status",
-            params: task
-          });
-          await this.notification(notification);
-          if (isTerminal(task.status)) {
-            this._cleanupTaskProgressHandler(taskId);
-          }
-        }
-      },
-      getTaskResult: (taskId) => {
-        return taskStore.getTaskResult(taskId, sessionId);
-      },
-      updateTaskStatus: async (taskId, status, statusMessage) => {
-        const task = await taskStore.getTask(taskId, sessionId);
-        if (!task) {
-          throw new McpError(ErrorCode.InvalidParams, `Task "${taskId}" not found - it may have been cleaned up`);
-        }
-        if (isTerminal(task.status)) {
-          throw new McpError(ErrorCode.InvalidParams, `Cannot update task "${taskId}" from terminal status "${task.status}" to "${status}". Terminal states (completed, failed, cancelled) cannot transition to other states.`);
-        }
-        await taskStore.updateTaskStatus(taskId, status, statusMessage, sessionId);
-        const updatedTask = await taskStore.getTask(taskId, sessionId);
-        if (updatedTask) {
-          const notification = TaskStatusNotificationSchema.parse({
-            method: "notifications/tasks/status",
-            params: updatedTask
-          });
-          await this.notification(notification);
-          if (isTerminal(updatedTask.status)) {
-            this._cleanupTaskProgressHandler(taskId);
-          }
-        }
-      },
-      listTasks: (cursor) => {
-        return taskStore.listTasks(cursor, sessionId);
-      }
-    };
-  }
-}
-function isPlainObject2(value) {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
-}
-function mergeCapabilities(base, additional) {
-  const result = { ...base };
-  for (const key in additional) {
-    const k = key;
-    const addValue = additional[k];
-    if (addValue === undefined)
-      continue;
-    const baseValue = result[k];
-    if (isPlainObject2(baseValue) && isPlainObject2(addValue)) {
-      result[k] = { ...baseValue, ...addValue };
-    } else {
-      result[k] = addValue;
-    }
-  }
-  return result;
-}
-
-// node_modules/@modelcontextprotocol/sdk/dist/esm/validation/ajv-provider.js
-var import_ajv = __toESM(require_ajv(), 1);
-var import_ajv_formats = __toESM(require_dist2(), 1);
-function createDefaultAjvInstance() {
-  const ajv = new import_ajv.default({
-    strict: false,
-    validateFormats: true,
-    validateSchema: false,
-    allErrors: true
-  });
-  const addFormats = import_ajv_formats.default;
-  addFormats(ajv);
-  return ajv;
-}
-
-class AjvJsonSchemaValidator {
-  constructor(ajv) {
-    this._ajv = ajv ?? createDefaultAjvInstance();
-  }
-  getValidator(schema) {
-    const ajvValidator = "$id" in schema && typeof schema.$id === "string" ? this._ajv.getSchema(schema.$id) ?? this._ajv.compile(schema) : this._ajv.compile(schema);
-    return (input) => {
-      const valid = ajvValidator(input);
-      if (valid) {
-        return {
-          valid: true,
-          data: input,
-          errorMessage: undefined
-        };
-      } else {
-        return {
-          valid: false,
-          data: undefined,
-          errorMessage: this._ajv.errorsText(ajvValidator.errors)
-        };
-      }
-    };
-  }
-}
-
-// node_modules/@modelcontextprotocol/sdk/dist/esm/experimental/tasks/client.js
-class ExperimentalClientTasks {
-  constructor(_client) {
-    this._client = _client;
-  }
-  async* callToolStream(params, resultSchema = CallToolResultSchema, options) {
-    const clientInternal = this._client;
-    const optionsWithTask = {
-      ...options,
-      task: options?.task ?? (clientInternal.isToolTask(params.name) ? {} : undefined)
-    };
-    const stream = clientInternal.requestStream({ method: "tools/call", params }, resultSchema, optionsWithTask);
-    const validator = clientInternal.getToolOutputValidator(params.name);
-    for await (const message of stream) {
-      if (message.type === "result" && validator) {
-        const result = message.result;
-        if (!result.structuredContent && !result.isError) {
-          yield {
-            type: "error",
-            error: new McpError(ErrorCode.InvalidRequest, `Tool ${params.name} has an output schema but did not return structured content`)
-          };
-          return;
-        }
-        if (result.structuredContent) {
-          try {
-            const validationResult = validator(result.structuredContent);
-            if (!validationResult.valid) {
-              yield {
-                type: "error",
-                error: new McpError(ErrorCode.InvalidParams, `Structured content does not match the tool's output schema: ${validationResult.errorMessage}`)
-              };
-              return;
-            }
-          } catch (error) {
-            if (error instanceof McpError) {
-              yield { type: "error", error };
-              return;
-            }
-            yield {
-              type: "error",
-              error: new McpError(ErrorCode.InvalidParams, `Failed to validate structured content: ${error instanceof Error ? error.message : String(error)}`)
-            };
-            return;
-          }
-        }
-      }
-      yield message;
-    }
-  }
-  async getTask(taskId, options) {
-    return this._client.getTask({ taskId }, options);
-  }
-  async getTaskResult(taskId, resultSchema, options) {
-    return this._client.getTaskResult({ taskId }, resultSchema, options);
-  }
-  async listTasks(cursor, options) {
-    return this._client.listTasks(cursor ? { cursor } : undefined, options);
-  }
-  async cancelTask(taskId, options) {
-    return this._client.cancelTask({ taskId }, options);
-  }
-  requestStream(request, resultSchema, options) {
-    return this._client.requestStream(request, resultSchema, options);
-  }
-}
-
-// node_modules/@modelcontextprotocol/sdk/dist/esm/experimental/tasks/helpers.js
-function assertToolsCallTaskCapability(requests, method, entityName) {
-  if (!requests) {
-    throw new Error(`${entityName} does not support task creation (required for ${method})`);
-  }
-  switch (method) {
-    case "tools/call":
-      if (!requests.tools?.call) {
-        throw new Error(`${entityName} does not support task creation for tools/call (required for ${method})`);
-      }
-      break;
-    default:
-      break;
-  }
-}
-function assertClientRequestTaskCapability(requests, method, entityName) {
-  if (!requests) {
-    throw new Error(`${entityName} does not support task creation (required for ${method})`);
-  }
-  switch (method) {
-    case "sampling/createMessage":
-      if (!requests.sampling?.createMessage) {
-        throw new Error(`${entityName} does not support task creation for sampling/createMessage (required for ${method})`);
-      }
-      break;
-    case "elicitation/create":
-      if (!requests.elicitation?.create) {
-        throw new Error(`${entityName} does not support task creation for elicitation/create (required for ${method})`);
-      }
-      break;
-    default:
-      break;
-  }
-}
-
-// node_modules/@modelcontextprotocol/sdk/dist/esm/client/index.js
-function applyElicitationDefaults(schema, data) {
-  if (!schema || data === null || typeof data !== "object")
-    return;
-  if (schema.type === "object" && schema.properties && typeof schema.properties === "object") {
-    const obj = data;
-    const props = schema.properties;
-    for (const key of Object.keys(props)) {
-      const propSchema = props[key];
-      if (obj[key] === undefined && Object.prototype.hasOwnProperty.call(propSchema, "default")) {
-        obj[key] = propSchema.default;
-      }
-      if (obj[key] !== undefined) {
-        applyElicitationDefaults(propSchema, obj[key]);
-      }
-    }
-  }
-  if (Array.isArray(schema.anyOf)) {
-    for (const sub of schema.anyOf) {
-      if (typeof sub !== "boolean") {
-        applyElicitationDefaults(sub, data);
-      }
-    }
-  }
-  if (Array.isArray(schema.oneOf)) {
-    for (const sub of schema.oneOf) {
-      if (typeof sub !== "boolean") {
-        applyElicitationDefaults(sub, data);
-      }
-    }
-  }
-}
-function getSupportedElicitationModes(capabilities) {
-  if (!capabilities) {
-    return { supportsFormMode: false, supportsUrlMode: false };
-  }
-  const hasFormCapability = capabilities.form !== undefined;
-  const hasUrlCapability = capabilities.url !== undefined;
-  const supportsFormMode = hasFormCapability || !hasFormCapability && !hasUrlCapability;
-  const supportsUrlMode = hasUrlCapability;
-  return { supportsFormMode, supportsUrlMode };
-}
-
-class Client extends Protocol {
-  constructor(_clientInfo, options) {
-    super(options);
-    this._clientInfo = _clientInfo;
-    this._cachedToolOutputValidators = new Map;
-    this._cachedKnownTaskTools = new Set;
-    this._cachedRequiredTaskTools = new Set;
-    this._listChangedDebounceTimers = new Map;
-    this._capabilities = options?.capabilities ?? {};
-    this._jsonSchemaValidator = options?.jsonSchemaValidator ?? new AjvJsonSchemaValidator;
-    if (options?.listChanged) {
-      this._pendingListChangedConfig = options.listChanged;
-    }
-  }
-  _setupListChangedHandlers(config) {
-    if (config.tools && this._serverCapabilities?.tools?.listChanged) {
-      this._setupListChangedHandler("tools", ToolListChangedNotificationSchema, config.tools, async () => {
-        const result = await this.listTools();
-        return result.tools;
-      });
-    }
-    if (config.prompts && this._serverCapabilities?.prompts?.listChanged) {
-      this._setupListChangedHandler("prompts", PromptListChangedNotificationSchema, config.prompts, async () => {
-        const result = await this.listPrompts();
-        return result.prompts;
-      });
-    }
-    if (config.resources && this._serverCapabilities?.resources?.listChanged) {
-      this._setupListChangedHandler("resources", ResourceListChangedNotificationSchema, config.resources, async () => {
-        const result = await this.listResources();
-        return result.resources;
-      });
-    }
-  }
-  get experimental() {
-    if (!this._experimental) {
-      this._experimental = {
-        tasks: new ExperimentalClientTasks(this)
-      };
-    }
-    return this._experimental;
-  }
-  registerCapabilities(capabilities) {
-    if (this.transport) {
-      throw new Error("Cannot register capabilities after connecting to transport");
-    }
-    this._capabilities = mergeCapabilities(this._capabilities, capabilities);
-  }
-  setRequestHandler(requestSchema, handler) {
-    const shape = getObjectShape(requestSchema);
-    const methodSchema = shape?.method;
-    if (!methodSchema) {
-      throw new Error("Schema is missing a method literal");
-    }
-    const methodValue = getLiteralValue(methodSchema);
-    if (typeof methodValue !== "string") {
-      throw new Error("Schema method literal must be a string");
-    }
-    const method = methodValue;
-    if (method === "elicitation/create") {
-      const wrappedHandler = async (request, extra) => {
-        const validatedRequest = safeParse2(ElicitRequestSchema, request);
-        if (!validatedRequest.success) {
-          const errorMessage = validatedRequest.error instanceof Error ? validatedRequest.error.message : String(validatedRequest.error);
-          throw new McpError(ErrorCode.InvalidParams, `Invalid elicitation request: ${errorMessage}`);
-        }
-        const { params } = validatedRequest.data;
-        params.mode = params.mode ?? "form";
-        const { supportsFormMode, supportsUrlMode } = getSupportedElicitationModes(this._capabilities.elicitation);
-        if (params.mode === "form" && !supportsFormMode) {
-          throw new McpError(ErrorCode.InvalidParams, "Client does not support form-mode elicitation requests");
-        }
-        if (params.mode === "url" && !supportsUrlMode) {
-          throw new McpError(ErrorCode.InvalidParams, "Client does not support URL-mode elicitation requests");
-        }
-        const result = await Promise.resolve(handler(request, extra));
-        if (params.task) {
-          const taskValidationResult = safeParse2(CreateTaskResultSchema, result);
-          if (!taskValidationResult.success) {
-            const errorMessage = taskValidationResult.error instanceof Error ? taskValidationResult.error.message : String(taskValidationResult.error);
-            throw new McpError(ErrorCode.InvalidParams, `Invalid task creation result: ${errorMessage}`);
-          }
-          return taskValidationResult.data;
-        }
-        const validationResult = safeParse2(ElicitResultSchema, result);
-        if (!validationResult.success) {
-          const errorMessage = validationResult.error instanceof Error ? validationResult.error.message : String(validationResult.error);
-          throw new McpError(ErrorCode.InvalidParams, `Invalid elicitation result: ${errorMessage}`);
-        }
-        const validatedResult = validationResult.data;
-        const requestedSchema = params.mode === "form" ? params.requestedSchema : undefined;
-        if (params.mode === "form" && validatedResult.action === "accept" && validatedResult.content && requestedSchema) {
-          if (this._capabilities.elicitation?.form?.applyDefaults) {
-            try {
-              applyElicitationDefaults(requestedSchema, validatedResult.content);
-            } catch {}
-          }
-        }
-        return validatedResult;
-      };
-      return super.setRequestHandler(requestSchema, wrappedHandler);
-    }
-    if (method === "sampling/createMessage") {
-      const wrappedHandler = async (request, extra) => {
-        const validatedRequest = safeParse2(CreateMessageRequestSchema, request);
-        if (!validatedRequest.success) {
-          const errorMessage = validatedRequest.error instanceof Error ? validatedRequest.error.message : String(validatedRequest.error);
-          throw new McpError(ErrorCode.InvalidParams, `Invalid sampling request: ${errorMessage}`);
-        }
-        const { params } = validatedRequest.data;
-        const result = await Promise.resolve(handler(request, extra));
-        if (params.task) {
-          const taskValidationResult = safeParse2(CreateTaskResultSchema, result);
-          if (!taskValidationResult.success) {
-            const errorMessage = taskValidationResult.error instanceof Error ? taskValidationResult.error.message : String(taskValidationResult.error);
-            throw new McpError(ErrorCode.InvalidParams, `Invalid task creation result: ${errorMessage}`);
-          }
-          return taskValidationResult.data;
-        }
-        const hasTools = params.tools || params.toolChoice;
-        const resultSchema = hasTools ? CreateMessageResultWithToolsSchema : CreateMessageResultSchema;
-        const validationResult = safeParse2(resultSchema, result);
-        if (!validationResult.success) {
-          const errorMessage = validationResult.error instanceof Error ? validationResult.error.message : String(validationResult.error);
-          throw new McpError(ErrorCode.InvalidParams, `Invalid sampling result: ${errorMessage}`);
-        }
-        return validationResult.data;
-      };
-      return super.setRequestHandler(requestSchema, wrappedHandler);
-    }
-    return super.setRequestHandler(requestSchema, handler);
-  }
-  assertCapability(capability, method) {
-    if (!this._serverCapabilities?.[capability]) {
-      throw new Error(`Server does not support ${capability} (required for ${method})`);
-    }
-  }
-  async connect(transport, options) {
-    await super.connect(transport);
-    if (transport.sessionId !== undefined) {
-      return;
-    }
-    try {
-      const result = await this.request({
-        method: "initialize",
-        params: {
-          protocolVersion: LATEST_PROTOCOL_VERSION,
-          capabilities: this._capabilities,
-          clientInfo: this._clientInfo
-        }
-      }, InitializeResultSchema, options);
-      if (result === undefined) {
-        throw new Error(`Server sent invalid initialize result: ${result}`);
-      }
-      if (!SUPPORTED_PROTOCOL_VERSIONS.includes(result.protocolVersion)) {
-        throw new Error(`Server's protocol version is not supported: ${result.protocolVersion}`);
-      }
-      this._serverCapabilities = result.capabilities;
-      this._serverVersion = result.serverInfo;
-      if (transport.setProtocolVersion) {
-        transport.setProtocolVersion(result.protocolVersion);
-      }
-      this._instructions = result.instructions;
-      await this.notification({
-        method: "notifications/initialized"
-      });
-      if (this._pendingListChangedConfig) {
-        this._setupListChangedHandlers(this._pendingListChangedConfig);
-        this._pendingListChangedConfig = undefined;
-      }
-    } catch (error) {
-      this.close();
-      throw error;
-    }
-  }
-  getServerCapabilities() {
-    return this._serverCapabilities;
-  }
-  getServerVersion() {
-    return this._serverVersion;
-  }
-  getInstructions() {
-    return this._instructions;
-  }
-  assertCapabilityForMethod(method) {
-    switch (method) {
-      case "logging/setLevel":
-        if (!this._serverCapabilities?.logging) {
-          throw new Error(`Server does not support logging (required for ${method})`);
-        }
-        break;
-      case "prompts/get":
-      case "prompts/list":
-        if (!this._serverCapabilities?.prompts) {
-          throw new Error(`Server does not support prompts (required for ${method})`);
-        }
-        break;
-      case "resources/list":
-      case "resources/templates/list":
-      case "resources/read":
-      case "resources/subscribe":
-      case "resources/unsubscribe":
-        if (!this._serverCapabilities?.resources) {
-          throw new Error(`Server does not support resources (required for ${method})`);
-        }
-        if (method === "resources/subscribe" && !this._serverCapabilities.resources.subscribe) {
-          throw new Error(`Server does not support resource subscriptions (required for ${method})`);
-        }
-        break;
-      case "tools/call":
-      case "tools/list":
-        if (!this._serverCapabilities?.tools) {
-          throw new Error(`Server does not support tools (required for ${method})`);
-        }
-        break;
-      case "completion/complete":
-        if (!this._serverCapabilities?.completions) {
-          throw new Error(`Server does not support completions (required for ${method})`);
-        }
-        break;
-      case "initialize":
-        break;
-      case "ping":
-        break;
-    }
-  }
-  assertNotificationCapability(method) {
-    switch (method) {
-      case "notifications/roots/list_changed":
-        if (!this._capabilities.roots?.listChanged) {
-          throw new Error(`Client does not support roots list changed notifications (required for ${method})`);
-        }
-        break;
-      case "notifications/initialized":
-        break;
-      case "notifications/cancelled":
-        break;
-      case "notifications/progress":
-        break;
-    }
-  }
-  assertRequestHandlerCapability(method) {
-    if (!this._capabilities) {
-      return;
-    }
-    switch (method) {
-      case "sampling/createMessage":
-        if (!this._capabilities.sampling) {
-          throw new Error(`Client does not support sampling capability (required for ${method})`);
-        }
-        break;
-      case "elicitation/create":
-        if (!this._capabilities.elicitation) {
-          throw new Error(`Client does not support elicitation capability (required for ${method})`);
-        }
-        break;
-      case "roots/list":
-        if (!this._capabilities.roots) {
-          throw new Error(`Client does not support roots capability (required for ${method})`);
-        }
-        break;
-      case "tasks/get":
-      case "tasks/list":
-      case "tasks/result":
-      case "tasks/cancel":
-        if (!this._capabilities.tasks) {
-          throw new Error(`Client does not support tasks capability (required for ${method})`);
-        }
-        break;
-      case "ping":
-        break;
-    }
-  }
-  assertTaskCapability(method) {
-    assertToolsCallTaskCapability(this._serverCapabilities?.tasks?.requests, method, "Server");
-  }
-  assertTaskHandlerCapability(method) {
-    if (!this._capabilities) {
-      return;
-    }
-    assertClientRequestTaskCapability(this._capabilities.tasks?.requests, method, "Client");
-  }
-  async ping(options) {
-    return this.request({ method: "ping" }, EmptyResultSchema, options);
-  }
-  async complete(params, options) {
-    return this.request({ method: "completion/complete", params }, CompleteResultSchema, options);
-  }
-  async setLoggingLevel(level, options) {
-    return this.request({ method: "logging/setLevel", params: { level } }, EmptyResultSchema, options);
-  }
-  async getPrompt(params, options) {
-    return this.request({ method: "prompts/get", params }, GetPromptResultSchema, options);
-  }
-  async listPrompts(params, options) {
-    return this.request({ method: "prompts/list", params }, ListPromptsResultSchema, options);
-  }
-  async listResources(params, options) {
-    return this.request({ method: "resources/list", params }, ListResourcesResultSchema, options);
-  }
-  async listResourceTemplates(params, options) {
-    return this.request({ method: "resources/templates/list", params }, ListResourceTemplatesResultSchema, options);
-  }
-  async readResource(params, options) {
-    return this.request({ method: "resources/read", params }, ReadResourceResultSchema, options);
-  }
-  async subscribeResource(params, options) {
-    return this.request({ method: "resources/subscribe", params }, EmptyResultSchema, options);
-  }
-  async unsubscribeResource(params, options) {
-    return this.request({ method: "resources/unsubscribe", params }, EmptyResultSchema, options);
-  }
-  async callTool(params, resultSchema = CallToolResultSchema, options) {
-    if (this.isToolTaskRequired(params.name)) {
-      throw new McpError(ErrorCode.InvalidRequest, `Tool "${params.name}" requires task-based execution. Use client.experimental.tasks.callToolStream() instead.`);
-    }
-    const result = await this.request({ method: "tools/call", params }, resultSchema, options);
-    const validator = this.getToolOutputValidator(params.name);
-    if (validator) {
-      if (!result.structuredContent && !result.isError) {
-        throw new McpError(ErrorCode.InvalidRequest, `Tool ${params.name} has an output schema but did not return structured content`);
-      }
-      if (result.structuredContent) {
-        try {
-          const validationResult = validator(result.structuredContent);
-          if (!validationResult.valid) {
-            throw new McpError(ErrorCode.InvalidParams, `Structured content does not match the tool's output schema: ${validationResult.errorMessage}`);
-          }
-        } catch (error) {
-          if (error instanceof McpError) {
-            throw error;
-          }
-          throw new McpError(ErrorCode.InvalidParams, `Failed to validate structured content: ${error instanceof Error ? error.message : String(error)}`);
-        }
-      }
-    }
-    return result;
-  }
-  isToolTask(toolName) {
-    if (!this._serverCapabilities?.tasks?.requests?.tools?.call) {
-      return false;
-    }
-    return this._cachedKnownTaskTools.has(toolName);
-  }
-  isToolTaskRequired(toolName) {
-    return this._cachedRequiredTaskTools.has(toolName);
-  }
-  cacheToolMetadata(tools) {
-    this._cachedToolOutputValidators.clear();
-    this._cachedKnownTaskTools.clear();
-    this._cachedRequiredTaskTools.clear();
-    for (const tool of tools) {
-      if (tool.outputSchema) {
-        const toolValidator = this._jsonSchemaValidator.getValidator(tool.outputSchema);
-        this._cachedToolOutputValidators.set(tool.name, toolValidator);
-      }
-      const taskSupport = tool.execution?.taskSupport;
-      if (taskSupport === "required" || taskSupport === "optional") {
-        this._cachedKnownTaskTools.add(tool.name);
-      }
-      if (taskSupport === "required") {
-        this._cachedRequiredTaskTools.add(tool.name);
-      }
-    }
-  }
-  getToolOutputValidator(toolName) {
-    return this._cachedToolOutputValidators.get(toolName);
-  }
-  async listTools(params, options) {
-    const result = await this.request({ method: "tools/list", params }, ListToolsResultSchema, options);
-    this.cacheToolMetadata(result.tools);
-    return result;
-  }
-  _setupListChangedHandler(listType, notificationSchema, options, fetcher) {
-    const parseResult = ListChangedOptionsBaseSchema.safeParse(options);
-    if (!parseResult.success) {
-      throw new Error(`Invalid ${listType} listChanged options: ${parseResult.error.message}`);
-    }
-    if (typeof options.onChanged !== "function") {
-      throw new Error(`Invalid ${listType} listChanged options: onChanged must be a function`);
-    }
-    const { autoRefresh, debounceMs } = parseResult.data;
-    const { onChanged } = options;
-    const refresh = async () => {
-      if (!autoRefresh) {
-        onChanged(null, null);
-        return;
-      }
-      try {
-        const items = await fetcher();
-        onChanged(null, items);
-      } catch (e) {
-        const error = e instanceof Error ? e : new Error(String(e));
-        onChanged(error, null);
-      }
-    };
-    const handler = () => {
-      if (debounceMs) {
-        const existingTimer = this._listChangedDebounceTimers.get(listType);
-        if (existingTimer) {
-          clearTimeout(existingTimer);
-        }
-        const timer = setTimeout(refresh, debounceMs);
-        this._listChangedDebounceTimers.set(listType, timer);
-      } else {
-        refresh();
-      }
-    };
-    this.setNotificationHandler(notificationSchema, handler);
-  }
-  async sendRootsListChanged() {
-    return this.notification({ method: "notifications/roots/list_changed" });
-  }
-}
-
-// node_modules/@modelcontextprotocol/sdk/dist/esm/client/stdio.js
-var import_cross_spawn = __toESM(require_cross_spawn(), 1);
-import process3 from "node:process";
-import { PassThrough } from "node:stream";
-
 // node_modules/@modelcontextprotocol/sdk/dist/esm/shared/stdio.js
-var STDIO_DEFAULT_MAX_BUFFER_SIZE = 10 * 1024 * 1024;
-
 class ReadBuffer {
   constructor(options) {
     this._maxBufferSize = options?.maxBufferSize ?? STDIO_DEFAULT_MAX_BUFFER_SIZE;
@@ -23083,22 +23448,15 @@ function serializeMessage(message) {
   return JSON.stringify(message) + `
 `;
 }
+var STDIO_DEFAULT_MAX_BUFFER_SIZE;
+var init_stdio = __esm(() => {
+  init_types();
+  STDIO_DEFAULT_MAX_BUFFER_SIZE = 10 * 1024 * 1024;
+});
 
 // node_modules/@modelcontextprotocol/sdk/dist/esm/client/stdio.js
-var DEFAULT_INHERITED_ENV_VARS = process3.platform === "win32" ? [
-  "APPDATA",
-  "HOMEDRIVE",
-  "HOMEPATH",
-  "LOCALAPPDATA",
-  "PATH",
-  "PROCESSOR_ARCHITECTURE",
-  "SYSTEMDRIVE",
-  "SYSTEMROOT",
-  "TEMP",
-  "USERNAME",
-  "USERPROFILE",
-  "PROGRAMFILES"
-] : ["HOME", "LOGNAME", "PATH", "SHELL", "TERM", "USER"];
+import process3 from "node:process";
+import { PassThrough } from "node:stream";
 function getDefaultEnvironment() {
   const env = {};
   for (const key of DEFAULT_INHERITED_ENV_VARS) {
@@ -23232,39 +23590,60 @@ class StdioClientTransport {
     });
   }
 }
-
-// src/utils/field-mapping.ts
-import { existsSync as existsSync3, readFileSync as readFileSync5 } from "node:fs";
-import { join as join4 } from "node:path";
-
-// src/utils/assignee-mapping.ts
-import { readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+var import_cross_spawn, DEFAULT_INHERITED_ENV_VARS;
+var init_stdio2 = __esm(() => {
+  init_stdio();
+  import_cross_spawn = __toESM(require_cross_spawn(), 1);
+  DEFAULT_INHERITED_ENV_VARS = process3.platform === "win32" ? [
+    "APPDATA",
+    "HOMEDRIVE",
+    "HOMEPATH",
+    "LOCALAPPDATA",
+    "PATH",
+    "PROCESSOR_ARCHITECTURE",
+    "SYSTEMDRIVE",
+    "SYSTEMROOT",
+    "TEMP",
+    "USERNAME",
+    "USERPROFILE",
+    "PROGRAMFILES"
+  ] : ["HOME", "LOGNAME", "PATH", "SHELL", "TERM", "USER"];
+});
 
 // src/utils/logger.ts
 import pino from "pino";
-var isDevelopment = true;
-var logger = isDevelopment ? pino({
-  level: process.env.LOG_LEVEL || "info",
-  transport: {
-    target: "pino-pretty",
-    options: {
-      colorize: true,
-      translateTime: "HH:MM:ss",
-      ignore: "pid,hostname"
-    }
-  }
-}) : pino({
-  level: process.env.LOG_LEVEL || "info"
-});
 function setLogLevel(level) {
   logger.level = level;
 }
 function getLogLevel() {
   return logger.level;
 }
+var isDevelopment = true, serializers, logger;
+var init_logger = __esm(() => {
+  serializers = {
+    err: pino.stdSerializers.err,
+    error: pino.stdSerializers.err
+  };
+  logger = isDevelopment ? pino({
+    level: process.env.LOG_LEVEL || "info",
+    serializers,
+    transport: {
+      target: "pino-pretty",
+      options: {
+        colorize: true,
+        translateTime: "HH:MM:ss",
+        ignore: "pid,hostname"
+      }
+    }
+  }) : pino({
+    level: process.env.LOG_LEVEL || "info",
+    serializers
+  });
+});
 
 // src/utils/assignee-mapping.ts
+import { readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 function loadAssigneeMapping() {
   try {
     const configPath = join(process.cwd(), ".backlog-jira", "config.json");
@@ -23423,43 +23802,13 @@ function autoDiscoverAndSaveMapping(jiraDisplayName, backlogAssignees) {
   }
   return null;
 }
-
-// src/utils/frontmatter.ts
-import { readFileSync as readFileSync4, writeFileSync as writeFileSync4 } from "node:fs";
-
-// src/utils/task-links.ts
-import {
-  existsSync as existsSync2,
-  mkdirSync as mkdirSync2,
-  readFileSync as readFileSync3,
-  unlinkSync,
-  writeFileSync as writeFileSync3
-} from "node:fs";
-import { basename, join as join3 } from "node:path";
+var init_assignee_mapping = __esm(() => {
+  init_logger();
+});
 
 // src/state/sprint-registry.ts
 import { existsSync, mkdirSync, readFileSync as readFileSync2, writeFileSync as writeFileSync2 } from "node:fs";
 import { dirname, join as join2 } from "node:path";
-var SPRINT_REGISTRY_VERSION = 1;
-var SPRINTS_GITIGNORE_RULE = "!sprints.json";
-var SPRINT_DATA_KEYS = [
-  "boardId",
-  "name",
-  "state",
-  "startDate",
-  "endDate",
-  "completeDate",
-  "goal"
-];
-
-class SprintRegistryError extends Error {
-  path;
-  constructor(path, message) {
-    super(`Invalid sprint registry ${path}: ${message}`);
-    this.path = path;
-    this.name = "SprintRegistryError";
-  }
-}
 function getSprintRegistryPath(cwd = process.cwd()) {
   return join2(cwd, ".backlog-jira", "sprints.json");
 }
@@ -23647,15 +23996,37 @@ function ensureRegistryTracked(configDir) {
     logger.debug({ error }, "Could not update .backlog-jira/.gitignore");
   }
 }
+var SPRINT_REGISTRY_VERSION = 1, SPRINTS_GITIGNORE_RULE = "!sprints.json", SPRINT_DATA_KEYS, SprintRegistryError;
+var init_sprint_registry = __esm(() => {
+  init_logger();
+  SPRINT_DATA_KEYS = [
+    "boardId",
+    "name",
+    "state",
+    "startDate",
+    "endDate",
+    "completeDate",
+    "goal"
+  ];
+  SprintRegistryError = class SprintRegistryError extends Error {
+    path;
+    constructor(path, message) {
+      super(`Invalid sprint registry ${path}: ${message}`);
+      this.path = path;
+      this.name = "SprintRegistryError";
+    }
+  };
+});
 
 // src/utils/task-links.ts
-var LINK_FRONTMATTER_KEYS = {
-  jiraKey: "jira_key",
-  jiraUrl: "jira_url",
-  jiraLastSync: "jira_last_sync",
-  jiraSyncState: "jira_sync_state"
-};
-var TASK_FILE_PATTERN = /^([A-Za-z][A-Za-z0-9_]*-\d+(?:\.\d+)*)\s+-\s+/;
+import {
+  existsSync as existsSync2,
+  mkdirSync as mkdirSync2,
+  readFileSync as readFileSync3,
+  unlinkSync,
+  writeFileSync as writeFileSync3
+} from "node:fs";
+import { basename, join as join3 } from "node:path";
 function normalizeTaskId(taskId) {
   return taskId.trim().toLowerCase();
 }
@@ -23729,14 +24100,6 @@ function linkToFrontmatter(link) {
   }
   return result;
 }
-var LINKS_GITIGNORE_RULES = `!links/
-!links/*.json
-`;
-var CONFIG_DIR_GITIGNORE = `# Ignore all files in .backlog-jira/ except Jira link records and the sprint registry
-*
-!.gitignore
-${LINKS_GITIGNORE_RULES}${SPRINTS_GITIGNORE_RULE}
-`;
 function ensureLinksTracked() {
   const gitignorePath = join3(process.cwd(), ".backlog-jira", ".gitignore");
   if (!existsSync2(gitignorePath))
@@ -23753,8 +24116,28 @@ function ensureLinksTracked() {
     logger.debug({ error }, "Could not update .backlog-jira/.gitignore");
   }
 }
+var LINK_FRONTMATTER_KEYS, TASK_FILE_PATTERN, LINKS_GITIGNORE_RULES = `!links/
+!links/*.json
+`, CONFIG_DIR_GITIGNORE;
+var init_task_links = __esm(() => {
+  init_sprint_registry();
+  init_logger();
+  LINK_FRONTMATTER_KEYS = {
+    jiraKey: "jira_key",
+    jiraUrl: "jira_url",
+    jiraLastSync: "jira_last_sync",
+    jiraSyncState: "jira_sync_state"
+  };
+  TASK_FILE_PATTERN = /^([A-Za-z][A-Za-z0-9_]*-\d+(?:\.\d+)*)\s+-\s+/;
+  CONFIG_DIR_GITIGNORE = `# Ignore all files in .backlog-jira/ except Jira link records and the sprint registry
+*
+!.gitignore
+${LINKS_GITIGNORE_RULES}${SPRINTS_GITIGNORE_RULE}
+`;
+});
 
 // src/utils/frontmatter.ts
+import { readFileSync as readFileSync4, writeFileSync as writeFileSync4 } from "node:fs";
 function parseFrontmatter(content) {
   const frontmatterMatch = content.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
   if (!frontmatterMatch) {
@@ -24027,110 +24410,20 @@ function getTaskFilePath(taskId) {
   }
   return join(tasksDir, file);
 }
+var init_frontmatter = __esm(() => {
+  init_logger();
+  init_task_links();
+});
 
 // src/utils/field-mapping.ts
-var FIELD_MAPPING_TYPES = [
-  "string",
-  "number",
-  "date",
-  "option",
-  "multi-option",
-  "user",
-  "version",
-  "array"
-];
-var FIELD_MAPPING_DIRECTIONS = ["pull", "push", "both"];
-var NATIVE_BACKLOG_TARGETS = [
-  "milestone",
-  "dependencies",
-  "references",
-  "priority",
-  "labels"
-];
-var CORE_OVERRIDE_TARGETS = new Set([
-  "priority",
-  "labels"
-]);
-var ARRAY_NATIVE_TARGETS = new Set([
-  "dependencies",
-  "references",
-  "labels"
-]);
-var FRONTMATTER_PREFIX = "frontmatter:";
-var RESERVED_FRONTMATTER_KEYS = new Set([
-  "id",
-  "title",
-  "status",
-  "assignee",
-  "reporter",
-  "created_date",
-  "updated_date",
-  "created",
-  "updated",
-  "labels",
-  "milestone",
-  "dependencies",
-  "references",
-  "documentation",
-  "parent",
-  "parent_task_id",
-  "subtasks",
-  "priority",
-  "ordinal",
-  "type",
-  "project",
-  "due_date",
-  "modified_files",
-  "onStatusChange",
-  "final_summary"
-]);
-var SPRINT_MAPPING_TYPE = "sprint";
-var SPRINT_PULL_SCOPES = ["all", "open"];
-var SPRINT_ONLY_KEYS = [
-  "boardId",
-  "createSprints",
-  "archiveClosedSprints",
-  "pullScope"
-];
-
-class FieldMappingConfigError extends Error {
-  errors;
-  constructor(errors) {
-    super(`Invalid fieldMappings in .backlog-jira/config.json:
-${errors.map((e) => `  - ${e}`).join(`
-`)}`);
-    this.errors = errors;
-    this.name = "FieldMappingConfigError";
-  }
-}
-var PRIORITY_SYSTEM_FIELD = "priority";
-var BACKLOG_PRIORITIES = ["high", "medium", "low"];
-var DEFAULT_PRIORITY_MAPPING = Object.freeze({
-  backlog: "priority",
-  jira: PRIORITY_SYSTEM_FIELD,
-  type: "option",
-  direction: "both",
-  valueMap: Object.freeze({
-    High: "high",
-    Medium: "medium",
-    Low: "low",
-    Highest: "high",
-    Lowest: "low",
-    Critical: "high",
-    Blocker: "high",
-    Major: "medium",
-    Minor: "low",
-    Trivial: "low"
-  })
-});
+import { existsSync as existsSync3, readFileSync as readFileSync5 } from "node:fs";
+import { join as join4 } from "node:path";
 function isBuiltInPriorityMapping(mapping) {
   return mapping.backlog === "priority" && mapping.jira === PRIORITY_SYSTEM_FIELD;
 }
 function withoutBuiltInMappings(mappings) {
   return mappings.filter((m) => !isBuiltInPriorityMapping(m));
 }
-var FRONTMATTER_KEY_PATTERN = /^[A-Za-z_][A-Za-z0-9_-]*$/;
-var JIRA_FIELD_PATTERN = /^(customfield_\d+|[A-Za-z][A-Za-z0-9_]*)$/;
 function validateBacklogTarget(target) {
   if (target.startsWith(FRONTMATTER_PREFIX)) {
     const key = target.slice(FRONTMATTER_PREFIX.length);
@@ -24603,18 +24896,6 @@ function hasMappedFieldUpdates(updates) {
 function getMappedJiraFieldIds(mappings) {
   return [...new Set(mappings.map((m) => m.jira))];
 }
-var DEFAULT_ISSUE_FIELDS = [
-  "summary",
-  "description",
-  "status",
-  "assignee",
-  "reporter",
-  "labels",
-  "priority",
-  "created",
-  "updated",
-  "issuetype"
-];
 function getIssueFieldsParam(mappings) {
   const extra = getMappedJiraFieldIds(mappings).filter((id) => !DEFAULT_ISSUE_FIELDS.includes(id));
   if (extra.length === 0)
@@ -24652,20 +24933,6 @@ function suggestTypeForSchema(schema) {
       return;
   }
 }
-
-class FieldValueError extends Error {
-  constructor(message) {
-    super(message);
-    this.name = "FieldValueError";
-  }
-}
-var JIRA_LIST_FIELDS = new Set([
-  "fixVersions",
-  "versions",
-  "components",
-  "labels"
-]);
-var ACCOUNT_ID_PATTERN = /^([0-9a-f]{24}|[0-9]{5,}:[a-f0-9-]+)$/;
 function reverseValueMap(value, valueMap) {
   if (!valueMap)
     return value;
@@ -24773,96 +25040,129 @@ function buildJiraValueUpdates(values, issue) {
   }
   return result;
 }
-
-// src/integrations/jira-sprints.ts
-var SPRINT_FIELD_SCHEMA = "com.pyxis.greenhopper.jira:gh-sprint";
-var SPRINT_STATES = [
-  "future",
-  "active",
-  "closed"
-];
-function text(value) {
-  if (value === undefined || value === null)
-    return;
-  const s = String(value).trim();
-  return s && s !== "<null>" ? s : undefined;
-}
-function sprintState(value) {
-  const state = text(value)?.toLowerCase();
-  return SPRINT_STATES.find((s) => s === state);
-}
-function parseLegacySprintString(value) {
-  const match = value.match(/\[(.*)\]\s*$/s);
-  if (!match)
-    return null;
-  const record = {};
-  for (const part of match[1].split(/,(?=[A-Za-z]+=)/)) {
-    const eq = part.indexOf("=");
-    if (eq > 0)
-      record[part.slice(0, eq)] = part.slice(eq + 1);
-  }
-  return record;
-}
-function parseSprint(value) {
-  let raw = null;
-  if (typeof value === "string") {
-    raw = parseLegacySprintString(value);
-  } else if (value && typeof value === "object" && !Array.isArray(value)) {
-    raw = value;
-  }
-  if (!raw)
-    return null;
-  const id = text(raw.id);
-  const name = text(raw.name);
-  const state = sprintState(raw.state);
-  if (!id || id === "-1" || !name || !state)
-    return null;
-  const sprint = { id, name, state };
-  const startDate = text(raw.startDate ?? raw.start_date);
-  const endDate = text(raw.endDate ?? raw.end_date);
-  const completeDate = text(raw.completeDate ?? raw.complete_date);
-  const goal = text(raw.goal);
-  const boardId = text(raw.boardId ?? raw.originBoardId ?? raw.origin_board_id ?? raw.board_id ?? raw.rapidViewId);
-  if (startDate)
-    sprint.startDate = startDate;
-  if (endDate)
-    sprint.endDate = endDate;
-  if (completeDate)
-    sprint.completeDate = completeDate;
-  if (goal)
-    sprint.goal = goal;
-  if (boardId && boardId !== "-1")
-    sprint.boardId = boardId;
-  return sprint;
-}
-function parseSprintFieldValue(value) {
-  if (value === undefined || value === null)
-    return [];
-  if (!Array.isArray(value) && typeof value === "object" && "value" in value && !("id" in value)) {
-    return parseSprintFieldValue(value.value);
-  }
-  const items = Array.isArray(value) ? value : [value];
-  return items.map((item) => parseSprint(item)).filter((sprint) => sprint !== null);
-}
-function findSprintFieldId(fields) {
-  const field = fields.find((f) => f.schema?.custom === SPRINT_FIELD_SCHEMA);
-  return field?.id ?? null;
-}
-function parseBoard(value) {
-  if (!value || typeof value !== "object" || Array.isArray(value))
-    return null;
-  const raw = value;
-  const id = text(raw.id);
-  if (!id || id === "-1")
-    return null;
-  const type = text(raw.type)?.toLowerCase() ?? "unknown";
-  return {
-    id,
-    name: text(raw.name) ?? "",
-    type,
-    supportsSprints: type !== "kanban"
+var FIELD_MAPPING_TYPES, FIELD_MAPPING_DIRECTIONS, NATIVE_BACKLOG_TARGETS, CORE_OVERRIDE_TARGETS, ARRAY_NATIVE_TARGETS, FRONTMATTER_PREFIX = "frontmatter:", RESERVED_FRONTMATTER_KEYS, SPRINT_MAPPING_TYPE = "sprint", SPRINT_PULL_SCOPES, SPRINT_ONLY_KEYS, FieldMappingConfigError, PRIORITY_SYSTEM_FIELD = "priority", BACKLOG_PRIORITIES, DEFAULT_PRIORITY_MAPPING, FRONTMATTER_KEY_PATTERN, JIRA_FIELD_PATTERN, DEFAULT_ISSUE_FIELDS, FieldValueError, JIRA_LIST_FIELDS, ACCOUNT_ID_PATTERN;
+var init_field_mapping = __esm(() => {
+  init_assignee_mapping();
+  init_frontmatter();
+  init_logger();
+  FIELD_MAPPING_TYPES = [
+    "string",
+    "number",
+    "date",
+    "option",
+    "multi-option",
+    "user",
+    "version",
+    "array"
+  ];
+  FIELD_MAPPING_DIRECTIONS = ["pull", "push", "both"];
+  NATIVE_BACKLOG_TARGETS = [
+    "milestone",
+    "dependencies",
+    "references",
+    "priority",
+    "labels"
+  ];
+  CORE_OVERRIDE_TARGETS = new Set([
+    "priority",
+    "labels"
+  ]);
+  ARRAY_NATIVE_TARGETS = new Set([
+    "dependencies",
+    "references",
+    "labels"
+  ]);
+  RESERVED_FRONTMATTER_KEYS = new Set([
+    "id",
+    "title",
+    "status",
+    "assignee",
+    "reporter",
+    "created_date",
+    "updated_date",
+    "created",
+    "updated",
+    "labels",
+    "milestone",
+    "dependencies",
+    "references",
+    "documentation",
+    "parent",
+    "parent_task_id",
+    "subtasks",
+    "priority",
+    "ordinal",
+    "type",
+    "project",
+    "due_date",
+    "modified_files",
+    "onStatusChange",
+    "final_summary"
+  ]);
+  SPRINT_PULL_SCOPES = ["all", "open"];
+  SPRINT_ONLY_KEYS = [
+    "boardId",
+    "createSprints",
+    "archiveClosedSprints",
+    "pullScope"
+  ];
+  FieldMappingConfigError = class FieldMappingConfigError extends Error {
+    errors;
+    constructor(errors) {
+      super(`Invalid fieldMappings in .backlog-jira/config.json:
+${errors.map((e) => `  - ${e}`).join(`
+`)}`);
+      this.errors = errors;
+      this.name = "FieldMappingConfigError";
+    }
   };
-}
+  BACKLOG_PRIORITIES = ["high", "medium", "low"];
+  DEFAULT_PRIORITY_MAPPING = Object.freeze({
+    backlog: "priority",
+    jira: PRIORITY_SYSTEM_FIELD,
+    type: "option",
+    direction: "both",
+    valueMap: Object.freeze({
+      High: "high",
+      Medium: "medium",
+      Low: "low",
+      Highest: "high",
+      Lowest: "low",
+      Critical: "high",
+      Blocker: "high",
+      Major: "medium",
+      Minor: "low",
+      Trivial: "low"
+    })
+  });
+  FRONTMATTER_KEY_PATTERN = /^[A-Za-z_][A-Za-z0-9_-]*$/;
+  JIRA_FIELD_PATTERN = /^(customfield_\d+|[A-Za-z][A-Za-z0-9_]*)$/;
+  DEFAULT_ISSUE_FIELDS = [
+    "summary",
+    "description",
+    "status",
+    "assignee",
+    "reporter",
+    "labels",
+    "priority",
+    "created",
+    "updated",
+    "issuetype"
+  ];
+  FieldValueError = class FieldValueError extends Error {
+    constructor(message) {
+      super(message);
+      this.name = "FieldValueError";
+    }
+  };
+  JIRA_LIST_FIELDS = new Set([
+    "fixVersions",
+    "versions",
+    "components",
+    "labels"
+  ]);
+  ACCOUNT_ID_PATTERN = /^([0-9a-f]{24}|[0-9]{5,}:[a-f0-9-]+)$/;
+});
 
 // src/integrations/milestones.ts
 import { spawn as spawn2 } from "node:child_process";
@@ -24874,7 +25174,6 @@ import {
   writeFileSync as writeFileSync5
 } from "node:fs";
 import { join as join5 } from "node:path";
-var DUE_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 function getMilestoneRefusalsPath(cwd = process.cwd()) {
   return join5(cwd, ".backlog-jira", "milestone-refusals.json");
 }
@@ -24890,28 +25189,6 @@ function readMilestoneRefusals(cwd = process.cwd()) {
     return [];
   }
 }
-var spawnBacklogCli = (args, cwd) => new Promise((resolve, reject) => {
-  logger.debug({ args, cwd }, "Executing Backlog CLI command");
-  const proc = spawn2("backlog", args, {
-    cwd,
-    stdio: ["ignore", "pipe", "pipe"]
-  });
-  let stdout = "";
-  let stderr = "";
-  proc.stdout?.on("data", (data) => {
-    stdout += data.toString();
-  });
-  proc.stderr?.on("data", (data) => {
-    stderr += data.toString();
-  });
-  proc.on("close", (code) => {
-    if (code === 0)
-      resolve(stdout);
-    else
-      reject(new Error(`backlog ${args.join(" ")} failed with code ${code}: ${(stderr || stdout).trim()}`));
-  });
-  proc.on("error", reject);
-});
 function helpOptions(help) {
   return new Set(help.match(/--[a-z][a-z-]*/g) ?? []);
 }
@@ -25145,8 +25422,6 @@ function checkDueDate(value) {
   }
   return date;
 }
-var FRONTMATTER_LINE = /^([A-Za-z_][A-Za-z0-9_-]*):(?: (.*))?$/;
-var DESCRIPTION_HEADING = "## Description";
 function parseScalar(raw) {
   const value = raw.trim();
   if (value.startsWith('"')) {
@@ -25300,6 +25575,34 @@ ${lines.join(`
 ---
 ${body}` };
 }
+var DUE_DATE_PATTERN, spawnBacklogCli = (args, cwd) => new Promise((resolve, reject) => {
+  logger.debug({ args, cwd }, "Executing Backlog CLI command");
+  const proc = spawn2("backlog", args, {
+    cwd,
+    stdio: ["ignore", "pipe", "pipe"]
+  });
+  let stdout = "";
+  let stderr = "";
+  proc.stdout?.on("data", (data) => {
+    stdout += data.toString();
+  });
+  proc.stderr?.on("data", (data) => {
+    stderr += data.toString();
+  });
+  proc.on("close", (code) => {
+    if (code === 0)
+      resolve(stdout);
+    else
+      reject(new Error(`backlog ${args.join(" ")} failed with code ${code}: ${(stderr || stdout).trim()}`));
+  });
+  proc.on("error", reject);
+}), FRONTMATTER_LINE, DESCRIPTION_HEADING = "## Description";
+var init_milestones = __esm(() => {
+  init_sprint_registry();
+  init_logger();
+  DUE_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+  FRONTMATTER_LINE = /^([A-Za-z_][A-Za-z0-9_-]*):(?: (.*))?$/;
+});
 
 // src/utils/sprint-pull.ts
 async function createSprintPullContext(mapping, clients, options = {}) {
@@ -25499,10 +25802,16 @@ async function pullTaskSprint(ctx, taskId, issue, options = {}) {
   writeTaskLink(taskId, next);
   return localChange ? { milestoneId, changed, skipped: "local-change" } : { milestoneId, changed };
 }
+var init_sprint_pull = __esm(() => {
+  init_jira_sprints();
+  init_milestones();
+  init_sprint_registry();
+  init_field_mapping();
+  init_logger();
+  init_task_links();
+});
 
 // src/utils/sprint-payload.ts
-var SPRINT_PAYLOAD_KEY = "milestone";
-var SPRINT_CONFLICT_FIELD = "sprint";
 function loadSprintPayloadSource(cwd = process.cwd()) {
   try {
     const mapping = loadSprintMapping(cwd);
@@ -25537,6 +25846,15 @@ function backlogSprintValue(source, milestone) {
   })();
   return entry ? entry.sprintId : `milestone:${value.toLowerCase()}`;
 }
+var SPRINT_PAYLOAD_KEY = "milestone", SPRINT_CONFLICT_FIELD = "sprint";
+var init_sprint_payload = __esm(() => {
+  init_jira_sprints();
+  init_milestones();
+  init_sprint_registry();
+  init_field_mapping();
+  init_logger();
+  init_sprint_pull();
+});
 
 // src/integrations/jira.ts
 class JiraClient {
@@ -25894,15 +26212,38 @@ Current tool: ${toolName}`;
     return `MCP tool ${toolName} failed: ${errorText}`;
   }
   async test() {
+    return (await this.checkConnection()).ok;
+  }
+  async checkConnection() {
     try {
-      await this.callMcpTool("jira_get_all_projects", {});
-      logger.debug("MCP Jira tools are accessible");
-      return true;
+      const fields = await this.callMcpTool("jira_search_fields", {
+        keyword: "",
+        limit: 1
+      });
+      const list = Array.isArray(fields) ? fields : fields?.fields;
+      if (Array.isArray(list) && list.length > 0) {
+        logger.debug("MCP Jira tools are accessible");
+        return { ok: true };
+      }
+      await this.callMcpTool("jira_search", {
+        jql: "updated >= -1d ORDER BY updated DESC",
+        limit: 1,
+        fields: "summary"
+      });
+      return {
+        ok: false,
+        error: "Jira returned no fields. Check that JIRA_URL points to your Jira site and the credentials are valid."
+      };
     } catch (error) {
-      logger.error({ error }, "MCP Jira tools test failed");
-      return false;
+      const message = error instanceof Error ? error.message : String(error);
+      if (this.silentMode) {
+        logger.debug({ error }, "MCP Jira tools test failed");
+      } else {
+        logger.error({ error }, "MCP Jira tools test failed");
+      }
+      return { ok: false, error: message || "Unknown error" };
     } finally {
-      await this.close();
+      await this.close().catch(() => {});
     }
   }
   async getAllProjects() {
@@ -26266,7 +26607,7 @@ Original error: ${message}`);
           name: t.name,
           to: t.to || {
             id: "",
-            name: ""
+            name: typeof t.to_status === "string" ? t.to_status : ""
           }
         };
       });
@@ -26432,7 +26773,6 @@ Original error: ${message}`);
     }
   }
 }
-var MAX_AGILE_RESULTS = 5000;
 function agileValues(result) {
   if (Array.isArray(result))
     return result;
@@ -26467,779 +26807,2800 @@ function getJsonErrorText(json) {
   }
   return messages.length > 0 ? messages.join("; ") : null;
 }
+var MAX_AGILE_RESULTS = 5000;
+var init_jira = __esm(() => {
+  init_client2();
+  init_stdio2();
+  init_field_mapping();
+  init_logger();
+  init_sprint_payload();
+  init_jira_sprints();
+});
 
-// src/commands/configure.ts
-function setEnv(name, value) {
-  if (value === undefined) {
-    delete process.env[name];
-  } else {
-    process.env[name] = value;
+// src/state/frontmatter-store.ts
+import {
+  existsSync as existsSync5,
+  mkdirSync as mkdirSync4,
+  readFileSync as readFileSync7,
+  readdirSync as readdirSync2,
+  writeFileSync as writeFileSync6
+} from "node:fs";
+import { join as join6 } from "node:path";
+
+class FrontmatterStore {
+  snapshotsDir;
+  opsLogPath;
+  constructor(configDir) {
+    const baseDir = configDir || join6(process.cwd(), ".backlog-jira");
+    if (!existsSync5(baseDir)) {
+      mkdirSync4(baseDir, { recursive: true });
+    }
+    this.snapshotsDir = join6(baseDir, "snapshots");
+    this.opsLogPath = join6(baseDir, "ops-log.jsonl");
+    if (!existsSync5(this.snapshotsDir)) {
+      mkdirSync4(this.snapshotsDir, { recursive: true });
+    }
+    logger.debug({ baseDir, snapshotsDir: this.snapshotsDir }, "FrontmatterStore initialized");
   }
-}
-function restoreEnv(snapshot) {
-  for (const [name, value] of Object.entries(snapshot)) {
-    setEnv(name, value);
-  }
-}
-async function configureCommand(options = {}) {
-  const originalLogLevel = getLogLevel();
-  if (!options.verbose) {
-    setLogLevel("warn");
-  }
-  try {
-    if (options.nonInteractive) {
-      console.log(source_default.yellow("Non-interactive mode is not yet implemented."));
-      console.log("Please use environment variables for CI/CD setup:");
-      console.log("  - JIRA_URL");
-      console.log("  - JIRA_EMAIL (for Cloud) or JIRA_PERSONAL_TOKEN (for Server)");
-      console.log("  - JIRA_API_TOKEN (for Cloud)");
-      process.exit(1);
-    }
-    console.log(source_default.bold.cyan(`
-\uD83D\uDD27 Jira Configuration Wizard
-`));
-    console.log(source_default.gray(`Let's set up your Jira connection step by step.
-`));
-    const configDir = join6(process.cwd(), ".backlog-jira");
-    if (!existsSync5(configDir)) {
-      console.log(source_default.yellow(`Creating .backlog-jira/ directory...
-`));
-      mkdirSync4(join6(configDir, "logs"), { recursive: true });
-    }
-    console.log(source_default.bold.green("Step 1: Jira Instance Type"));
-    console.log(source_default.gray(`Select your Jira deployment type.
-`));
-    const instanceTypeResponse = await import_prompts.default({
-      type: "select",
-      name: "instanceType",
-      message: "What type of Jira instance are you using?",
-      choices: [
-        {
-          title: "Jira Cloud (atlassian.net)",
-          value: "cloud",
-          description: "Cloud-hosted Jira from Atlassian"
-        },
-        {
-          title: "Jira Server / Data Center (self-hosted)",
-          value: "server",
-          description: "Self-hosted Jira installation"
-        }
-      ]
-    });
-    if (!instanceTypeResponse.instanceType) {
-      console.log(source_default.yellow(`
-✗ Configuration cancelled.
-`));
-      process.exit(0);
-    }
-    const instanceType = instanceTypeResponse.instanceType;
-    console.log(source_default.bold.green(`
-
-Step 2: Jira URL`));
-    console.log(source_default.gray(`Enter your Jira instance URL.
-`));
-    let jiraUrl = "";
-    let urlValid = false;
-    while (!urlValid) {
-      const urlResponse = await import_prompts.default({
-        type: "text",
-        name: "url",
-        message: "Jira URL:",
-        initial: instanceType === "cloud" ? "https://your-domain.atlassian.net" : "https://jira.yourcompany.com",
-        validate: (value) => {
-          if (!value || value.trim() === "") {
-            return "URL is required";
-          }
-          if (!value.startsWith("http://") && !value.startsWith("https://")) {
-            return "URL must start with http:// or https://";
-          }
-          if (instanceType === "cloud" && !value.includes("atlassian.net")) {
-            return "Cloud URL should contain 'atlassian.net'";
-          }
-          return true;
-        }
-      });
-      if (!urlResponse.url) {
-        console.log(source_default.yellow(`
-✗ Configuration cancelled.
-`));
-        process.exit(0);
-      }
-      jiraUrl = urlResponse.url;
-      jiraUrl = jiraUrl.trim().replace(/\/$/, "");
-      try {
-        new URL(jiraUrl);
-        urlValid = true;
-      } catch {
-        console.log(source_default.red(`Invalid URL format. Please try again.
-`));
-      }
-    }
-    console.log(source_default.bold.green(`
-
-Step 3: Authentication`));
-    let jiraEmail = "";
-    let jiraApiToken = "";
-    let jiraPersonalToken = "";
-    if (instanceType === "cloud") {
-      console.log(source_default.gray(`For Jira Cloud, you need an API token.
-`));
-      console.log(source_default.cyan("To create an API token:"));
-      console.log(source_default.cyan("  1. Go to https://id.atlassian.com/manage-profile/security/api-tokens"));
-      console.log(source_default.cyan("  2. Click 'Create API token'"));
-      console.log(source_default.cyan(`  3. Copy the generated token
-`));
-      const emailResponse = await import_prompts.default({
-        type: "text",
-        name: "email",
-        message: "Jira account email:",
-        validate: (value) => {
-          if (!value || value.trim() === "") {
-            return "Email is required";
-          }
-          if (!value.includes("@")) {
-            return "Please enter a valid email address";
-          }
-          return true;
-        }
-      });
-      if (!emailResponse.email) {
-        console.log(source_default.yellow(`
-✗ Configuration cancelled.
-`));
-        process.exit(0);
-      }
-      jiraEmail = emailResponse.email;
-      const tokenResponse = await import_prompts.default({
-        type: "password",
-        name: "token",
-        message: "API token:",
-        validate: (value) => {
-          if (!value || value.trim() === "") {
-            return "API token is required";
-          }
-          return true;
-        }
-      });
-      if (!tokenResponse.token) {
-        console.log(source_default.yellow(`
-✗ Configuration cancelled.
-`));
-        process.exit(0);
-      }
-      jiraApiToken = tokenResponse.token;
-    } else {
-      console.log(source_default.gray(`For Jira Server/Data Center, you need a Personal Access Token.
-`));
-      console.log(source_default.cyan("To create a Personal Access Token:"));
-      console.log(source_default.cyan("  1. Go to your Jira profile settings"));
-      console.log(source_default.cyan("  2. Navigate to 'Personal Access Tokens'"));
-      console.log(source_default.cyan(`  3. Create a new token with appropriate permissions
-`));
-      const patResponse = await import_prompts.default({
-        type: "password",
-        name: "pat",
-        message: "Personal Access Token:",
-        validate: (value) => {
-          if (!value || value.trim() === "") {
-            return "Personal Access Token is required";
-          }
-          return true;
-        }
-      });
-      if (!patResponse.pat) {
-        console.log(source_default.yellow(`
-✗ Configuration cancelled.
-`));
-        process.exit(0);
-      }
-      jiraPersonalToken = patResponse.pat;
-    }
-    console.log(source_default.bold.green(`
-
-Step 4: MCP Server Configuration (Optional)`));
-    console.log(source_default.gray(`Configure additional arguments and environment variables for the MCP server.
-`));
-    const mcpEnvVars = {};
-    const mcpServerArgs = [];
-    const useMcpArgsResponse = await import_prompts.default({
-      type: "confirm",
-      name: "useMcpArgs",
-      message: "Do you want to configure MCP server arguments (e.g., Docker options like --dns)?",
-      initial: false
-    });
-    if (useMcpArgsResponse.useMcpArgs === undefined) {
-      console.log(source_default.yellow(`
-✗ Configuration cancelled.
-`));
-      process.exit(0);
-    }
-    if (useMcpArgsResponse.useMcpArgs) {
-      console.log(source_default.cyan(`
-Enter server arguments one by one.`));
-      console.log(source_default.gray("Examples: --dns 8.8.8.8, --dns-search company.com"));
-      console.log(source_default.gray(`Leave empty to finish.
-`));
-      let addingArgs = true;
-      while (addingArgs) {
-        const argResponse = await import_prompts.default({
-          type: "text",
-          name: "arg",
-          message: "Server argument:"
-        });
-        if (argResponse.arg === undefined) {
-          console.log(source_default.yellow(`
-✗ Configuration cancelled.
-`));
-          process.exit(0);
-        }
-        const arg = argResponse.arg.trim();
-        if (arg === "") {
-          addingArgs = false;
-          continue;
-        }
-        mcpServerArgs.push(arg);
-        console.log(source_default.green(`  ✓ Added argument: ${arg}
-`));
-      }
-      if (mcpServerArgs.length > 0) {
-        console.log(source_default.cyan(`
-Configured server arguments:`));
-        for (const arg of mcpServerArgs) {
-          console.log(source_default.gray(`  ${arg}`));
-        }
-        console.log();
-      }
-    }
-    const useMcpEnvResponse = await import_prompts.default({
-      type: "confirm",
-      name: "useMcpEnv",
-      message: "Do you want to configure additional MCP server environment variables?",
-      initial: false
-    });
-    if (useMcpEnvResponse.useMcpEnv === undefined) {
-      console.log(source_default.yellow(`
-✗ Configuration cancelled.
-`));
-      process.exit(0);
-    }
-    if (useMcpEnvResponse.useMcpEnv) {
-      console.log(source_default.cyan(`
-Enter key-value pairs for environment variables.`));
-      console.log(source_default.gray(`Leave the key empty to finish.
-`));
-      let addingVars = true;
-      while (addingVars) {
-        const keyResponse = await import_prompts.default({
-          type: "text",
-          name: "key",
-          message: "Environment variable name:",
-          validate: (value) => {
-            if (value.trim() === "") {
-              return true;
-            }
-            if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(value)) {
-              return "Invalid variable name. Use only letters, numbers, and underscores.";
-            }
-            if (mcpEnvVars[value]) {
-              return "This variable already exists.";
-            }
-            return true;
-          }
-        });
-        if (keyResponse.key === undefined) {
-          console.log(source_default.yellow(`
-✗ Configuration cancelled.
-`));
-          process.exit(0);
-        }
-        const key = keyResponse.key.trim();
-        if (key === "") {
-          addingVars = false;
-          continue;
-        }
-        const valueResponse = await import_prompts.default({
-          type: "text",
-          name: "value",
-          message: `Value for ${key}:`,
-          validate: (value) => {
-            if (value === undefined || value === null) {
-              return "Value is required";
-            }
-            return true;
-          }
-        });
-        if (valueResponse.value === undefined) {
-          console.log(source_default.yellow(`
-✗ Configuration cancelled.
-`));
-          process.exit(0);
-        }
-        mcpEnvVars[key] = valueResponse.value;
-        console.log(source_default.green(`  ✓ Added ${key}
-`));
-      }
-      if (Object.keys(mcpEnvVars).length > 0) {
-        console.log(source_default.cyan(`
-Configured environment variables:`));
-        for (const [key, value] of Object.entries(mcpEnvVars)) {
-          console.log(source_default.gray(`  ${key}: ${"*".repeat(Math.min(value.length, 20))}`));
-        }
-        console.log();
-      }
-    }
-    console.log(source_default.bold.green(`
-
-Step 5: Testing Connection`));
-    console.log(source_default.gray(`Validating credentials by connecting to Jira...
-`));
-    const originalEnv = {
-      JIRA_URL: process.env.JIRA_URL,
-      JIRA_EMAIL: process.env.JIRA_EMAIL,
-      JIRA_API_TOKEN: process.env.JIRA_API_TOKEN,
-      JIRA_PERSONAL_TOKEN: process.env.JIRA_PERSONAL_TOKEN
-    };
-    process.env.JIRA_URL = jiraUrl;
-    if (instanceType === "cloud") {
-      process.env.JIRA_EMAIL = jiraEmail;
-      process.env.JIRA_API_TOKEN = jiraApiToken;
-      setEnv("JIRA_PERSONAL_TOKEN", undefined);
-    } else {
-      process.env.JIRA_PERSONAL_TOKEN = jiraPersonalToken;
-      setEnv("JIRA_EMAIL", undefined);
-      setEnv("JIRA_API_TOKEN", undefined);
-    }
-    for (const [key, value] of Object.entries(mcpEnvVars)) {
-      process.env[key] = value;
-    }
-    let connectionOk = false;
-    let availableProjects = [];
+  addMapping(backlogId, jiraKey) {
     try {
-      const jiraClient = new JiraClient({
-        dockerArgs: mcpServerArgs,
-        silentMode: true
-      });
-      connectionOk = await jiraClient.test();
-      if (connectionOk) {
-        console.log(source_default.green(`✓ Connection successful!
-`));
-        try {
-          const projectsClient = new JiraClient({
-            dockerArgs: mcpServerArgs,
-            silentMode: true
-          });
-          const projects = await projectsClient.getAllProjects();
-          availableProjects = projects;
-          await projectsClient.close();
-        } catch (error) {
-          console.log(source_default.yellow("⚠ Could not fetch projects list"));
-          logger.debug({ error }, "Failed to fetch projects");
+      const filePath = getTaskFilePath(backlogId);
+      updateJiraMetadata(filePath, { jiraKey });
+      logger.debug({ backlogId, jiraKey }, "Added mapping");
+    } catch (error) {
+      logger.error({ error, backlogId, jiraKey }, "Failed to add mapping");
+      throw error;
+    }
+  }
+  getMapping(backlogId) {
+    try {
+      const filePath = getTaskFilePath(backlogId);
+      const metadata = getJiraMetadata(filePath);
+      if (!metadata.jiraKey) {
+        return null;
+      }
+      const { frontmatter } = parseFrontmatter(readFileSync7(filePath, "utf-8"));
+      return {
+        backlogId,
+        jiraKey: metadata.jiraKey,
+        createdAt: frontmatter.created || new Date().toISOString(),
+        updatedAt: frontmatter.updated || new Date().toISOString()
+      };
+    } catch (error) {
+      return null;
+    }
+  }
+  getMappingByJiraKey(jiraKey) {
+    try {
+      const tasksDir = join6(process.cwd(), "backlog", "tasks");
+      const files = readdirSync2(tasksDir).filter((f) => f.endsWith(".md"));
+      for (const file of files) {
+        const backlogId = taskIdFromFilePath(file);
+        if (!backlogId)
+          continue;
+        const frontmatter = readPluginFrontmatter(join6(tasksDir, file));
+        if (frontmatter.jira_key === jiraKey) {
+          return {
+            backlogId,
+            jiraKey,
+            createdAt: frontmatter.created || new Date().toISOString(),
+            updatedAt: frontmatter.updated || new Date().toISOString()
+          };
         }
-      } else {
-        console.log(source_default.red(`✗ Connection failed. Please check your credentials.
-`));
-        restoreEnv(originalEnv);
-        process.exit(1);
+      }
+      return null;
+    } catch (error) {
+      logger.error({ error, jiraKey }, "Failed to get mapping by Jira key");
+      return null;
+    }
+  }
+  getAllMappings() {
+    const mappings = new Map;
+    try {
+      const tasksDir = join6(process.cwd(), "backlog", "tasks");
+      const files = readdirSync2(tasksDir).filter((f) => f.endsWith(".md"));
+      for (const file of files) {
+        const backlogId = taskIdFromFilePath(file);
+        if (!backlogId)
+          continue;
+        const frontmatter = readPluginFrontmatter(join6(tasksDir, file));
+        if (frontmatter.jira_key) {
+          mappings.set(backlogId, frontmatter.jira_key);
+        }
       }
     } catch (error) {
-      console.log(source_default.red("✗ Connection failed:"));
-      console.log(source_default.red(`  ${error instanceof Error ? error.message : String(error)}
+      logger.error({ error }, "Failed to get all mappings");
+    }
+    return mappings;
+  }
+  deleteMapping(backlogId) {
+    try {
+      const filePath = getTaskFilePath(backlogId);
+      updateJiraMetadata(filePath, {
+        jiraKey: undefined,
+        jiraLastSync: undefined,
+        jiraSyncState: undefined,
+        jiraUrl: undefined
+      });
+      logger.debug({ backlogId }, "Deleted mapping");
+    } catch (error) {
+      logger.error({ error, backlogId }, "Failed to delete mapping");
+      throw error;
+    }
+  }
+  getSnapshotPath(backlogId, side) {
+    return join6(this.snapshotsDir, `${normalizeTaskId(backlogId)}-${side}.json`);
+  }
+  setSnapshot(backlogId, side, hash, payload) {
+    const snapshotPath = this.getSnapshotPath(backlogId, side);
+    const snapshot = {
+      backlogId,
+      side,
+      hash,
+      payload: JSON.stringify(payload),
+      updatedAt: new Date().toISOString()
+    };
+    try {
+      writeFileSync6(snapshotPath, JSON.stringify(snapshot, null, 2), "utf-8");
+      logger.debug({ backlogId, side, hash }, "Set snapshot");
+    } catch (error) {
+      logger.error({ error, backlogId, side }, "Failed to set snapshot");
+      throw error;
+    }
+  }
+  getSnapshot(backlogId, side) {
+    const snapshotPath = this.getSnapshotPath(backlogId, side);
+    if (!existsSync5(snapshotPath)) {
+      return null;
+    }
+    try {
+      const content = readFileSync7(snapshotPath, "utf-8");
+      return JSON.parse(content);
+    } catch (error) {
+      logger.error({ error, backlogId, side }, "Failed to get snapshot");
+      return null;
+    }
+  }
+  getSnapshots(backlogId) {
+    return {
+      backlog: this.getSnapshot(backlogId, "backlog"),
+      jira: this.getSnapshot(backlogId, "jira")
+    };
+  }
+  updateSyncState(backlogId, updates) {
+    try {
+      const filePath = getTaskFilePath(backlogId);
+      const metadata = getJiraMetadata(filePath);
+      updateJiraMetadata(filePath, {
+        jiraKey: metadata.jiraKey,
+        jiraLastSync: updates.lastSyncAt ?? metadata.jiraLastSync,
+        jiraSyncState: updates.conflictState ?? metadata.jiraSyncState,
+        jiraUrl: metadata.jiraUrl
+      });
+      logger.debug({ backlogId, updates }, "Updated sync state");
+    } catch (error) {
+      logger.error({ error, backlogId, updates }, "Failed to update sync state");
+      throw error;
+    }
+  }
+  getSyncState(backlogId) {
+    try {
+      const filePath = getTaskFilePath(backlogId);
+      const metadata = getJiraMetadata(filePath);
+      return {
+        backlogId,
+        lastSyncAt: metadata.jiraLastSync || null,
+        conflictState: metadata.jiraSyncState || null,
+        strategy: null
+      };
+    } catch (error) {
+      return null;
+    }
+  }
+  logOperation(op, backlogId, jiraKey, outcome, details) {
+    const logEntry = {
+      id: Date.now(),
+      ts: new Date().toISOString(),
+      op,
+      backlogId,
+      jiraKey,
+      outcome,
+      details: details || null
+    };
+    try {
+      const line = `${JSON.stringify(logEntry)}
+`;
+      writeFileSync6(this.opsLogPath, line, { flag: "a", encoding: "utf-8" });
+      logger.debug({ op, backlogId, jiraKey, outcome }, "Logged operation");
+    } catch (error) {
+      logger.error({ error, op }, "Failed to log operation");
+    }
+  }
+  getRecentOps(limit = 100) {
+    if (!existsSync5(this.opsLogPath)) {
+      return [];
+    }
+    try {
+      const content = readFileSync7(this.opsLogPath, "utf-8");
+      const lines = content.trim().split(`
+`).filter((l) => l.trim());
+      const ops = lines.map((line) => {
+        try {
+          return JSON.parse(line);
+        } catch {
+          return null;
+        }
+      }).filter((op) => op !== null).reverse().slice(0, limit);
+      return ops;
+    } catch (error) {
+      logger.error({ error }, "Failed to get recent ops");
+      return [];
+    }
+  }
+  testWriteAccess() {
+    const testFile = join6(this.snapshotsDir, ".write-test");
+    try {
+      writeFileSync6(testFile, "test", "utf-8");
+      readFileSync7(testFile, "utf-8");
+      const { unlinkSync } = __require("node:fs");
+      unlinkSync(testFile);
+    } catch (error) {
+      logger.error({ error }, "Write access test failed");
+      throw new Error("Cannot write to .backlog-jira directory");
+    }
+  }
+  close() {
+    logger.debug("FrontmatterStore closed (no-op)");
+  }
+}
+var init_frontmatter_store = __esm(() => {
+  init_frontmatter();
+  init_logger();
+  init_task_links();
+});
+
+// src/state/store.ts
+var init_store = __esm(() => {
+  init_frontmatter_store();
+});
+
+// src/utils/config-file.ts
+import { existsSync as existsSync6, mkdirSync as mkdirSync5, readFileSync as readFileSync8, writeFileSync as writeFileSync7 } from "node:fs";
+import { join as join7 } from "node:path";
+function getConfigDir(cwd = process.cwd()) {
+  return join7(cwd, ".backlog-jira");
+}
+function getConfigPath(cwd = process.cwd()) {
+  return join7(getConfigDir(cwd), "config.json");
+}
+function createDefaultConfig() {
+  return {
+    jira: {
+      baseUrl: "",
+      projectKey: "",
+      issueType: "Task",
+      jqlFilter: ""
+    },
+    backlog: {
+      statusMapping: {
+        "To Do": ["To Do", "Open", "Backlog"],
+        "In Progress": ["In Progress"],
+        Done: ["Done", "Closed", "Resolved"]
+      }
+    },
+    sync: {
+      conflictStrategy: "prompt",
+      enableAnnotations: false,
+      watchInterval: 60
+    }
+  };
+}
+function bootstrapConfigDir(cwd = process.cwd()) {
+  const configDir = getConfigDir(cwd);
+  const created = !existsSync6(configDir);
+  mkdirSync5(join7(configDir, "logs"), { recursive: true });
+  const configPath = getConfigPath(cwd);
+  if (!existsSync6(configPath)) {
+    writeConfigFile(createDefaultConfig(), cwd);
+  }
+  const store = new FrontmatterStore(configDir);
+  store.close();
+  const gitignorePath = join7(configDir, ".gitignore");
+  if (!existsSync6(gitignorePath)) {
+    writeFileSync7(gitignorePath, CONFIG_DIR_GITIGNORE);
+  }
+  return created;
+}
+function readConfigFile(cwd = process.cwd()) {
+  const configPath = getConfigPath(cwd);
+  if (!existsSync6(configPath))
+    return null;
+  let parsed;
+  try {
+    parsed = JSON.parse(readFileSync8(configPath, "utf-8"));
+  } catch (error) {
+    throw new Error(`${configPath} contains invalid JSON: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error(`${configPath} must contain a JSON object`);
+  }
+  return parsed;
+}
+function writeConfigFile(config, cwd = process.cwd()) {
+  writeFileSync7(getConfigPath(cwd), `${JSON.stringify(config, null, 2)}
+`);
+}
+function getSection(config, name) {
+  const section = config[name];
+  return section && typeof section === "object" && !Array.isArray(section) ? section : {};
+}
+function setSectionValues(config, name, values) {
+  config[name] = { ...getSection(config, name), ...values };
+  return config;
+}
+var CONFLICT_STRATEGIES;
+var init_config_file = __esm(() => {
+  init_store();
+  init_task_links();
+  CONFLICT_STRATEGIES = [
+    "prompt",
+    "prefer-backlog",
+    "prefer-jira"
+  ];
+});
+
+// src/utils/jira-config.ts
+import { existsSync as existsSync7, readFileSync as readFileSync9 } from "node:fs";
+import { join as join8 } from "node:path";
+function jiraClientOptionsFromConfig(config) {
+  const mcp = config?.mcp;
+  const options = {};
+  if (!mcp || typeof mcp !== "object")
+    return options;
+  if (mcp.serverArgs && Array.isArray(mcp.serverArgs)) {
+    logger.debug({ dockerArgs: mcp.serverArgs }, "Using Docker args from config.json");
+    options.dockerArgs = mcp.serverArgs;
+    options.serverArgs = mcp.serverArgs;
+  }
+  if (typeof mcp.useExternalServer === "boolean") {
+    options.useExternalServer = mcp.useExternalServer;
+  }
+  if (typeof mcp.fallbackToDocker === "boolean") {
+    options.fallbackToDocker = mcp.fallbackToDocker;
+  }
+  if (typeof mcp.serverCommand === "string") {
+    options.serverCommand = mcp.serverCommand;
+  }
+  if (mcp.envVars && typeof mcp.envVars === "object") {
+    options.extraEnv = { ...mcp.envVars };
+  }
+  return options;
+}
+function getJiraClientOptions(cwd = process.cwd()) {
+  try {
+    const configPath = join8(cwd, ".backlog-jira", "config.json");
+    if (!existsSync7(configPath)) {
+      return {};
+    }
+    return jiraClientOptionsFromConfig(JSON.parse(readFileSync9(configPath, "utf-8")));
+  } catch (error) {
+    logger.warn({ error }, "Failed to read MCP config from config.json");
+    return {};
+  }
+}
+var init_jira_config = __esm(() => {
+  init_logger();
+});
+
+// src/commands/map-fields.ts
+import { existsSync as existsSync8, readFileSync as readFileSync10, writeFileSync as writeFileSync8 } from "node:fs";
+import { join as join9 } from "node:path";
+function getConfigPath2() {
+  return join9(process.cwd(), ".backlog-jira", "config.json");
+}
+function readConfig() {
+  const configPath = getConfigPath2();
+  if (!existsSync8(configPath)) {
+    throw new Error("Configuration not found. Run 'backlog-jira init' first.");
+  }
+  return JSON.parse(readFileSync10(configPath, "utf-8"));
+}
+function writeConfig(config) {
+  writeFileSync8(getConfigPath2(), `${JSON.stringify(config, null, 2)}
+`);
+}
+function parseValueMapEntries(entries = []) {
+  if (entries.length === 0)
+    return;
+  const valueMap = {};
+  for (const entry of entries) {
+    const separator = entry.indexOf("=");
+    if (separator <= 0) {
+      throw new Error(`Invalid --value-map entry "${entry}" (expected "Jira value=Backlog value")`);
+    }
+    valueMap[entry.slice(0, separator).trim()] = entry.slice(separator + 1).trim();
+  }
+  return valueMap;
+}
+function addFieldMapping(config, mapping, options = {}) {
+  const existing = Array.isArray(config.fieldMappings) ? [...config.fieldMappings] : [];
+  const index = existing.findIndex((m) => m?.backlog === mapping.backlog);
+  if (index >= 0 && !options.force) {
+    throw new Error(`A mapping for "${mapping.backlog}" already exists. Use --force to replace it.`);
+  }
+  const entry = {
+    backlog: mapping.backlog,
+    jira: mapping.jira,
+    type: mapping.type,
+    direction: mapping.direction ?? (isBuiltInPriorityMapping(mapping) ? "both" : "pull")
+  };
+  if (mapping.valueMap)
+    entry.valueMap = mapping.valueMap;
+  if (mapping.type === SPRINT_MAPPING_TYPE) {
+    entry.boardId = typeof mapping.boardId === "string" && /^\d+$/.test(mapping.boardId) ? Number(mapping.boardId) : mapping.boardId;
+    for (const key of [
+      "createSprints",
+      "archiveClosedSprints",
+      "pullScope"
+    ]) {
+      if (mapping[key] !== undefined)
+        entry[key] = mapping[key];
+    }
+  }
+  if (index >= 0)
+    existing[index] = entry;
+  else
+    existing.push(entry);
+  const { errors } = validateFieldMappings(existing);
+  if (errors.length > 0) {
+    throw new FieldMappingConfigError(errors);
+  }
+  return { ...config, fieldMappings: existing };
+}
+function removeFieldMapping(config, backlogTarget) {
+  const existing = Array.isArray(config.fieldMappings) ? config.fieldMappings : [];
+  const remaining = existing.filter((m) => m?.backlog !== backlogTarget);
+  if (remaining.length === existing.length) {
+    throw new Error(`No field mapping found for "${backlogTarget}"`);
+  }
+  return { ...config, fieldMappings: remaining };
+}
+function describeMapping(mapping) {
+  const valueMap = mapping.valueMap ? source_default.gray(` valueMap: ${Object.entries(mapping.valueMap).map(([from, to]) => `${from}→${to}`).join(", ")}`) : "";
+  const arrow = mapping.direction === "both" ? "↔" : mapping.direction === "push" ? "→" : "←";
+  return `  ${source_default.cyan(mapping.backlog)} ${arrow} ${source_default.yellow(mapping.jira)} ${source_default.gray(`(${mapping.type}, ${mapping.direction})`)}${valueMap}`;
+}
+function describeSprintMapping(mapping) {
+  const arrow = mapping.direction === "both" ? "↔" : mapping.direction === "push" ? "→" : "←";
+  const options = [
+    `board ${mapping.boardId}`,
+    mapping.direction,
+    `createSprints: ${mapping.createSprints}`,
+    `archiveClosedSprints: ${mapping.archiveClosedSprints}`,
+    `pullScope: ${mapping.pullScope}`
+  ];
+  return `  ${source_default.cyan(mapping.backlog)} ${arrow} ${source_default.yellow("sprint")} ${source_default.gray(`(sprint, ${options.join(", ")})`)}`;
+}
+async function listFieldMappings() {
+  const config = readConfig();
+  const { mappings, errors, sprintMapping } = validateFieldMappings(config.fieldMappings);
+  console.log(source_default.bold.cyan(`
+\uD83D\uDCCB Field Mappings
 `));
-      restoreEnv(originalEnv);
+  if (sprintMapping) {
+    console.log(describeSprintMapping(sprintMapping));
+  }
+  if (mappings.length === 0 && errors.length === 0 && !sprintMapping) {
+    console.log(source_default.gray("  No field mappings configured."));
+    console.log(source_default.gray("  Add one with: backlog-jira map-fields add <backlog-target> <jira-field> --type <type>"));
+  }
+  for (const mapping of mappings) {
+    console.log(describeMapping(mapping));
+  }
+  if (errors.length > 0) {
+    console.log(source_default.red(`
+❌ Invalid entries:`));
+    for (const error of errors) {
+      console.log(source_default.red(`  - ${error}`));
+    }
+    process.exitCode = 1;
+  }
+  console.log(source_default.gray(`
+  ← pull (Jira → Backlog)   → push (Backlog → Jira)   ↔ both
+`));
+}
+async function discoverFields(options) {
+  const jira = new JiraClient({ ...getJiraClientOptions(), silentMode: true });
+  try {
+    const fields = await jira.searchFields(options.search ?? "");
+    const filtered = options.customOnly ? fields.filter((f) => f.custom || f.id.startsWith("customfield_")) : fields;
+    if (filtered.length === 0) {
+      console.log(source_default.yellow("No Jira fields found."));
+      return;
+    }
+    console.log(source_default.bold.cyan(`
+\uD83D\uDD0E Jira fields (${filtered.length})
+`));
+    const sorted = [...filtered].sort((a, b) => a.name.localeCompare(b.name));
+    const idWidth = Math.max(...sorted.map((f) => f.id.length), 2);
+    for (const field of sorted) {
+      const schemaType = field.schema?.type ? field.schema.items ? `${field.schema.type}<${field.schema.items}>` : field.schema.type : "unknown";
+      const suggested = field.schema?.custom === SPRINT_FIELD_SCHEMA ? "sprint (map-fields add milestone sprint --type sprint --board <id>)" : suggestTypeForSchema(field.schema);
+      console.log(`  ${source_default.yellow(field.id.padEnd(idWidth))}  ${field.name} ${source_default.gray(`[${schemaType}]`)}${suggested ? source_default.green(` → --type ${suggested}`) : ""}`);
+    }
+    console.log();
+  } finally {
+    await jira.close();
+  }
+}
+async function listBoards(options) {
+  const jira = new JiraClient({ ...getJiraClientOptions(), silentMode: true });
+  try {
+    const boards = await jira.listBoards({ projectKey: options.project });
+    if (boards.length === 0) {
+      console.log(source_default.yellow("No Jira boards found."));
+      return;
+    }
+    console.log(source_default.bold.cyan(`
+\uD83D\uDCCB Jira boards (${boards.length})
+`));
+    const idWidth = Math.max(...boards.map((b) => b.id.length), 2);
+    for (const board of boards) {
+      console.log(`  ${source_default.yellow(board.id.padEnd(idWidth))}  ${board.name} ${source_default.gray(`[${board.type}]`)}${board.supportsSprints ? source_default.green(` → --board ${board.id}`) : source_default.gray(" (no sprints)")}`);
+    }
+    console.log(source_default.gray(`
+  Map sprints to milestones with: backlog-jira map-fields add milestone sprint --type sprint --board <id>
+`));
+  } finally {
+    await jira.close();
+  }
+}
+function registerMapFieldsCommand(program) {
+  const mapFieldsCmd = program.command("map-fields").description("Manage custom Jira → Backlog field mappings (applied on pull)");
+  const run = (label, fn) => async (...args) => {
+    try {
+      await fn(...args);
+    } catch (error) {
+      logger.error({ error }, `${label} failed`);
+      console.error(source_default.red(`Error: ${error instanceof Error ? error.message : String(error)}`));
       process.exit(1);
     }
-    console.log(source_default.bold.green(`
-Step 6: Project Selection`));
-    console.log(source_default.gray(`Select or enter the Jira project key.
-`));
-    let projectKey = "";
-    if (availableProjects.length > 0) {
-      const projectChoices = availableProjects.map((p) => ({
-        name: `${p.key} - ${p.name}`,
-        value: p.key
-      }));
-      projectChoices.push({
-        name: "Enter manually",
-        value: "___manual___"
-      });
-      const projectChoiceResponse = await import_prompts.default({
-        type: "select",
-        name: "choice",
-        message: "Select your project:",
-        choices: projectChoices.map((c) => ({
-          title: c.name,
-          value: c.value
-        }))
-      });
-      if (!projectChoiceResponse.choice) {
-        console.log(source_default.yellow(`
-✗ Configuration cancelled.
-`));
-        process.exit(0);
-      }
-      const projectChoice = projectChoiceResponse.choice;
-      if (projectChoice === "___manual___") {
-        const keyResponse = await import_prompts.default({
-          type: "text",
-          name: "key",
-          message: "Project key (e.g., PROJ, DEV):",
-          validate: (value) => {
-            if (!value || value.trim() === "") {
-              return "Project key is required";
-            }
-            if (!/^[A-Z][A-Z0-9]*$/.test(value.trim())) {
-              return "Project key should be uppercase letters and numbers";
-            }
-            return true;
-          }
-        });
-        if (!keyResponse.key) {
-          console.log(source_default.yellow(`
-✗ Configuration cancelled.
-`));
-          process.exit(0);
+  };
+  mapFieldsCmd.command("list").alias("show").description("List configured field mappings").action(run("List field mappings", listFieldMappings));
+  mapFieldsCmd.command("add").description("Add a field mapping").argument("<backlog-target>", "milestone, dependencies, references, priority, labels, or frontmatter:<key>").argument("<jira-field>", 'Jira field ID (customfield_NNNNN), system field name (e.g. fixVersions), or "sprint" with --type sprint').requiredOption("--type <type>", `One of: ${[...FIELD_MAPPING_TYPES, SPRINT_MAPPING_TYPE].join(", ")} (sprint: Jira sprints of --board as milestones)`).option("--board <id>", "Sprint mappings: Jira board whose sprints sync").option("--create-sprints", "Sprint mappings: pushing an unmatched milestone creates a Jira sprint").option("--no-archive-closed-sprints", "Sprint mappings: keep milestones of closed sprints active").option("--pull-scope <scope>", 'Sprint mappings: "all" (default) or "open" (only issues in open sprints are imported)').option("--direction <direction>", `One of: ${FIELD_MAPPING_DIRECTIONS.join(", ")} (pull: Jira → Backlog, push: Backlog → Jira; default: pull, or both for priority ↔ priority)`).option("--value-map <entry>", 'Translate a Jira value, e.g. "Highest=high" (repeatable)', (value, previous = []) => [...previous, value]).option("--force", "Replace an existing mapping for the same target").action(run("Add field mapping", async (backlogTarget, jiraField, options) => {
+    const sprint = options.type === SPRINT_MAPPING_TYPE;
+    const config = addFieldMapping(readConfig(), {
+      backlog: backlogTarget,
+      jira: jiraField,
+      type: options.type,
+      direction: options.direction,
+      valueMap: parseValueMapEntries(options.valueMap),
+      ...sprint ? {
+        boardId: options.board,
+        createSprints: options.createSprints || undefined,
+        archiveClosedSprints: options.archiveClosedSprints === false ? false : undefined,
+        pullScope: options.pullScope
+      } : {}
+    }, { force: options.force });
+    writeConfig(config);
+    console.log(source_default.green(`✓ Added field mapping: ${backlogTarget} ← ${jiraField}`));
+    if (sprint) {
+      console.log(source_default.gray("  Run 'backlog-jira doctor' to check the board, then 'backlog-jira pull' to create sprint milestones."));
+      return;
+    }
+    console.log(source_default.gray("  Run 'backlog-jira pull' to apply it to mapped tasks."));
+  }));
+  mapFieldsCmd.command("remove").alias("rm").description("Remove the field mapping for a Backlog target").argument("<backlog-target>", "Backlog target of the mapping to remove").action(run("Remove field mapping", async (backlogTarget) => {
+    writeConfig(removeFieldMapping(readConfig(), backlogTarget));
+    console.log(source_default.green(`✓ Removed field mapping: ${backlogTarget}`));
+  }));
+  mapFieldsCmd.command("boards").description("List Jira boards and whether they have sprints").option("--project <key>", "Only boards of a project").action(run("List boards", listBoards));
+  mapFieldsCmd.command("discover").description("List Jira fields with their IDs and types").option("--search <keyword>", "Only show fields matching a keyword").option("--custom-only", "Only show custom fields").action(run("Discover fields", discoverFields));
+}
+var init_map_fields = __esm(() => {
+  init_source();
+  init_jira_sprints();
+  init_jira();
+  init_field_mapping();
+  init_jira_config();
+  init_logger();
+});
+
+// src/utils/setup.ts
+import { spawnSync } from "node:child_process";
+function detectCredentials(env = process.env) {
+  const value = (name) => {
+    const v = env[name];
+    return typeof v === "string" && v.trim() !== "" ? v.trim() : undefined;
+  };
+  const url = value("JIRA_URL");
+  const email = value("JIRA_EMAIL") ?? value("JIRA_USERNAME");
+  const hasApiToken = value("JIRA_API_TOKEN") !== undefined;
+  const hasPersonalToken = value("JIRA_PERSONAL_TOKEN") !== undefined;
+  const auth = !url ? null : hasPersonalToken ? "server" : email && hasApiToken ? "cloud" : null;
+  const missing = [];
+  if (!url)
+    missing.push("JIRA_URL");
+  if (!hasPersonalToken) {
+    if (!email)
+      missing.push("JIRA_EMAIL");
+    if (!hasApiToken)
+      missing.push("JIRA_API_TOKEN");
+  }
+  return { url, email, hasApiToken, hasPersonalToken, auth, missing };
+}
+function credentialHelpLines() {
+  return [
+    "backlog-jira reads credentials only from exported environment variables:",
+    "  JIRA_URL, JIRA_EMAIL and JIRA_API_TOKEN (Jira Cloud), or",
+    "  JIRA_URL and JIRA_PERSONAL_TOKEN (Jira Server / Data Center).",
+    "Tokens are never stored in .backlog-jira/config.json.",
+    "",
+    "Option 1 - export in your shell (add to ~/.zshrc or ~/.bashrc to keep them):",
+    '  export JIRA_URL="https://your-domain.atlassian.net"',
+    '  export JIRA_EMAIL="you@example.com"',
+    '  export JIRA_API_TOKEN="<token from https://id.atlassian.com/manage-profile/security/api-tokens>"',
+    "",
+    "Option 2 - a .env file in the project (keep it out of git). It is not read",
+    "automatically; export its variables before running backlog-jira:",
+    "  set -a; . ./.env; set +a",
+    "",
+    "Option 3 - direnv (https://direnv.net) exports them whenever you enter the project:",
+    '  echo "dotenv" > .envrc   # or put the export lines in .envrc',
+    "  direnv allow",
+    "",
+    "Plain assignments (JIRA_URL=... without export) are not passed to backlog-jira."
+  ];
+}
+function mergeEnvFile(existing, values) {
+  const names = new Set(Object.keys(values));
+  const kept = existing.split(`
+`).filter((line) => {
+    const match = line.match(/^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)=/);
+    return !(match && names.has(match[1]));
+  }).join(`
+`).replace(/\n+$/, "");
+  const lines = Object.entries(values).map(([name, value]) => `${name}='${value.replace(/'/g, "'\\''")}'`);
+  return `${kept ? `${kept}
+
+` : ""}${lines.join(`
+`)}
+`;
+}
+function readBacklogStatuses(cwd = process.cwd()) {
+  const result = spawnSync("backlog", ["config", "get", "statuses"], {
+    cwd,
+    encoding: "utf-8"
+  });
+  const statuses = result.status === 0 ? String(result.stdout).trim().replace(/^\[|\]$/g, "").split(",").map((s) => s.trim().replace(/^["']|["']$/g, "")).filter(Boolean) : [];
+  return statuses.length > 0 ? statuses : ["To Do", "In Progress", "Done"];
+}
+async function discoverProjectStatuses(jira, projectKey, issueTypes, options = {}) {
+  const results = [];
+  for (const issueType of issueTypes) {
+    const { issues } = await jira.searchIssues(`project = "${projectKey}" AND issuetype = "${issueType.replace(/"/g, "\\\"")}" ORDER BY updated DESC`, { maxResults: options.issuesPerType ?? 50, fields: "status,issuetype" });
+    const statuses = new Set;
+    const samples = new Map;
+    for (const issue of issues) {
+      if (!issue.status || issue.status === "Unknown")
+        continue;
+      statuses.add(issue.status);
+      if (!samples.has(issue.status))
+        samples.set(issue.status, issue.key);
+    }
+    for (const key of samples.values()) {
+      try {
+        for (const transition of await jira.getTransitions(key)) {
+          if (transition.to?.name)
+            statuses.add(transition.to.name);
         }
-        projectKey = keyResponse.key;
-      } else {
-        projectKey = projectChoice;
+      } catch {}
+    }
+    if (statuses.size > 0) {
+      results.push({ issueType, statuses: [...statuses] });
+    }
+  }
+  return results;
+}
+function suggestBacklogStatus(jiraStatus, backlogStatuses, currentMapping = {}) {
+  const lower = jiraStatus.trim().toLowerCase();
+  for (const [backlogStatus, jiraStatuses] of Object.entries(currentMapping)) {
+    if (backlogStatuses.includes(backlogStatus) && Array.isArray(jiraStatuses) && jiraStatuses.some((s) => String(s).toLowerCase() === lower)) {
+      return backlogStatus;
+    }
+  }
+  const same = backlogStatuses.find((s) => s.toLowerCase() === lower);
+  if (same)
+    return same;
+  const first = backlogStatuses[0];
+  const last = backlogStatuses[backlogStatuses.length - 1];
+  if (DONE_WORDS.test(jiraStatus))
+    return last;
+  if (TODO_WORDS.test(jiraStatus))
+    return first;
+  return backlogStatuses.find((s) => /progress/i.test(s)) ?? backlogStatuses[Math.min(1, backlogStatuses.length - 1)] ?? first;
+}
+function buildStatusMappingConfig(choices, previous = {}, previousUnmapped = []) {
+  const chosen = new Set(Object.keys(choices).map((s) => s.toLowerCase()));
+  const statusMapping = {};
+  const add = (backlogStatus, jiraStatus) => {
+    const list = statusMapping[backlogStatus] ?? [];
+    if (!list.some((s) => s.toLowerCase() === jiraStatus.toLowerCase())) {
+      list.push(jiraStatus);
+    }
+    statusMapping[backlogStatus] = list;
+  };
+  for (const [backlogStatus, jiraStatuses] of Object.entries(previous)) {
+    if (!Array.isArray(jiraStatuses))
+      continue;
+    for (const jiraStatus of jiraStatuses) {
+      if (!chosen.has(String(jiraStatus).toLowerCase())) {
+        add(backlogStatus, String(jiraStatus));
       }
+    }
+  }
+  for (const [jiraStatus, backlogStatus] of Object.entries(choices)) {
+    if (backlogStatus)
+      add(backlogStatus, jiraStatus);
+  }
+  const unmapped = new Map;
+  for (const s of previousUnmapped) {
+    if (!chosen.has(s.toLowerCase()))
+      unmapped.set(s.toLowerCase(), s);
+  }
+  for (const [jiraStatus, backlogStatus] of Object.entries(choices)) {
+    if (!backlogStatus)
+      unmapped.set(jiraStatus.toLowerCase(), jiraStatus);
+  }
+  return { statusMapping, unmappedJiraStatuses: [...unmapped.values()] };
+}
+function uncoveredJiraStatuses(jiraStatuses, statusMapping, unmapped = []) {
+  const covered = new Set([...Object.values(statusMapping).flat(), ...unmapped].map((s) => String(s).toLowerCase()));
+  return jiraStatuses.filter((s) => !covered.has(s.toLowerCase()));
+}
+function mergeToolsets(existing) {
+  const tokens = (existing ?? "").split(",").map((t) => t.trim()).filter(Boolean);
+  if (tokens.some((t) => t.toLowerCase() === "all"))
+    return existing ?? "all";
+  const result = tokens.length > 0 ? tokens : ["default"];
+  for (const toolset of REQUIRED_TOOLSETS) {
+    if (!result.includes(toolset))
+      result.push(toolset);
+  }
+  return result.join(",");
+}
+function applyRequiredToolsets(config) {
+  const mcp = getSection(config, "mcp");
+  const envVars = mcp.envVars && typeof mcp.envVars === "object" ? mcp.envVars : {};
+  return setSectionValues(config, "mcp", {
+    envVars: { ...envVars, TOOLSETS: mergeToolsets(envVars.TOOLSETS) }
+  });
+}
+function findSprintEntry(config) {
+  return Array.isArray(config.fieldMappings) ? config.fieldMappings.find((m) => m?.type === SPRINT_MAPPING_TYPE) : undefined;
+}
+function applySprintSettings(config, settings) {
+  const existing = Array.isArray(config.fieldMappings) ? config.fieldMappings.filter((m) => !(m?.type === SPRINT_MAPPING_TYPE && m.backlog !== "milestone")) : undefined;
+  const updated = addFieldMapping(existing ? { ...config, fieldMappings: existing } : config, {
+    backlog: "milestone",
+    jira: "sprint",
+    type: SPRINT_MAPPING_TYPE,
+    ...settings
+  }, { force: true });
+  return applyRequiredToolsets(updated);
+}
+var DONE_WORDS, TODO_WORDS, REQUIRED_TOOLSETS;
+var init_setup = __esm(() => {
+  init_map_fields();
+  init_config_file();
+  init_field_mapping();
+  DONE_WORDS = /\b(done|closed|resolved|complete|completed|released|shipped|fixed|won'?t|cancel+ed|rejected|duplicate)\b/i;
+  TODO_WORDS = /\b(to ?do|open|backlog|new|reopened|selected|ready|triage|planned)\b/i;
+  REQUIRED_TOOLSETS = ["jira_projects", "jira_agile"];
+});
+
+// src/utils/status-mapping.ts
+import { existsSync as existsSync9, readFileSync as readFileSync11 } from "node:fs";
+import { join as join10 } from "node:path";
+function loadStatusMapping(cwd = process.cwd()) {
+  const configPath = join10(cwd, ".backlog-jira", "config.json");
+  if (!existsSync9(configPath)) {
+    logger.debug("No config.json found, using default status mapping");
+    return buildStatusMapping(getDefaultBacklogToJiraMapping());
+  }
+  try {
+    const config = JSON.parse(readFileSync11(configPath, "utf-8"));
+    return buildStatusMapping(config.backlog?.statusMapping || getDefaultBacklogToJiraMapping(), config.backlog?.projectOverrides);
+  } catch (error) {
+    logger.warn({ error }, "Failed to load status mapping config, using defaults");
+    return buildStatusMapping(getDefaultBacklogToJiraMapping());
+  }
+}
+function buildStatusMapping(backlogToJira, projectOverrides) {
+  const jiraToBacklog = {};
+  for (const [backlogStatus, jiraStatuses] of Object.entries(backlogToJira)) {
+    for (const jiraStatus of jiraStatuses) {
+      jiraToBacklog[jiraStatus.toLowerCase()] = backlogStatus;
+    }
+  }
+  return {
+    backlogToJira,
+    jiraToBacklog,
+    ...projectOverrides ? { projectOverrides } : undefined
+  };
+}
+function getDefaultBacklogToJiraMapping() {
+  return {
+    "To Do": ["To Do", "Open", "Backlog", "Todo"],
+    "In Progress": ["In Progress", "In Development", "In Review"],
+    Done: ["Done", "Closed", "Resolved", "Complete"]
+  };
+}
+function mapJiraStatusToBacklog(jiraStatus, projectKey, mapping = loadStatusMapping()) {
+  if (projectKey && mapping.projectOverrides?.[projectKey]) {
+    const override = mapping.projectOverrides[projectKey].jiraToBacklog;
+    if (override) {
+      const lower = jiraStatus.toLowerCase();
+      const exact = override[jiraStatus];
+      const lowerHit = override[lower];
+      if (exact)
+        return exact;
+      if (lowerHit)
+        return lowerHit;
+      for (const [k, v] of Object.entries(override)) {
+        if (k.toLowerCase() === lower)
+          return v;
+      }
+    }
+  }
+  const lower = jiraStatus.toLowerCase();
+  return mapping.jiraToBacklog[lower] || mapping.jiraToBacklog[jiraStatus] || jiraStatus;
+}
+async function findTransitionForStatus(jiraClient, issueKey, targetBacklogStatus, projectKey) {
+  try {
+    const transitions = await jiraClient.getTransitions(issueKey);
+    if (transitions.length === 0) {
+      return {
+        success: false,
+        error: `No transitions available for issue ${issueKey}`
+      };
+    }
+    const mapping = loadStatusMapping();
+    let acceptableJiraStatuses;
+    if (projectKey && mapping.projectOverrides?.[projectKey]) {
+      acceptableJiraStatuses = mapping.projectOverrides[projectKey].backlogToJira[targetBacklogStatus] || mapping.backlogToJira[targetBacklogStatus] || [];
     } else {
-      const keyResponse = await import_prompts.default({
-        type: "text",
-        name: "key",
-        message: "Project key (e.g., PROJ, DEV):",
-        validate: (value) => {
-          if (!value || value.trim() === "") {
-            return "Project key is required";
-          }
-          if (!/^[A-Z][A-Z0-9]*$/.test(value.trim())) {
-            return "Project key should be uppercase letters and numbers";
-          }
+      acceptableJiraStatuses = mapping.backlogToJira[targetBacklogStatus] || [];
+    }
+    if (acceptableJiraStatuses.length === 0) {
+      return {
+        success: false,
+        error: `No Jira status mapping configured for Backlog status "${targetBacklogStatus}"`
+      };
+    }
+    const matchingTransition = findBestTransitionMatch(transitions, acceptableJiraStatuses);
+    if (!matchingTransition) {
+      const availableTransitions = transitions.map((t) => `"${t.name}" → "${t.to.name}"`).join(", ");
+      return {
+        success: false,
+        error: `No transition found from current status to "${targetBacklogStatus}". Available: ${availableTransitions}`
+      };
+    }
+    logger.debug({
+      issueKey,
+      targetBacklogStatus,
+      transitionId: matchingTransition.id,
+      transitionName: matchingTransition.name,
+      targetJiraStatus: matchingTransition.to.name
+    }, "Found matching transition");
+    return {
+      success: true,
+      transitionId: matchingTransition.id,
+      transitionName: matchingTransition.name
+    };
+  } catch (error) {
+    const errorMsg = error instanceof Error ? error.message : String(error);
+    logger.error({ error, issueKey, targetBacklogStatus }, "Failed to find transition");
+    return {
+      success: false,
+      error: `Failed to query transitions: ${errorMsg}`
+    };
+  }
+}
+function findBestTransitionMatch(transitions, acceptableStatuses) {
+  for (const acceptable of acceptableStatuses) {
+    const exact = transitions.find((t) => t.to.name && t.to.name === acceptable);
+    if (exact) {
+      return exact;
+    }
+  }
+  for (const acceptable of acceptableStatuses) {
+    const caseInsensitive = transitions.find((t) => t.to.name && t.to.name.toLowerCase() === acceptable.toLowerCase());
+    if (caseInsensitive) {
+      return caseInsensitive;
+    }
+  }
+  for (const acceptable of acceptableStatuses) {
+    const lowerAcceptable = acceptable.toLowerCase();
+    const nameMatch = transitions.find((t) => {
+      const lowerTransitionName = t.name.toLowerCase();
+      if (lowerTransitionName.includes(lowerAcceptable)) {
+        return true;
+      }
+      if (lowerAcceptable === "done" || lowerAcceptable === "closed" || lowerAcceptable === "resolved" || lowerAcceptable === "complete") {
+        if (lowerTransitionName.includes("resolve") || lowerTransitionName.includes("close") || lowerTransitionName.includes("done") || lowerTransitionName.includes("complete")) {
           return true;
         }
-      });
-      if (!keyResponse.key) {
-        console.log(source_default.yellow(`
-✗ Configuration cancelled.
-`));
-        process.exit(0);
       }
-      projectKey = keyResponse.key;
+      if (lowerAcceptable === "in progress" || lowerAcceptable === "in development") {
+        if (lowerTransitionName.includes("start") || lowerTransitionName.includes("progress")) {
+          return true;
+        }
+      }
+      return false;
+    });
+    if (nameMatch) {
+      logger.debug({
+        transitionName: nameMatch.name,
+        targetStatus: acceptable
+      }, "Matched transition by name (destination status not provided by MCP)");
+      return nameMatch;
     }
-    projectKey = projectKey.trim().toUpperCase();
-    console.log(source_default.bold.green(`
+  }
+  return null;
+}
+var init_status_mapping = __esm(() => {
+  init_logger();
+});
 
-Step 7: Issue Type`));
-    console.log(source_default.gray(`What type of issues should be synced?
+// src/utils/normalizer.ts
+import crypto from "node:crypto";
+function getSprintSource(options) {
+  return options?.sprint === undefined ? loadSprintPayloadSource() : options.sprint;
+}
+function getMappedFieldMappings(options) {
+  return options?.fieldMappings ?? loadFieldMappings();
+}
+function normalizeBacklogTask(task, options) {
+  const payload = {
+    title: task.title.trim(),
+    description: (task.description || "").trim(),
+    status: canonicalStatus(task.status),
+    priority: task.priority?.toLowerCase(),
+    labels: (task.labels || []).map((l) => l.toLowerCase()).sort(),
+    assignee: task.assignee?.trim().toLowerCase(),
+    acceptanceCriteria: (task.acceptanceCriteria || []).map((ac) => ({
+      text: ac.text.trim(),
+      checked: ac.checked
+    }))
+  };
+  const mappings = getMappedFieldMappings(options).filter((m) => !isCoreOverrideTarget(m.backlog));
+  const sprint = getSprintSource(options);
+  if (mappings.length > 0 || sprint) {
+    const frontmatter = options?.frontmatter ?? readTaskFrontmatter(task.id);
+    payload.mappedFields = {};
+    for (const mapping of mappings) {
+      payload.mappedFields[mapping.backlog] = canonicalMappedValue(getBacklogTargetValue(frontmatter, mapping.backlog), mapping.backlog);
+    }
+    if (sprint) {
+      payload.mappedFields[SPRINT_PAYLOAD_KEY] = backlogSprintValue(sprint, frontmatter.milestone);
+    }
+  }
+  return payload;
+}
+function normalizeJiraIssue(issue, options) {
+  const payload = {
+    title: issue.summary.trim(),
+    description: (issue.description || "").trim(),
+    status: canonicalStatus(mapJiraStatusToBacklog(issue.status, issue.key.split("-")[0], options?.statusMapping ?? loadStatusMapping())),
+    priority: issue.priority?.toLowerCase(),
+    labels: (issue.labels || []).map((l) => l.toLowerCase()).sort(),
+    assignee: issue.assignee?.trim().toLowerCase(),
+    acceptanceCriteria: extractAcceptanceCriteria(issue.description || "")
+  };
+  for (const mapping of getMappedFieldMappings(options)) {
+    const value = getMappedJiraValue(issue, mapping);
+    if (mapping.backlog === "priority") {
+      payload.priority = typeof value === "string" ? value.toLowerCase() : undefined;
+    } else if (mapping.backlog === "labels") {
+      payload.labels = (Array.isArray(value) ? value : []).map((l) => l.toLowerCase()).sort();
+    } else {
+      payload.mappedFields = payload.mappedFields ?? {};
+      payload.mappedFields[mapping.backlog] = canonicalMappedValue(value, mapping.backlog);
+    }
+  }
+  const sprint = getSprintSource(options);
+  if (sprint) {
+    payload.mappedFields = payload.mappedFields ?? {};
+    payload.mappedFields[SPRINT_PAYLOAD_KEY] = jiraSprintValue(sprint, issue);
+  }
+  return payload;
+}
+function canonicalStatus(status) {
+  const normalized = status.toLowerCase().trim();
+  return CANONICAL_STATUS_TOKENS[normalized] ?? normalized;
+}
+function formatAcceptanceCriteriaForJira(acceptanceCriteria) {
+  if (!acceptanceCriteria || acceptanceCriteria.length === 0) {
+    return "";
+  }
+  const formatted = acceptanceCriteria.map((ac) => {
+    const checkbox = ac.checked ? "[x]" : "[ ]";
+    return `- ${checkbox} ${ac.text}`;
+  }).join(`
+`);
+  return `
+
+Acceptance Criteria:
+${formatted}`;
+}
+function stripAcceptanceCriteriaFromDescription(description) {
+  if (!description)
+    return "";
+  const withoutAc = description.replace(/\n\n?Acceptance Criteria:?\s*[\s\S]*?(?=\n\n|$)/i, "");
+  return withoutAc.trim();
+}
+function mergeDescriptionWithAc(description, acceptanceCriteria, implementationPlan, implementationNotes) {
+  const cleanDescription = stripAcceptanceCriteriaFromDescription(description);
+  const acSection = formatAcceptanceCriteriaForJira(acceptanceCriteria);
+  let fullDescription = cleanDescription + acSection;
+  if (implementationPlan?.trim()) {
+    fullDescription += `
+
+Implementation Plan:
+${implementationPlan.trim()}`;
+  }
+  if (implementationNotes?.trim()) {
+    fullDescription += `
+
+Implementation Notes:
+${implementationNotes.trim()}`;
+  }
+  return fullDescription;
+}
+function extractAcceptanceCriteria(description) {
+  const criteria = [];
+  const acMatch = description.match(/acceptance criteria:?\s*([\s\S]*?)(?=\n\n|$)/i);
+  if (!acMatch)
+    return criteria;
+  const acSection = acMatch[1];
+  const lines = acSection.split(`
+`);
+  for (const line of lines) {
+    const checkedMatch = line.match(/^[\s-]*\[x\]\s*(.+)/i);
+    const uncheckedMatch = line.match(/^[\s-]*\[ \]\s*(.+)/i);
+    const bulletMatch = line.match(/^[\s-]*[*•-]\s*(.+)/);
+    if (checkedMatch) {
+      criteria.push({ text: checkedMatch[1].trim(), checked: true });
+    } else if (uncheckedMatch) {
+      criteria.push({ text: uncheckedMatch[1].trim(), checked: false });
+    } else if (bulletMatch) {
+      criteria.push({ text: bulletMatch[1].trim(), checked: false });
+    }
+  }
+  return criteria;
+}
+function computeHash(payload) {
+  const stable = {
+    acceptanceCriteria: payload.acceptanceCriteria,
+    assignee: payload.assignee || "",
+    description: payload.description,
+    labels: payload.labels,
+    priority: payload.priority || "",
+    status: payload.status,
+    title: payload.title
+  };
+  const mappedKeys = Object.keys(payload.mappedFields ?? {}).sort();
+  if (mappedKeys.length > 0) {
+    const mappedFields = {};
+    for (const key of mappedKeys) {
+      mappedFields[key] = payload.mappedFields[key];
+    }
+    stable.mappedFields = mappedFields;
+  }
+  const json = JSON.stringify(stable);
+  return crypto.createHash("sha256").update(json).digest("hex");
+}
+function comparePayloads(a, b) {
+  const changes = [];
+  if (a.title !== b.title)
+    changes.push("title");
+  if (a.description !== b.description)
+    changes.push("description");
+  if (a.status !== b.status)
+    changes.push("status");
+  if (a.priority !== b.priority)
+    changes.push("priority");
+  if (a.assignee !== b.assignee)
+    changes.push("assignee");
+  if (JSON.stringify(a.labels) !== JSON.stringify(b.labels)) {
+    changes.push("labels");
+  }
+  if (JSON.stringify(a.acceptanceCriteria) !== JSON.stringify(b.acceptanceCriteria)) {
+    changes.push("acceptanceCriteria");
+  }
+  const mappedKeys = new Set([
+    ...Object.keys(a.mappedFields ?? {}),
+    ...Object.keys(b.mappedFields ?? {})
+  ]);
+  for (const key of [...mappedKeys].sort()) {
+    if ((a.mappedFields?.[key] ?? "") !== (b.mappedFields?.[key] ?? "")) {
+      changes.push(key);
+    }
+  }
+  return changes;
+}
+var CANONICAL_STATUS_TOKENS;
+var init_normalizer = __esm(() => {
+  init_field_mapping();
+  init_sprint_payload();
+  init_status_mapping();
+  CANONICAL_STATUS_TOKENS = {
+    "to do": "todo",
+    "in progress": "in_progress"
+  };
+});
+
+// src/utils/mapped-field-sync.ts
+function formatMappedFieldFailures(issueKey, failures) {
+  const lines = failures.map((f) => `  - ${f.mapping.jira} (mapped to ${f.mapping.backlog}): ${firstLine(f.error)}`);
+  const hints = [];
+  if (failures.some((f) => f.mapping.type !== "sprint")) {
+    hints.push("Check the field is on the issue type's edit screen (backlog-jira doctor) or fix the mapping with backlog-jira map-fields.");
+  }
+  if (failures.some((f) => f.mapping.type === "sprint")) {
+    hints.push("Check the milestone matches a future or active sprint on the configured board (backlog-jira doctor).");
+  }
+  return `Mapped field${failures.length === 1 ? "" : "s"} could not be updated on ${issueKey}:
+${lines.join(`
+`)}
+${hints.join(`
+`)}`;
+}
+function firstLine(text) {
+  const line = text.trim().split(`
+`)[0] ?? "";
+  return line.length > 300 ? `${line.slice(0, 297)}...` : line;
+}
+function errorMessage(error) {
+  return error instanceof Error ? error.message : String(error);
+}
+async function updateIssueWithMappedFields(jira, issueKey, coreFields, mapped) {
+  const failures = [...mapped.errors];
+  const hasCore = Object.keys(coreFields).length > 0;
+  const mappedIds = Object.keys(mapped.fields);
+  if (mappedIds.length === 0) {
+    if (hasCore)
+      await jira.updateIssue(issueKey, coreFields);
+    return failures;
+  }
+  try {
+    await jira.updateIssue(issueKey, { ...coreFields, fields: mapped.fields });
+    return failures;
+  } catch (error) {
+    logger.warn({ issueKey, error: errorMessage(error), mappedFields: mappedIds }, "Update with mapped fields failed; retrying fields individually");
+  }
+  if (hasCore) {
+    await jira.updateIssue(issueKey, coreFields);
+  }
+  for (const fieldId of mappedIds) {
+    try {
+      await jira.updateIssue(issueKey, {
+        fields: { [fieldId]: mapped.fields[fieldId] }
+      });
+    } catch (error) {
+      for (const change of mapped.changes) {
+        if (change.mapping.jira === fieldId) {
+          failures.push({
+            mapping: change.mapping,
+            error: errorMessage(error)
+          });
+        }
+      }
+    }
+  }
+  return failures;
+}
+async function createIssueWithMappedFields(jira, projectKey, issueType, summary, options, mapped) {
+  const mappedIds = Object.keys(mapped.fields);
+  try {
+    const issue = await jira.createIssue(projectKey, issueType, summary, {
+      ...options,
+      ...mappedIds.length > 0 ? { fields: mapped.fields } : {}
+    });
+    return { issue, failures: [...mapped.errors] };
+  } catch (error) {
+    const message = errorMessage(error);
+    if (!mappedIds.some((id) => message.includes(id))) {
+      throw error;
+    }
+    logger.warn({ error: message, mappedFields: mappedIds }, "Create with mapped fields failed; creating without them");
+  }
+  const issue = await jira.createIssue(projectKey, issueType, summary, options);
+  const failures = await updateIssueWithMappedFields(jira, issue.key, {}, mapped);
+  return { issue, failures };
+}
+function payloadWithValuesFrom(payload, source, targets) {
+  const result = {
+    ...payload,
+    ...payload.mappedFields ? { mappedFields: { ...payload.mappedFields } } : {}
+  };
+  for (const key of targets) {
+    if (key === "priority") {
+      result.priority = source.priority;
+    } else if (key === "labels") {
+      result.labels = source.labels;
+    } else if (result.mappedFields) {
+      result.mappedFields[key] = source.mappedFields?.[key] ?? "";
+    }
+  }
+  return result;
+}
+function payloadWithFailedFields(backlogPayload, jiraPayload, failures) {
+  return payloadWithValuesFrom(backlogPayload, jiraPayload, failures.map((f) => f.mapping.backlog));
+}
+function markOwnerValues(payload, owner, mappings, ownedDirection) {
+  const targets = mappings.filter((m) => m.direction === ownedDirection && payloadValue(payload, m.backlog) !== payloadValue(owner, m.backlog)).map((m) => m.backlog);
+  return targets.length > 0 ? payloadWithValuesFrom(payload, owner, targets) : null;
+}
+function recordSyncedSnapshots(store, taskId, payloads, source, mappings) {
+  const syncedHash = computeHash(payloads[source]);
+  const target = source === "backlog" ? "jira" : "backlog";
+  const marked = markOwnerValues(payloads[source], payloads[target], mappings, source === "backlog" ? "pull" : "push");
+  store.setSnapshot(taskId, source, marked ? computeHash(marked) : syncedHash, marked ?? payloads[source]);
+  store.setSnapshot(taskId, target, syncedHash, payloads[target]);
+}
+function recordPartialPush(store, taskId, task, issue, failures, mappings = []) {
+  const jiraPayload = normalizeJiraIssue(issue);
+  const withFailures = payloadWithFailedFields(normalizeBacklogTask(task), jiraPayload, failures);
+  const backlogPayload = markOwnerValues(withFailures, jiraPayload, mappings, "pull") ?? withFailures;
+  store.setSnapshot(taskId, "backlog", computeHash(backlogPayload), backlogPayload);
+  store.setSnapshot(taskId, "jira", computeHash(jiraPayload), jiraPayload);
+  store.updateSyncState(taskId, { lastSyncAt: new Date().toISOString() });
+}
+async function writeBacklogMappedValues(backlog, taskId, values, currentFrontmatter) {
+  const updates = buildBacklogValueUpdates(values, currentFrontmatter);
+  if (Object.keys(updates.cli).length > 0) {
+    await backlog.updateTask(taskId, updates.cli);
+  }
+  if (Object.keys(updates.frontmatter).length > 0) {
+    updateFrontmatterFields(getTaskFilePath(taskId), updates.frontmatter);
+  }
+}
+function payloadValue(payload, target) {
+  if (!payload)
+    return "";
+  if (target === "priority")
+    return payload.priority ?? "";
+  if (target === "labels")
+    return JSON.stringify(payload.labels ?? []);
+  return payload.mappedFields?.[target] ?? "";
+}
+function fromCanonical(value, target) {
+  if (!value)
+    return null;
+  if (target === "labels" || value.startsWith("[")) {
+    try {
+      const parsed = JSON.parse(value);
+      if (Array.isArray(parsed))
+        return parsed.length > 0 ? parsed : null;
+    } catch {}
+  }
+  return value;
+}
+function sideChanges(state, target) {
+  const backlogNow = payloadValue(state.current.backlog, target);
+  const jiraNow = payloadValue(state.current.jira, target);
+  return {
+    backlogChanged: backlogNow !== payloadValue(state.base.backlog, target),
+    jiraChanged: jiraNow !== payloadValue(state.base.jira, target),
+    differ: backlogNow !== jiraNow
+  };
+}
+function detectMappedFieldConflicts(state, mappings) {
+  const conflicts = [];
+  if (!state.base.backlog || !state.base.jira)
+    return conflicts;
+  for (const mapping of mappings) {
+    if (mapping.direction !== "both")
+      continue;
+    const target = mapping.backlog;
+    const { backlogChanged, jiraChanged, differ } = sideChanges(state, target);
+    if (!backlogChanged || !jiraChanged || !differ)
+      continue;
+    conflicts.push({
+      field: target,
+      backlogValue: getBacklogTargetValue(state.frontmatter, target),
+      jiraValue: getMappedJiraValue(state.issue, mapping),
+      baseValue: fromCanonical(payloadValue(state.base.backlog, target), target),
+      mapping
+    });
+  }
+  return conflicts;
+}
+function parseManualMappedValue(value, mapping) {
+  if (value === null || value === undefined)
+    return null;
+  if (Array.isArray(value)) {
+    return coerceForTarget(value.map(String), mapping.backlog);
+  }
+  const text = String(value).trim();
+  if (!text)
+    return null;
+  const isList = mapping.type === "multi-option" || mapping.type === "array" || Array.isArray(coerceForTarget(text, mapping.backlog));
+  return isList ? text.split(",").map((v) => v.trim()).filter(Boolean) : text;
+}
+function planMappedFieldMerge(state, mappings, resolutions) {
+  const plan = [];
+  for (const mapping of mappings) {
+    const target = mapping.backlog;
+    const backlogValue = getBacklogTargetValue(state.frontmatter, target);
+    const jiraValue = getMappedJiraValue(state.issue, mapping);
+    if (resolutions.has(target) && mapping.direction === "both") {
+      plan.push({ mapping, value: resolutions.get(target) ?? null });
+      continue;
+    }
+    const { backlogChanged, jiraChanged, differ } = sideChanges(state, target);
+    if (!differ)
+      continue;
+    if (mapping.direction === "pull") {
+      plan.push({ mapping, value: jiraValue });
+    } else if (mapping.direction === "push") {
+      plan.push({ mapping, value: backlogValue });
+    } else if (backlogChanged && !jiraChanged) {
+      plan.push({ mapping, value: backlogValue });
+    } else if (jiraChanged && !backlogChanged) {
+      plan.push({ mapping, value: jiraValue });
+    }
+  }
+  return plan;
+}
+async function applyMappedFieldMerge(plan, context) {
+  const { taskId, issueKey, backlog, jira, frontmatter, issue } = context;
+  await writeBacklogMappedValues(backlog, taskId, plan.filter((p) => p.mapping.direction !== "push"), frontmatter);
+  const jiraUpdates = buildJiraValueUpdates(plan.filter((p) => p.mapping.direction !== "pull"), issue);
+  return updateIssueWithMappedFields(jira, issueKey, {}, jiraUpdates);
+}
+function displayValue(value) {
+  if (value === null)
+    return "(empty)";
+  return Array.isArray(value) ? value.join(", ") : value;
+}
+function formatMappedFieldsSection(mappings, frontmatter, issue, jiraUnavailableReason) {
+  if (mappings.length === 0)
+    return [];
+  const lines = ["", "Mapped Fields:", "-".repeat(50)];
+  for (const mapping of mappings) {
+    const backlogValue = getBacklogTargetValue(frontmatter, mapping.backlog);
+    lines.push(`${mapping.backlog} ↔ ${mapping.jira} (${mapping.type}, ${mapping.direction})`);
+    lines.push(`  Backlog: ${displayValue(backlogValue)}`);
+    if (issue) {
+      const jiraValue = getMappedJiraValue(issue, mapping);
+      const inSync = canonicalMappedValue(backlogValue, mapping.backlog) === canonicalMappedValue(jiraValue, mapping.backlog);
+      lines.push(`  Jira:    ${displayValue(jiraValue)}${inSync ? "" : "  [differs]"}`);
+    } else {
+      lines.push(`  Jira:    ${jiraUnavailableReason ?? "(unavailable)"}`);
+    }
+  }
+  return lines;
+}
+function verifyFieldMappings(mappings, knownFields, screenFieldIds, scope) {
+  const known = new Set(knownFields.map((f) => f.id));
+  return mappings.map((mapping) => {
+    const problems = [];
+    if (!known.has(mapping.jira)) {
+      problems.push(`Jira field "${mapping.jira}" does not exist`);
+    } else if (mapping.direction !== "pull" && screenFieldIds && !screenFieldIds.has(mapping.jira)) {
+      problems.push(`Jira field "${mapping.jira}" is not editable for ${scope.projectKey} / ${scope.issueType} (not on the issue type's screen)`);
+    }
+    return { mapping, problems };
+  });
+}
+function getOverriddenCoreFields(mappings) {
+  return new Set(withoutBuiltInMappings(mappings).map((m) => m.backlog).filter((t) => isCoreOverrideTarget(t)));
+}
+var MappedFieldPushError;
+var init_mapped_field_sync = __esm(() => {
+  init_field_mapping();
+  init_frontmatter();
+  init_logger();
+  init_normalizer();
+  MappedFieldPushError = class MappedFieldPushError extends Error {
+    issueKey;
+    failures;
+    constructor(issueKey, failures) {
+      super(formatMappedFieldFailures(issueKey, failures));
+      this.issueKey = issueKey;
+      this.failures = failures;
+      this.name = "MappedFieldPushError";
+    }
+  };
+});
+
+// src/commands/doctor.ts
+import { spawn as spawn3 } from "node:child_process";
+import { existsSync as existsSync10 } from "node:fs";
+import { readFile } from "node:fs/promises";
+import { join as join11 } from "node:path";
+async function exec(command, args = []) {
+  return new Promise((resolve, reject) => {
+    const proc = spawn3(command, args, {
+      shell: false,
+      stdio: ["pipe", "pipe", "pipe"]
+    });
+    let stdout = "";
+    let stderr = "";
+    proc.stdout.on("data", (data) => {
+      stdout += data;
+    });
+    proc.stderr.on("data", (data) => {
+      stderr += data;
+    });
+    proc.on("close", (code) => {
+      if (code === 0) {
+        resolve(stdout.trim());
+      } else {
+        reject(new Error(`${command} failed: ${stderr}`));
+      }
+    });
+  });
+}
+async function checkNodeRuntime() {
+  const version = process.versions.node;
+  const major = Number.parseInt(version.split(".")[0], 10);
+  if (major < 20) {
+    throw new Error(`Node.js 20+ required, found: ${version}`);
+  }
+  const runtime = process.versions.bun ? `Bun ${process.versions.bun} (Node.js ${version} compatible)` : `Node.js ${version}`;
+  logger.info(`  ✓ Runtime: ${runtime}`);
+}
+async function checkBacklogCLI() {
+  const version = await exec("backlog", ["--version"]);
+  logger.info(`  ✓ Backlog CLI: ${version}`);
+}
+async function checkMCPServer() {
+  const result = await exec("backlog", ["task", "list", "--plain"]);
+  if (!result) {
+    logger.warn("  ⚠ No tasks found. Make sure you're in a Backlog.md project directory.");
+  } else {
+    logger.info("  ✓ Backlog.md project detected");
+  }
+}
+async function checkDatabasePerms() {
+  const configDir = join11(process.cwd(), ".backlog-jira");
+  if (!existsSync10(configDir)) {
+    throw new Error(".backlog-jira/ not found. Run 'backlog-jira init' first.");
+  }
+  const store = new FrontmatterStore;
+  store.testWriteAccess();
+  store.close();
+  logger.info("  ✓ Database permissions OK");
+}
+async function checkGitStatus() {
+  try {
+    const status = await exec("git", ["status", "--porcelain"]);
+    if (status.trim()) {
+      logger.warn("  ⚠ Working directory has uncommitted changes");
+    } else {
+      logger.info("  ✓ Git working directory clean");
+    }
+  } catch (error) {
+    logger.warn("  ⚠ Not a git repository");
+  }
+}
+async function checkMCPConnectivity() {
+  try {
+    const startTime = Date.now();
+    const result = await exec("backlog", [
+      "task",
+      "list",
+      "--plain",
+      "-s",
+      "To Do"
+    ]);
+    const duration = Date.now() - startTime;
+    if (duration > 5000) {
+      logger.warn(`  ⚠ MCP response slow (${duration}ms). Consider optimizing task count.`);
+    } else {
+      logger.info(`  ✓ MCP connectivity OK (${duration}ms)`);
+    }
+  } catch (error) {
+    throw new Error("Failed to connect to MCP server. Ensure backlog CLI is working.");
+  }
+}
+async function checkNodeModules() {
+  const nodeModulesPath = join11(process.cwd(), "node_modules");
+  if (!existsSync10(nodeModulesPath)) {
+    throw new Error("node_modules not found. Install dependencies first (npm, pnpm or bun install).");
+  }
+  logger.info("  ✓ Dependencies installed");
+}
+async function checkDiskSpace() {
+  try {
+    const result = await exec("df", ["-h", process.cwd()]);
+    const lines = result.split(`
+`);
+    if (lines.length > 1) {
+      const parts = lines[1].split(/\s+/);
+      const available = parts[3];
+      logger.info(`  ✓ Disk space: ${available} available`);
+    }
+  } catch (error) {
+    logger.warn("  ⚠ Could not check disk space");
+  }
+}
+async function checkConfigFile(cwd = process.cwd()) {
+  const configPath = join11(cwd, ".backlog-jira", "config.json");
+  if (!existsSync10(configPath)) {
+    throw new Error("Config file not found. Run 'backlog-jira init' first.");
+  }
+  let config;
+  try {
+    config = JSON.parse(await readFile(configPath, "utf8"));
+  } catch (error) {
+    if (error instanceof SyntaxError) {
+      throw new Error("Config file contains invalid JSON");
+    }
+    throw error;
+  }
+  const projectKey = config?.jira?.projectKey;
+  if (typeof projectKey !== "string" || projectKey.trim() === "") {
+    throw new Error("Missing required config field: jira.projectKey (set it in .backlog-jira/config.json)");
+  }
+  logger.info("  ✓ Configuration file valid");
+}
+async function checkFieldMappings(jira, cwd = process.cwd()) {
+  const mappings = loadFieldMappings(cwd);
+  if (mappings.length === 0) {
+    logger.info(loadSprintMapping(cwd) ? "  ✓ No field mappings besides the sprint mapping" : "  ✓ No field mappings configured");
+    return [];
+  }
+  const config = JSON.parse(await readFile(join11(cwd, ".backlog-jira", "config.json"), "utf8"));
+  const projectKey = config.jira?.projectKey || process.env.JIRA_PROJECT || "";
+  const issueType = config.jira?.issueType || "Task";
+  let knownFields;
+  try {
+    knownFields = await jira.searchFields("", 1000);
+  } catch (error) {
+    throw new Error(`Could not list Jira fields to verify field mappings: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  let screenFieldIds = null;
+  const writesToJira = mappings.some((m) => m.direction !== "pull");
+  if (writesToJira) {
+    if (!projectKey) {
+      logger.warn("  ⚠ jira.projectKey is not configured; cannot check mapped fields are editable");
+    } else {
+      try {
+        const types = await jira.getProjectIssueTypes(projectKey);
+        const type = types.find((t) => t.name.toLowerCase() === issueType.toLowerCase());
+        if (!type) {
+          throw new Error(`issue type "${issueType}" not found in project ${projectKey}`);
+        }
+        screenFieldIds = new Set(await jira.getCreateFieldIds(projectKey, type.id));
+      } catch (error) {
+        logger.warn(`  ⚠ Could not read screen fields for ${projectKey} / ${issueType}, skipping editability check: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+  }
+  const results = verifyFieldMappings(mappings, knownFields, screenFieldIds, {
+    projectKey,
+    issueType
+  });
+  for (const { mapping, problems } of results) {
+    const label = `${mapping.backlog} ↔ ${mapping.jira} (${mapping.direction})`;
+    if (problems.length === 0) {
+      logger.info(`  ✓ Field mapping ${label}`);
+    } else {
+      for (const problem of problems) {
+        logger.error(`  ✗ Field mapping ${label}: ${problem}`);
+      }
+    }
+  }
+  const failed = results.filter((r) => r.problems.length > 0);
+  if (failed.length > 0) {
+    throw new Error(`${failed.length} field mapping${failed.length === 1 ? "" : "s"} failed verification (${failed.map((r) => r.mapping.jira).join(", ")})`);
+  }
+  return results;
+}
+async function checkSprintSync(jira, options = {}) {
+  const cwd = options.cwd ?? process.cwd();
+  const mapping = loadSprintMapping(cwd);
+  if (!mapping) {
+    logger.info("  ✓ Sprint sync not configured");
+    return 0;
+  }
+  const errors = [];
+  let warnings = 0;
+  const describe = (error) => error instanceof Error ? error.message.split(`
+`)[0] : String(error);
+  try {
+    const fieldId = await jira.getSprintFieldId();
+    if (fieldId) {
+      logger.info(`  ✓ Sprint field ${fieldId}`);
+      const stored = SprintRegistry.load(cwd).sprintFieldId;
+      if (stored && stored !== fieldId) {
+        logger.warn(`  ⚠ .backlog-jira/sprints.json records Sprint field ${stored} but Jira reports ${fieldId}; remove "sprintFieldId" from sprints.json so it is rediscovered`);
+        warnings++;
+      }
+    } else {
+      errors.push("Sprint field not found: this Jira site has no Jira Software Sprint field");
+    }
+  } catch (error) {
+    errors.push(`Could not discover the Sprint field: ${describe(error)}`);
+  }
+  let sprints = null;
+  try {
+    const board = await jira.getBoard(mapping.boardId);
+    if (!board) {
+      errors.push(`Board ${mapping.boardId} was not found or is not accessible (check "boardId" and board permissions)`);
+    } else if (!board.supportsSprints) {
+      errors.push(`Board ${mapping.boardId} (${board.name}) is a ${board.type} board without sprints; sprint sync needs a scrum board`);
+    } else {
+      sprints = await jira.getBoardSprints(mapping.boardId);
+      logger.info(`  ✓ Board ${board.id} (${board.name}, ${board.type}) with ${sprints.length} sprint${sprints.length === 1 ? "" : "s"}`);
+    }
+  } catch (error) {
+    errors.push(`Board ${mapping.boardId} is unreachable: ${describe(error)}`);
+  }
+  if (mapping.direction !== "pull") {
+    if (mapping.createSprints) {
+      logger.info(`  ℹ createSprints is on: pushing a task whose milestone matches no sprint creates a future sprint on board ${mapping.boardId}`);
+    } else if (sprints) {
+      const unmatched = findUnmatchedMilestones(options.taskIds ?? new FrontmatterStore().getAllMappings().keys(), sprints, cwd);
+      if (unmatched.length > 0) {
+        logger.warn(`  ⚠ ${unmatched.length} linked task${unmatched.length === 1 ? "" : "s"} ha${unmatched.length === 1 ? "s a milestone" : "ve milestones"} matching no future or active sprint on board ${mapping.boardId} (createSprints is off, so push will report them):`);
+        for (const { taskId, milestone } of unmatched) {
+          logger.warn(`      ${taskId}: ${milestone}`);
+        }
+        warnings++;
+      }
+    }
+  }
+  for (const refusal of readMilestoneRefusals(cwd)) {
+    logger.warn(`  ⚠ Milestone ${refusal.milestoneId}${refusal.title ? ` (${refusal.title})` : ""} was not updated (${refusal.fields.join(", ")}): ${refusal.reason}`);
+    warnings++;
+  }
+  if (errors.length > 0) {
+    for (const error of errors)
+      logger.error(`  ✗ ${error}`);
+    throw new Error(`${errors.length} sprint sync problem${errors.length === 1 ? "" : "s"}`);
+  }
+  return warnings;
+}
+function findUnmatchedMilestones(taskIds, sprints, cwd) {
+  const registry = SprintRegistry.load(cwd);
+  const milestones = new MilestoneAdapter({ cwd, registry });
+  const openNames = new Set(sprints.filter((s) => s.state !== "closed").map((s) => s.name.trim().toLowerCase()));
+  const unmatched = [];
+  for (const taskId of taskIds) {
+    const value = readTaskFrontmatter(taskId).milestone;
+    if (typeof value !== "string" || !value.trim())
+      continue;
+    const milestone = milestones.get(value) ?? milestones.findByTitle(value);
+    if (milestone && registry.findByMilestone(milestone.id))
+      continue;
+    const title = (milestone?.title ?? value).trim().toLowerCase();
+    if (openNames.has(title))
+      continue;
+    unmatched.push({
+      taskId,
+      milestone: milestone ? `${milestone.title} (${milestone.id})` : value
+    });
+  }
+  return unmatched;
+}
+async function checkSprintSyncWithJira() {
+  const jira = new JiraClient({ ...getJiraClientOptions(), silentMode: true });
+  try {
+    return await checkSprintSync(jira);
+  } finally {
+    await jira.close().catch(() => {});
+  }
+}
+async function checkFieldMappingsWithJira() {
+  const jira = new JiraClient({ ...getJiraClientOptions(), silentMode: true });
+  try {
+    await checkFieldMappings(jira);
+  } finally {
+    await jira.close().catch(() => {});
+  }
+}
+async function runDoctor() {
+  logger.info(`Running environment checks...
+`);
+  const checks = [
+    { name: "Node.js runtime", fn: checkNodeRuntime, critical: true },
+    { name: "Backlog CLI", fn: checkBacklogCLI, critical: true },
+    { name: "Dependencies", fn: checkNodeModules, critical: true },
+    { name: "Configuration", fn: () => checkConfigFile(), critical: true },
+    { name: "Database", fn: checkDatabasePerms, critical: true },
+    { name: "MCP Connectivity", fn: checkMCPConnectivity, critical: true },
+    { name: "Field mappings", fn: checkFieldMappingsWithJira, critical: true },
+    { name: "Sprint sync", fn: checkSprintSyncWithJira, critical: true },
+    { name: "Backlog.md project", fn: checkMCPServer, critical: false },
+    { name: "Git status", fn: checkGitStatus, critical: false },
+    { name: "Disk space", fn: checkDiskSpace, critical: false }
+  ];
+  let criticalFailed = false;
+  let warningCount = 0;
+  for (const check of checks) {
+    try {
+      const warnings = await check.fn();
+      if (typeof warnings === "number")
+        warningCount += warnings;
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      if (check.critical) {
+        logger.error(`  ✗ ${check.name}: ${errorMsg}`);
+        criticalFailed = true;
+      } else {
+        logger.warn(`  ⚠ ${check.name}: ${errorMsg}`);
+        warningCount++;
+      }
+    }
+  }
+  logger.info("");
+  if (criticalFailed) {
+    logger.error("Critical checks failed. Please fix the issues above before proceeding.");
+  } else if (warningCount > 0) {
+    logger.info(`✓ All critical checks passed! (${warningCount} warning${warningCount > 1 ? "s" : ""})`);
+  } else {
+    logger.info("✓ All checks passed! Ready to sync.");
+  }
+  return { ok: !criticalFailed, warnings: warningCount };
+}
+async function doctorCommand() {
+  const { ok } = await runDoctor();
+  if (!ok)
+    process.exit(1);
+}
+var init_doctor = __esm(() => {
+  init_jira();
+  init_milestones();
+  init_sprint_registry();
+  init_store();
+  init_field_mapping();
+  init_jira_config();
+  init_logger();
+  init_mapped_field_sync();
+});
+
+// src/commands/configure.ts
+import { existsSync as existsSync11, readFileSync as readFileSync12, writeFileSync as writeFileSync9 } from "node:fs";
+import { join as join12 } from "node:path";
+async function ask(question) {
+  const name = String(question.name);
+  const response = await import_prompts.default(question);
+  const answer = response?.[name];
+  if (answer === undefined)
+    throw new WizardCancelled;
+  return answer;
+}
+function describeError(error) {
+  return error instanceof Error ? error.message : String(error);
+}
+function defaultCreateJira(config) {
+  return new JiraClient({
+    ...jiraClientOptionsFromConfig(config),
+    silentMode: true
+  });
+}
+async function withJira(ctx, fn, config = ctx.config) {
+  const key = JSON.stringify([
+    config.mcp ?? null,
+    ...[
+      "JIRA_URL",
+      "JIRA_EMAIL",
+      "JIRA_USERNAME",
+      "JIRA_API_TOKEN",
+      "JIRA_PERSONAL_TOKEN"
+    ].map((name) => process.env[name] ?? null)
+  ]);
+  if (ctx.jira?.key !== key) {
+    await closeJira(ctx);
+    ctx.jira = { key, client: ctx.createJira(config) };
+  }
+  return fn(ctx.jira.client);
+}
+async function closeJira(ctx) {
+  const client = ctx.jira?.client;
+  ctx.jira = undefined;
+  await client?.close().catch(() => {});
+}
+function jiraSection(ctx) {
+  const jira = getSection(ctx.config, "jira");
+  return {
+    projectKey: typeof jira.projectKey === "string" ? jira.projectKey : "",
+    issueType: typeof jira.issueType === "string" ? jira.issueType : "Task",
+    jqlFilter: typeof jira.jqlFilter === "string" ? jira.jqlFilter : ""
+  };
+}
+async function credentialsStep(ctx) {
+  let status = detectCredentials();
+  const mark = (ok) => ok ? source_default.green("✓") : source_default.red("✗");
+  console.log(`  ${mark(!!status.url)} JIRA_URL        ${status.url ?? ""}`);
+  if (status.hasPersonalToken) {
+    console.log(`  ${mark(true)} JIRA_PERSONAL_TOKEN (set, hidden)`);
+  } else {
+    console.log(`  ${mark(!!status.email)} JIRA_EMAIL      ${status.email ?? ""}`);
+    console.log(`  ${mark(status.hasApiToken)} JIRA_API_TOKEN  ${status.hasApiToken ? "(set, hidden)" : ""}`);
+  }
+  if (!status.auth) {
+    console.log(source_default.yellow(`
+  Not exported to this process: ${status.missing.join(", ")}
 `));
-    const issueTypeResponse = await import_prompts.default({
+    for (const line of credentialHelpLines()) {
+      console.log(source_default.gray(`  ${line}`));
+    }
+    console.log();
+    const enterNow = await ask({
+      type: "confirm",
+      name: "enterCredentials",
+      message: "Enter credentials for this session so setup can continue? (not saved to config.json)",
+      initial: true
+    });
+    if (!enterNow) {
+      console.log(source_default.gray("  Export the variables, then run: backlog-jira configure --step credentials"));
+      return "skipped";
+    }
+    const values = await promptCredentials(ctx);
+    for (const [name, value] of Object.entries(values)) {
+      process.env[name] = value;
+    }
+    status = detectCredentials();
+    await offerEnvFile(ctx, values);
+  } else {
+    console.log(source_default.green(`
+  Credentials are exported.`));
+  }
+  if (status.url) {
+    setSectionValues(ctx.config, "jira", {
+      baseUrl: status.url.replace(/\/+$/, "")
+    });
+  }
+  return status.auth ? "done" : "skipped";
+}
+async function promptCredentials(ctx) {
+  const instance = await ask({
+    type: "select",
+    name: "instanceType",
+    message: "Jira deployment:",
+    choices: [
+      {
+        title: "Jira Cloud (atlassian.net) - email + API token",
+        value: "cloud"
+      },
+      {
+        title: "Jira Server / Data Center - personal access token",
+        value: "server"
+      }
+    ]
+  });
+  const baseUrl = getSection(ctx.config, "jira").baseUrl;
+  const url = await ask({
+    type: "text",
+    name: "jiraUrl",
+    message: "Jira URL:",
+    initial: process.env.JIRA_URL || typeof baseUrl === "string" && baseUrl || (instance === "cloud" ? "https://your-domain.atlassian.net" : ""),
+    validate: (value) => {
+      try {
+        const parsed = new URL(value.trim());
+        return /^https?:$/.test(parsed.protocol) ? true : "URL must start with http:// or https://";
+      } catch {
+        return "Enter a URL such as https://your-domain.atlassian.net";
+      }
+    }
+  });
+  const values = {
+    JIRA_URL: url.trim().replace(/\/+$/, "")
+  };
+  if (instance === "cloud") {
+    console.log(source_default.gray("  Create an API token at https://id.atlassian.com/manage-profile/security/api-tokens"));
+    values.JIRA_EMAIL = (await ask({
+      type: "text",
+      name: "jiraEmail",
+      message: "Jira account email:",
+      initial: process.env.JIRA_EMAIL ?? "",
+      validate: (value) => value.includes("@") ? true : "Enter the email you log in to Jira with"
+    })).trim();
+    values.JIRA_API_TOKEN = await ask({
+      type: "password",
+      name: "jiraApiToken",
+      message: "API token:",
+      validate: (value) => value.trim() ? true : "Token is required"
+    });
+  } else {
+    values.JIRA_PERSONAL_TOKEN = await ask({
+      type: "password",
+      name: "jiraPersonalToken",
+      message: "Personal access token:",
+      validate: (value) => value.trim() ? true : "Token is required"
+    });
+  }
+  return values;
+}
+async function offerEnvFile(ctx, values) {
+  const save = await ask({
+    type: "confirm",
+    name: "saveEnvFile",
+    message: "Also write them to .env for later runs? (added to .gitignore)",
+    initial: false
+  });
+  if (!save) {
+    console.log(source_default.gray("  They are set for this session only. Export them before running backlog-jira again."));
+    return;
+  }
+  const envPath = join12(ctx.cwd, ".env");
+  const existing = existsSync11(envPath) ? readFileSync12(envPath, "utf-8") : "";
+  writeFileSync9(envPath, mergeEnvFile(existing, values), { mode: 384 });
+  console.log(source_default.green(`  ✓ Wrote ${envPath}`));
+  const gitignorePath = join12(ctx.cwd, ".gitignore");
+  const gitignore = existsSync11(gitignorePath) ? readFileSync12(gitignorePath, "utf-8") : "";
+  if (!gitignore.split(`
+`).some((line) => line.trim() === ".env")) {
+    writeFileSync9(gitignorePath, `${gitignore}${gitignore && !gitignore.endsWith(`
+`) ? `
+` : ""}.env
+`);
+    console.log(source_default.green("  ✓ Added .env to .gitignore"));
+  }
+  console.log(source_default.yellow("  backlog-jira does not read .env itself: load it with direnv ('dotenv' in .envrc) or 'set -a; . ./.env; set +a'."));
+}
+async function connectionStep(ctx) {
+  if (!detectCredentials().auth) {
+    console.log(source_default.red("  ✗ Credentials are not exported, so the MCP server cannot log in to Jira."));
+    console.log(source_default.gray("    Run: backlog-jira configure --step credentials"));
+    return "failed";
+  }
+  console.log(source_default.gray("  Starting the MCP Atlassian server..."));
+  const result = await withJira(ctx, (jira) => jira.checkConnection());
+  if (result.ok) {
+    console.log(source_default.green("  ✓ Connected to Jira"));
+    return "done";
+  }
+  console.log(source_default.red("  ✗ Connection failed:"));
+  for (const line of (result.error ?? "Unknown error").split(`
+`)) {
+    console.log(source_default.red(`    ${line}`));
+  }
+  console.log(source_default.gray("    Check the credentials, that Docker is running (or mcp.useExternalServer), and proxy settings in mcp.envVars."));
+  return "failed";
+}
+async function projectStep(ctx) {
+  const current = jiraSection(ctx);
+  const envVars = getSection(getSection(ctx.config, "mcp"), "envVars");
+  if (typeof envVars.TOOLSETS === "string")
+    applyRequiredToolsets(ctx.config);
+  let projects = [];
+  try {
+    projects = await withJira(ctx, (jira) => jira.getAllProjects());
+  } catch (error) {
+    console.log(source_default.yellow(`  ⚠ Could not list Jira projects: ${describeError(error)}`));
+  }
+  let projectKey;
+  const manualKey = () => ask({
+    type: "text",
+    name: "projectKey",
+    message: "Jira project key (e.g. PROJ):",
+    initial: current.projectKey,
+    validate: (value) => /^[A-Za-z][A-Za-z0-9_]*$/.test(value.trim()) ? true : "Enter a project key such as PROJ"
+  });
+  if (projects.length > 0) {
+    const sorted = [...projects].sort((a, b) => a.key.localeCompare(b.key));
+    const choices = [
+      ...sorted.map((p) => ({ title: `${p.key} - ${p.name}`, value: p.key })),
+      { title: "Enter a key manually", value: "__manual__" }
+    ];
+    const index = sorted.findIndex((p) => p.key === current.projectKey);
+    const choice = await ask({
+      type: "autocomplete",
+      name: "project",
+      message: "Jira project (type to filter):",
+      choices,
+      initial: index >= 0 ? index : 0,
+      suggest: filterChoices
+    });
+    projectKey = choice === "__manual__" ? await manualKey() : choice;
+  } else {
+    projectKey = await manualKey();
+  }
+  projectKey = projectKey.trim().toUpperCase();
+  let issueTypes = [];
+  try {
+    issueTypes = await withJira(ctx, (jira) => jira.getProjectIssueTypes(projectKey));
+  } catch (error) {
+    console.log(source_default.yellow(`  ⚠ Could not list issue types of ${projectKey}: ${describeError(error)}`));
+  }
+  let issueType;
+  if (issueTypes.length > 0) {
+    const names = issueTypes.map((t) => t.name);
+    const index = names.findIndex((n) => n.toLowerCase() === current.issueType.toLowerCase());
+    issueType = await ask({
       type: "select",
       name: "issueType",
-      message: "Default issue type:",
-      choices: [
-        { title: "Task", value: "Task" },
-        { title: "Story", value: "Story" },
-        { title: "Bug", value: "Bug" },
-        { title: "Epic", value: "Epic" },
-        { title: "Other (enter manually)", value: "___manual___" }
-      ]
+      message: "Issue type for tasks created in Jira:",
+      choices: names.map((n) => ({ title: n, value: n })),
+      initial: index >= 0 ? index : 0
     });
-    if (!issueTypeResponse.issueType) {
-      console.log(source_default.yellow(`
-✗ Configuration cancelled.
-`));
-      process.exit(0);
-    }
-    const issueType = issueTypeResponse.issueType;
-    let finalIssueType = issueType;
-    if (issueType === "___manual___") {
-      const typeResponse = await import_prompts.default({
-        type: "text",
-        name: "type",
-        message: "Issue type name:",
-        validate: (value) => {
-          if (!value || value.trim() === "") {
-            return "Issue type is required";
-          }
-          return true;
-        }
-      });
-      if (!typeResponse.type) {
-        console.log(source_default.yellow(`
-✗ Configuration cancelled.
-`));
-        process.exit(0);
+  } else {
+    issueType = await ask({
+      type: "text",
+      name: "issueType",
+      message: "Issue type for tasks created in Jira:",
+      initial: current.issueType,
+      validate: (value) => value.trim() ? true : "Required"
+    });
+  }
+  setSectionValues(ctx.config, "jira", {
+    projectKey,
+    issueType: issueType.trim()
+  });
+  console.log(source_default.green(`  ✓ Project ${projectKey}, issue type ${issueType}`));
+  return "done";
+}
+function filterChoices(input, choices) {
+  const needle = input.trim().toLowerCase();
+  return Promise.resolve(needle ? choices.filter((c) => c.title.toLowerCase().includes(needle)) : choices);
+}
+function splitList(value) {
+  return value.split(",").map((s) => s.trim()).filter(Boolean);
+}
+async function statusStep(ctx) {
+  const { projectKey, issueType } = jiraSection(ctx);
+  if (!projectKey) {
+    console.log(source_default.yellow("  Choose a project first: backlog-jira configure --step project"));
+    return "skipped";
+  }
+  const backlog = getSection(ctx.config, "backlog");
+  const previous = backlog.statusMapping && typeof backlog.statusMapping === "object" ? backlog.statusMapping : {};
+  const previousUnmapped = Array.isArray(backlog.unmappedJiraStatuses) ? backlog.unmappedJiraStatuses.map(String) : [];
+  const backlogStatuses = ctx.backlogStatuses();
+  let perType = [];
+  try {
+    perType = await withJira(ctx, async (jira) => {
+      let types = [issueType];
+      try {
+        types = (await jira.getProjectIssueTypes(projectKey)).map((t) => t.name);
+      } catch (error) {
+        logger.debug({ error }, "Could not list issue types");
       }
-      finalIssueType = typeResponse.type;
-    }
-    console.log(source_default.bold.green(`
-
-Step 8: JQL Filter (Optional)`));
-    console.log(source_default.gray(`Add a JQL filter to limit which issues are synced.
-`));
-    const jqlFilterResponse = await import_prompts.default({
-      type: "confirm",
-      name: "useJqlFilter",
-      message: "Do you want to add a JQL filter?",
-      initial: false
+      return discoverProjectStatuses(jira, projectKey, types);
     });
-    if (jqlFilterResponse.useJqlFilter === undefined) {
-      console.log(source_default.yellow(`
-✗ Configuration cancelled.
-`));
-      process.exit(0);
+  } catch (error) {
+    console.log(source_default.yellow(`  ⚠ Could not read Jira statuses of ${projectKey}: ${describeError(error)}`));
+  }
+  console.log(`  Backlog statuses: ${source_default.cyan(backlogStatuses.join(", "))}`);
+  const jiraStatuses = [];
+  const addStatus = (status) => {
+    if (!jiraStatuses.some((s) => s.toLowerCase() === status.toLowerCase())) {
+      jiraStatuses.push(status);
     }
-    let jqlFilter = "";
-    if (jqlFilterResponse.useJqlFilter) {
-      const filterResponse = await import_prompts.default({
-        type: "text",
-        name: "filter",
-        message: "JQL filter (e.g., labels = 'sync' AND status != Done):",
-        initial: ""
-      });
-      if (filterResponse.filter === undefined) {
-        console.log(source_default.yellow(`
-✗ Configuration cancelled.
-`));
-        process.exit(0);
-      }
-      jqlFilter = filterResponse.filter;
+  };
+  if (perType.length > 0) {
+    console.log(`  Jira statuses of ${projectKey} by issue type:`);
+    for (const entry of perType) {
+      console.log(`    ${entry.issueType.padEnd(12)} ${source_default.yellow(entry.statuses.join(", "))}`);
+      for (const status of entry.statuses)
+        addStatus(status);
     }
-    console.log(source_default.bold.green(`
-
-Step 9: Status Mapping`));
-    console.log(source_default.gray(`Map Backlog.md statuses to Jira statuses.
-`));
-    const mappingResponse = await import_prompts.default({
-      type: "confirm",
-      name: "useCustomMapping",
-      message: "Customize status mapping? (default mapping will be used if No)",
-      initial: false
-    });
-    if (mappingResponse.useCustomMapping === undefined) {
-      console.log(source_default.yellow(`
-✗ Configuration cancelled.
-`));
-      process.exit(0);
+    console.log(source_default.gray("  (Found from the project's issues and their transitions; add statuses no issue has used yet below.)"));
+    for (const status of splitList(await ask({
+      type: "text",
+      name: "extraStatuses",
+      message: "Other Jira statuses to map (comma-separated, optional):",
+      initial: ""
+    }))) {
+      addStatus(status);
     }
-    const useCustomMapping = mappingResponse.useCustomMapping;
-    const statusMapping = {
-      "To Do": ["To Do", "Open", "Backlog"],
-      "In Progress": ["In Progress"],
-      Done: ["Done", "Closed", "Resolved"]
-    };
-    if (useCustomMapping) {
-      console.log(source_default.cyan(`
-Default mapping:`));
-      console.log(source_default.gray("  To Do → To Do, Open, Backlog"));
-      console.log(source_default.gray("  In Progress → In Progress"));
-      console.log(source_default.gray(`  Done → Done, Closed, Resolved
-`));
-      console.log(source_default.yellow("Note: Using default mapping for now. Edit .backlog-jira/config.json to customize."));
+  } else {
+    console.log(source_default.yellow(`  No Jira statuses found for ${projectKey}. Enter them manually.`));
+    const known = [...Object.values(previous).flat(), ...previousUnmapped].map(String);
+    for (const status of splitList(await ask({
+      type: "text",
+      name: "extraStatuses",
+      message: "Jira statuses (comma-separated):",
+      initial: known.join(", ")
+    }))) {
+      addStatus(status);
     }
-    console.log(source_default.bold.green(`
-
-Step 10: Conflict Resolution Strategy`));
-    console.log(source_default.gray(`How should conflicts be handled during sync?
-`));
-    const conflictStrategyResponse = await import_prompts.default({
+  }
+  if (jiraStatuses.length === 0) {
+    console.log(source_default.yellow("  No statuses to map; keeping the current mapping."));
+    return "skipped";
+  }
+  const UNMAPPED = "__unmapped__";
+  const choices = {};
+  for (const status of jiraStatuses) {
+    const wasUnmapped = previousUnmapped.some((s) => s.toLowerCase() === status.toLowerCase());
+    const suggestion = suggestBacklogStatus(status, backlogStatuses, previous);
+    const options = [
+      ...backlogStatuses.map((s) => ({ title: s, value: s })),
+      { title: "Leave unmapped (keep the Jira status name)", value: UNMAPPED }
+    ];
+    const answer = await ask({
       type: "select",
-      name: "strategy",
-      message: "Conflict resolution strategy:",
-      choices: [
-        {
-          title: "Prompt (ask for each conflict)",
-          value: "prompt",
-          description: "Interactive resolution for each conflict"
-        },
-        {
-          title: "Prefer Backlog",
-          value: "prefer-backlog",
-          description: "Automatically use Backlog version when conflicts occur"
-        },
-        {
-          title: "Prefer Jira",
-          value: "prefer-jira",
-          description: "Automatically use Jira version when conflicts occur"
-        }
-      ],
+      name: "backlogStatus",
+      message: `Jira "${status}" →`,
+      choices: options,
+      initial: wasUnmapped ? options.length - 1 : Math.max(0, backlogStatuses.indexOf(suggestion))
+    });
+    choices[status] = answer === UNMAPPED ? null : answer;
+  }
+  const { statusMapping, unmappedJiraStatuses } = buildStatusMappingConfig(choices, previous, previousUnmapped);
+  const uncovered = uncoveredJiraStatuses(jiraStatuses, statusMapping, unmappedJiraStatuses);
+  const values = { statusMapping };
+  setSectionValues(ctx.config, "backlog", values);
+  const section = getSection(ctx.config, "backlog");
+  if (unmappedJiraStatuses.length > 0) {
+    section.unmappedJiraStatuses = unmappedJiraStatuses;
+  } else {
+    section.unmappedJiraStatuses = undefined;
+  }
+  console.log(source_default.green("  ✓ Status mapping:"));
+  for (const [backlogStatus, list] of Object.entries(statusMapping)) {
+    console.log(`    ${backlogStatus.padEnd(14)} ← ${list.join(", ")}`);
+  }
+  if (unmappedJiraStatuses.length > 0) {
+    console.log(source_default.gray(`    Left unmapped: ${unmappedJiraStatuses.join(", ")}`));
+  }
+  if (uncovered.length > 0) {
+    console.log(source_default.yellow(`    Not covered: ${uncovered.join(", ")}`));
+  }
+  const unused = backlogStatuses.filter((s) => !statusMapping[s]);
+  if (unused.length > 0) {
+    console.log(source_default.gray(`    Backlog statuses without a Jira status (cannot be pushed): ${unused.join(", ")}`));
+  }
+  return "done";
+}
+async function sprintsStep(ctx) {
+  const { projectKey } = jiraSection(ctx);
+  const existing = findSprintEntry(ctx.config);
+  const listingConfig = applyRequiredToolsets(structuredClone(ctx.config));
+  let boards = [];
+  try {
+    boards = await withJira(ctx, (jira) => jira.listBoards(projectKey ? { projectKey } : undefined), listingConfig);
+  } catch (error) {
+    console.log(source_default.yellow(`  ⚠ Could not list Jira boards: ${describeError(error)}`));
+  }
+  const sprintBoards = boards.filter((b) => b.supportsSprints);
+  if (boards.length > 0) {
+    console.log(`  Boards${projectKey ? ` of ${projectKey}` : ""} (sprint sync needs a board with sprints):`);
+    for (const board of boards) {
+      console.log(`    ${board.id.padEnd(6)} ${board.name} ${source_default.gray(`[${board.type}]`)}${board.supportsSprints ? "" : source_default.gray(" (no sprints)")}`);
+    }
+  } else {
+    console.log(source_default.gray("  No boards found."));
+  }
+  if (existing) {
+    console.log(`  Current: board ${String(existing.boardId)}, ${String(existing.direction ?? "both")}`);
+  }
+  const choices = [
+    ...sprintBoards.map((b) => ({
+      title: `Sync sprints of board ${b.id} - ${b.name}`,
+      value: b.id
+    })),
+    { title: "Enter a board id", value: "__manual__" },
+    ...existing ? [{ title: "Turn sprint sync off", value: "__off__" }] : [],
+    {
+      title: existing ? "Keep the current setting" : "No sprint sync",
+      value: "__skip__"
+    }
+  ];
+  const currentIndex = existing ? sprintBoards.findIndex((b) => b.id === String(existing.boardId)) : -1;
+  let boardId = await ask({
+    type: "select",
+    name: "board",
+    message: "Sprint sync:",
+    choices,
+    initial: currentIndex >= 0 ? currentIndex : sprintBoards.length > 0 && !existing ? 0 : choices.length - 1
+  });
+  if (boardId === "__skip__")
+    return "skipped";
+  if (boardId === "__off__") {
+    ctx.config = removeFieldMapping(ctx.config, String(existing?.backlog));
+    console.log(source_default.green("  ✓ Sprint sync turned off"));
+    return "done";
+  }
+  if (boardId === "__manual__") {
+    boardId = (await ask({
+      type: "text",
+      name: "boardId",
+      message: "Board id:",
+      initial: existing ? String(existing.boardId) : "",
+      validate: (value) => /^\d+$/.test(value.trim()) ? true : "Enter the numeric board id"
+    })).trim();
+  }
+  const directions = ["both", "pull", "push"];
+  const direction = await ask({
+    type: "select",
+    name: "sprintDirection",
+    message: "Direction:",
+    choices: [
+      { title: "both - Jira sprints ↔ Backlog milestones", value: "both" },
+      { title: "pull - Jira → Backlog only", value: "pull" },
+      { title: "push - Backlog → Jira only", value: "push" }
+    ],
+    initial: Math.max(0, directions.indexOf(existing?.direction))
+  });
+  const createSprints = direction === "pull" ? false : await ask({
+    type: "confirm",
+    name: "createSprints",
+    message: "Create a Jira sprint when a pushed milestone matches none? (otherwise it is reported)",
+    initial: existing?.createSprints === true
+  });
+  const archiveClosedSprints = await ask({
+    type: "confirm",
+    name: "archiveClosedSprints",
+    message: "Archive the milestone when its sprint closes?",
+    initial: existing?.archiveClosedSprints !== false
+  });
+  const pullScope = direction === "push" ? "all" : await ask({
+    type: "select",
+    name: "pullScope",
+    message: "Issues 'pull --import' brings in:",
+    choices: [
+      {
+        title: "all - every issue matching the import filter",
+        value: "all"
+      },
+      {
+        title: "open - only issues in open sprints (sprint in openSprints())",
+        value: "open"
+      }
+    ],
+    initial: existing?.pullScope === "open" ? 1 : 0
+  });
+  try {
+    ctx.config = applySprintSettings(ctx.config, {
+      boardId,
+      direction,
+      createSprints,
+      archiveClosedSprints,
+      pullScope
+    });
+  } catch (error) {
+    console.log(source_default.red(`  ✗ ${describeError(error)}`));
+    return "failed";
+  }
+  const toolsets = getSection(getSection(ctx.config, "mcp"), "envVars").TOOLSETS;
+  console.log(source_default.green(`  ✓ Sprints of board ${boardId} sync as milestones (${direction})`));
+  console.log(source_default.gray(`    mcp.envVars.TOOLSETS=${String(toolsets)} keeps the jira_agile tools enabled`));
+  return "done";
+}
+async function fieldsStep(ctx) {
+  const { mappings, sprintMapping } = validateFieldMappings(ctx.config.fieldMappings);
+  if (mappings.length > 0 || sprintMapping) {
+    console.log("  Current mappings:");
+    if (sprintMapping) {
+      console.log(`    milestone ↔ sprint (board ${sprintMapping.boardId})`);
+    }
+    for (const m of mappings) {
+      console.log(`    ${m.backlog} ← ${m.jira} (${m.type}, ${m.direction})`);
+    }
+  }
+  let fields = [];
+  try {
+    fields = await withJira(ctx, (jira) => jira.searchFields("", 1000));
+  } catch (error) {
+    console.log(source_default.yellow(`  ⚠ Could not list Jira fields: ${describeError(error)}`));
+  }
+  fields = fields.filter((f) => f.schema?.custom !== SPRINT_FIELD_SCHEMA).sort((a, b) => a.name.localeCompare(b.name));
+  const byId = new Map(fields.map((f) => [f.id, f]));
+  const describe = (f) => {
+    const schema = f.schema?.type ? f.schema.items ? `${f.schema.type}<${f.schema.items}>` : f.schema.type : "unknown";
+    const suggested = suggestTypeForSchema(f.schema);
+    return `${f.name} (${f.id}) [${schema}]${suggested ? ` → ${suggested}` : ""}`;
+  };
+  let added = 0;
+  for (;; ) {
+    const more = await ask({
+      type: "confirm",
+      name: "addField",
+      message: added === 0 ? "Add a field mapping?" : "Add another field mapping?",
+      initial: false
+    });
+    if (!more)
+      break;
+    const jiraField = fields.length > 0 ? await ask({
+      type: "autocomplete",
+      name: "jiraField",
+      message: "Jira field (type to filter):",
+      choices: fields.map((f) => ({ title: describe(f), value: f.id })),
+      suggest: filterChoices
+    }) : (await ask({
+      type: "text",
+      name: "jiraField",
+      message: "Jira field id (customfield_NNNNN or a system field):",
+      validate: (value) => value.trim() ? true : "Required"
+    })).trim();
+    const field = byId.get(jiraField);
+    const slug = (field?.name ?? jiraField).toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+    const backlog = (await ask({
+      type: "text",
+      name: "backlogTarget",
+      message: "Backlog target (milestone, dependencies, references, priority, labels or frontmatter:<key>):",
+      initial: `frontmatter:${slug}`,
+      validate: (value) => validateBacklogTarget(value.trim()) ?? true
+    })).trim();
+    const suggested = suggestTypeForSchema(field?.schema);
+    const type = await ask({
+      type: "select",
+      name: "fieldType",
+      message: "Value type:",
+      choices: FIELD_MAPPING_TYPES.map((t) => ({ title: t, value: t })),
+      initial: suggested ? FIELD_MAPPING_TYPES.indexOf(suggested) : 0
+    });
+    const direction = await ask({
+      type: "select",
+      name: "fieldDirection",
+      message: "Direction:",
+      choices: FIELD_MAPPING_DIRECTIONS.map((d) => ({
+        title: d === "pull" ? "pull - Jira → Backlog" : d === "push" ? "push - Backlog → Jira" : "both",
+        value: d
+      })),
       initial: 0
     });
-    if (!conflictStrategyResponse.strategy) {
-      console.log(source_default.yellow(`
-✗ Configuration cancelled.
-`));
-      process.exit(0);
-    }
-    const conflictStrategy = conflictStrategyResponse.strategy;
-    console.log(source_default.bold.green(`
-
-Step 11: Save Configuration`));
-    console.log(source_default.gray(`Review and save your configuration.
-`));
-    console.log(source_default.bold.cyan("Configuration Summary:"));
-    console.log(source_default.gray("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"));
-    console.log(`  Instance Type: ${instanceType === "cloud" ? "Jira Cloud" : "Jira Server/Data Center"}`);
-    console.log(`  Jira URL:      ${jiraUrl}`);
-    if (instanceType === "cloud") {
-      console.log(`  Email:         ${jiraEmail}`);
-      console.log(`  API Token:     ${"*".repeat(Math.min(jiraApiToken.length, 20))}`);
-    } else {
-      console.log(`  PAT:           ${"*".repeat(Math.min(jiraPersonalToken.length, 20))}`);
-    }
-    console.log(`  Project Key:   ${projectKey}`);
-    console.log(`  Issue Type:    ${finalIssueType}`);
-    console.log(`  JQL Filter:    ${jqlFilter || "(none)"}`);
-    console.log(`  Conflict:      ${conflictStrategy}`);
-    console.log(source_default.gray(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-`));
-    const confirmSaveResponse = await import_prompts.default({
-      type: "confirm",
-      name: "confirmSave",
-      message: "Save this configuration?",
-      initial: true
-    });
-    if (confirmSaveResponse.confirmSave === undefined || !confirmSaveResponse.confirmSave) {
-      console.log(source_default.yellow(`
-✗ Configuration cancelled.
-`));
-      restoreEnv(originalEnv);
-      process.exit(0);
-    }
-    const configPath = join6(configDir, "config.json");
-    const config = {
-      jira: {
-        baseUrl: jiraUrl,
-        projectKey,
-        issueType: finalIssueType,
-        jqlFilter
-      },
-      backlog: {
-        statusMapping
-      },
-      sync: {
-        conflictStrategy,
-        enableAnnotations: false,
-        watchInterval: 60
-      }
-    };
-    if (mcpServerArgs.length > 0 || Object.keys(mcpEnvVars).length > 0) {
-      config.mcp = {};
-      if (mcpServerArgs.length > 0) {
-        config.mcp.serverArgs = mcpServerArgs;
-      }
-      if (Object.keys(mcpEnvVars).length > 0) {
-        config.mcp.envVars = mcpEnvVars;
-      }
-    }
-    writeFileSync6(configPath, JSON.stringify(config, null, 2));
-    console.log(source_default.green(`✓ Configuration saved to ${configPath}`));
-    const saveToEnvResponse = await import_prompts.default({
-      type: "confirm",
-      name: "saveToEnv",
-      message: "Save credentials to .env file?",
-      initial: true
-    });
-    if (saveToEnvResponse.saveToEnv === undefined) {
-      console.log(source_default.yellow(`
-✗ Configuration cancelled.
-`));
-      process.exit(0);
-    }
-    const saveToEnv = saveToEnvResponse.saveToEnv;
-    if (saveToEnv) {
-      const envPath = join6(process.cwd(), ".env");
-      let envContent = "";
-      if (existsSync5(envPath)) {
-        const existingContent = readFileSync7(envPath, "utf-8");
-        const lines = existingContent.split(`
-`);
-        const filteredLines = lines.filter((line) => {
-          const trimmed = line.trim();
-          return !trimmed.startsWith("JIRA_") && trimmed !== "";
-        });
-        if (filteredLines.length > 0) {
-          envContent = `${filteredLines.join(`
-`)}
-
-`;
-        }
-      }
-      envContent += `# Jira Configuration
-`;
-      envContent += `JIRA_URL=${jiraUrl}
-`;
-      if (instanceType === "cloud") {
-        envContent += `JIRA_EMAIL=${jiraEmail}
-`;
-        envContent += `JIRA_API_TOKEN=${jiraApiToken}
-`;
-      } else {
-        envContent += `JIRA_PERSONAL_TOKEN=${jiraPersonalToken}
-`;
-      }
-      if (Object.keys(mcpEnvVars).length > 0) {
-        envContent += `
-# MCP Server Environment Variables
-`;
-        for (const [key, value] of Object.entries(mcpEnvVars)) {
-          envContent += `${key}=${value}
-`;
-        }
-      }
-      writeFileSync6(envPath, envContent);
-      console.log(source_default.green(`✓ Credentials saved to ${envPath}`));
-      const gitignorePath = join6(process.cwd(), ".gitignore");
-      let gitignoreContent = "";
-      if (existsSync5(gitignorePath)) {
-        gitignoreContent = readFileSync7(gitignorePath, "utf-8");
-      }
-      if (!gitignoreContent.includes(".env")) {
-        console.log(source_default.yellow(`
-⚠️  WARNING: .env is not in .gitignore`));
-        console.log(source_default.yellow("   Your credentials may be committed to version control!"));
-        const addToGitignoreResponse = await import_prompts.default({
+    const mapping = { backlog, jira: jiraField, type, direction };
+    try {
+      let force = false;
+      if (Array.isArray(ctx.config.fieldMappings) && ctx.config.fieldMappings.some((m) => m?.backlog === backlog)) {
+        force = await ask({
           type: "confirm",
-          name: "addToGitignore",
-          message: "Add .env to .gitignore?",
-          initial: true
+          name: "replaceMapping",
+          message: `A mapping for "${backlog}" exists. Replace it?`,
+          initial: false
         });
-        if (addToGitignoreResponse.addToGitignore === undefined) {
-          console.log(source_default.yellow(`
-✗ Configuration cancelled.
-`));
-          process.exit(0);
+        if (!force)
+          continue;
+      }
+      ctx.config = addFieldMapping(ctx.config, mapping, { force });
+      added++;
+      console.log(source_default.green(`  ✓ ${backlog} ← ${jiraField} (${type}, ${direction})`));
+    } catch (error) {
+      console.log(source_default.red(`  ✗ ${describeError(error)}`));
+    }
+  }
+  if (added > 0) {
+    console.log(source_default.gray("  Value maps: backlog-jira map-fields add <target> <field> --type <type> --value-map 'Jira=Backlog' --force"));
+  }
+  return added > 0 ? "done" : "skipped";
+}
+async function conflictStep(ctx) {
+  const current = getSection(ctx.config, "sync").conflictStrategy;
+  const strategy = await ask({
+    type: "select",
+    name: "conflictStrategy",
+    message: "When a field changed in both Backlog and Jira:",
+    choices: [
+      {
+        title: "prompt - ask which side to keep for each conflicting field",
+        value: "prompt"
+      },
+      {
+        title: "prefer-backlog - keep the Backlog value",
+        value: "prefer-backlog"
+      },
+      { title: "prefer-jira - keep the Jira value", value: "prefer-jira" }
+    ],
+    initial: Math.max(0, CONFLICT_STRATEGIES.indexOf(current))
+  });
+  setSectionValues(ctx.config, "sync", { conflictStrategy: strategy });
+  console.log(source_default.green(`  ✓ Conflict strategy: ${strategy}`));
+  return "done";
+}
+async function filterStep(ctx) {
+  const { projectKey, jqlFilter } = jiraSection(ctx);
+  const suggested = projectKey ? `project = ${projectKey} ORDER BY created DESC` : "";
+  console.log(source_default.gray(`  'backlog-jira pull --import' imports up to ${IMPORT_LIMIT} unlinked issues matching this JQL per run.`));
+  if (findSprintEntry(ctx.config)?.pullScope === "open") {
+    console.log(source_default.gray('  pullScope "open" adds: AND sprint in openSprints()'));
+  }
+  for (;; ) {
+    const jql = (await ask({
+      type: "text",
+      name: "jqlFilter",
+      message: "Import filter (JQL):",
+      initial: jqlFilter || suggested,
+      validate: (value) => value.trim() ? true : "Enter a JQL query"
+    })).trim();
+    let problem = null;
+    if (detectCredentials().auth) {
+      try {
+        const result = await withJira(ctx, (jira) => jira.searchIssues(jql, { maxResults: 1, fields: "summary" }));
+        if (typeof result.total === "number" && result.total >= 0) {
+          console.log(`  ${result.total} issue${result.total === 1 ? "" : "s"} match`);
+          if (result.total > IMPORT_LIMIT) {
+            console.log(source_default.yellow(`  More than ${IMPORT_LIMIT} issues match: one import run takes the first ${IMPORT_LIMIT}. Import in batches with narrower filters (pull --import --jql '...'), e.g. by sprint or created date.`));
+          }
         }
-        if (addToGitignoreResponse.addToGitignore) {
-          const newGitignore = `${gitignoreContent + (gitignoreContent.endsWith(`
-`) ? "" : `
-`)}.env
-`;
-          writeFileSync6(gitignorePath, newGitignore);
-          console.log(source_default.green("✓ Added .env to .gitignore"));
-        }
+      } catch (error) {
+        problem = describeError(error);
       }
     }
-    const backlogGitignorePath = join6(configDir, ".gitignore");
-    if (!existsSync5(backlogGitignorePath)) {
-      writeFileSync6(backlogGitignorePath, CONFIG_DIR_GITIGNORE);
+    if (problem) {
+      console.log(source_default.red(`  ✗ Jira rejected the filter: ${problem}`));
+      const keep = await ask({
+        type: "confirm",
+        name: "keepFilter",
+        message: "Keep this filter anyway?",
+        initial: false
+      });
+      if (!keep)
+        continue;
     }
-    console.log(source_default.bold.green(`
-✓ Configuration complete!
+    setSectionValues(ctx.config, "jira", { jqlFilter: jql });
+    console.log(source_default.green(`  ✓ Import filter: ${jql}`));
+    return "done";
+  }
+}
+function printNextSteps() {
+  console.log(source_default.bold.cyan(`
+Next steps:`));
+  console.log("  1. Preview the import:   backlog-jira pull --import --dry-run");
+  console.log(`  2. Import:               backlog-jira pull --import   (at most ${IMPORT_LIMIT} issues per run; narrow with --jql to import more)`);
+  console.log('  3. Commit the setup:     git add .backlog-jira && git commit -m "Configure backlog-jira"');
+  console.log(source_default.gray(`
+  Revisit a step any time: backlog-jira configure --step <${CONFIGURE_STEPS.join("|")}>
 `));
-    console.log(source_default.cyan("Next steps:"));
-    console.log(source_default.gray("  1. Run 'backlog-jira connect' to verify connections"));
-    console.log(source_default.gray("  2. Run 'backlog-jira doctor' to check environment setup"));
-    console.log(source_default.gray(`  3. Start syncing with 'backlog-jira sync --all'
+}
+async function runConfigure(options = {}) {
+  const originalLogLevel = getLogLevel();
+  if (!options.verbose)
+    setLogLevel("warn");
+  try {
+    if (options.nonInteractive)
+      return configureNonInteractive(options);
+    const step = options.step?.trim().toLowerCase();
+    if (step && !CONFIGURE_STEPS.includes(step)) {
+      throw new Error(`Unknown step "${options.step}". Steps: ${CONFIGURE_STEPS.join(", ")}`);
+    }
+    const steps = step ? [step] : [...CONFIGURE_STEPS];
+    const cwd = options.cwd ?? process.cwd();
+    if (bootstrapConfigDir(cwd)) {
+      console.log(source_default.gray(`Created ${getConfigDir(cwd)}/ with default settings.`));
+    }
+    const ctx = {
+      cwd,
+      config: readConfigFile(cwd) ?? {},
+      createJira: options.createJira ?? defaultCreateJira,
+      backlogStatuses: options.backlogStatuses ?? (() => readBacklogStatuses(cwd))
+    };
+    if (!step) {
+      console.log(source_default.bold.cyan(`
+\uD83D\uDD27 backlog-jira setup
 `));
-    process.exit(0);
+      console.log(source_default.gray(`${steps.length} steps; skip any of them and come back later with --step <name>. Each step is saved as it completes.`));
+    }
+    try {
+      const result = {
+        completed: [],
+        skipped: [],
+        failed: false
+      };
+      for (const [index, name] of steps.entries()) {
+        const info = STEP_INFO[name];
+        console.log(source_default.bold.green(`
+${step ? "" : `Step ${index + 1}/${steps.length}: `}${info.title}`));
+        console.log(source_default.gray(`  ${info.about}
+`));
+        try {
+          if (!step) {
+            const run = await ask({
+              type: "confirm",
+              name: `run_${name}`,
+              message: `Set up ${info.title.toLowerCase()} now?`,
+              initial: true
+            });
+            if (!run) {
+              console.log(source_default.gray(`  Skipped. Later: backlog-jira configure --step ${name}`));
+              result.skipped.push(name);
+              continue;
+            }
+          }
+          const outcome = await STEP_RUNNERS[name](ctx);
+          writeConfigFile(ctx.config, cwd);
+          if (outcome === "done")
+            result.completed.push(name);
+          else
+            result.skipped.push(name);
+          if (outcome === "failed") {
+            result.failed = true;
+            if (!step && name === "connection") {
+              const proceed = await ask({
+                type: "confirm",
+                name: "continueOffline",
+                message: "Continue without a connection? (later steps fall back to manual entry)",
+                initial: true
+              });
+              if (!proceed) {
+                console.log(source_default.gray("  Fix the connection, then run: backlog-jira configure"));
+                return result;
+              }
+            }
+          }
+        } catch (error) {
+          if (error instanceof WizardCancelled) {
+            writeConfigFile(ctx.config, cwd);
+            console.log(source_default.yellow(`
+✗ Setup cancelled. Completed steps are saved; resume with: backlog-jira configure --step ${name}
+`));
+            return { ...result, cancelledAt: name };
+          }
+          throw error;
+        }
+      }
+      console.log(source_default.gray(`
+  Saved ${join12(getConfigDir(cwd), "config.json")}`));
+      if (!step) {
+        await closeJira(ctx);
+        console.log(source_default.bold.cyan(`
+Checking the setup (backlog-jira doctor)
+`));
+        setLogLevel("info");
+        try {
+          const doctor = await (options.doctor ?? runDoctor)();
+          if (!doctor.ok)
+            result.failed = true;
+        } catch (error) {
+          console.log(source_default.red(`  ✗ doctor failed: ${describeError(error)}`));
+          result.failed = true;
+        } finally {
+          if (!options.verbose)
+            setLogLevel("warn");
+        }
+        printNextSteps();
+      }
+      return result;
+    } finally {
+      await closeJira(ctx);
+    }
   } finally {
     setLogLevel(originalLogLevel);
   }
 }
+function configureNonInteractive(options) {
+  const cwd = options.cwd ?? process.cwd();
+  bootstrapConfigDir(cwd);
+  const config = readConfigFile(cwd) ?? {};
+  if (options.conflictStrategy !== undefined && !CONFLICT_STRATEGIES.includes(options.conflictStrategy)) {
+    throw new Error(`Invalid conflict strategy "${options.conflictStrategy}". Use one of: ${CONFLICT_STRATEGIES.join(", ")}`);
+  }
+  const credentials = detectCredentials();
+  const jira = {};
+  if (credentials.url)
+    jira.baseUrl = credentials.url.replace(/\/+$/, "");
+  if (options.projectKey)
+    jira.projectKey = options.projectKey.trim().toUpperCase();
+  if (options.issueType)
+    jira.issueType = options.issueType.trim();
+  if (options.jqlFilter !== undefined)
+    jira.jqlFilter = options.jqlFilter.trim();
+  setSectionValues(config, "jira", jira);
+  const sync = {};
+  if (options.conflictStrategy)
+    sync.conflictStrategy = options.conflictStrategy;
+  if (options.enableAnnotations)
+    sync.enableAnnotations = true;
+  if (Object.keys(sync).length > 0)
+    setSectionValues(config, "sync", sync);
+  writeConfigFile(config, cwd);
+  console.log(`Saved ${join12(getConfigDir(cwd), "config.json")}`);
+  if (!credentials.auth) {
+    console.log(source_default.yellow(`Warning: not exported to this process: ${credentials.missing.join(", ")} (or JIRA_URL and JIRA_PERSONAL_TOKEN)`));
+  }
+  const projectKey = getSection(config, "jira").projectKey;
+  if (!projectKey) {
+    console.log(source_default.yellow("Warning: jira.projectKey is not set (use --project-key)"));
+  }
+  return { completed: [], skipped: [], failed: false };
+}
+async function configureCommand(options = {}) {
+  const result = await runConfigure(options);
+  process.exit(result.failed ? 1 : 0);
+}
+var import_prompts, CONFIGURE_STEPS, STEP_INFO, IMPORT_LIMIT = 50, WizardCancelled, STEP_RUNNERS;
+var init_configure = __esm(() => {
+  init_source();
+  init_jira_sprints();
+  init_jira();
+  init_config_file();
+  init_field_mapping();
+  init_jira_config();
+  init_logger();
+  init_setup();
+  init_doctor();
+  init_map_fields();
+  import_prompts = __toESM(require_prompts3(), 1);
+  CONFIGURE_STEPS = [
+    "credentials",
+    "connection",
+    "project",
+    "status",
+    "sprints",
+    "fields",
+    "conflict",
+    "filter"
+  ];
+  STEP_INFO = {
+    credentials: {
+      title: "Credentials",
+      about: "Check that JIRA_URL and a Jira token are exported to backlog-jira."
+    },
+    connection: {
+      title: "Connection check",
+      about: "Start the MCP Atlassian server and call Jira with your credentials."
+    },
+    project: {
+      title: "Project and issue type",
+      about: "Choose the Jira project and the issue type new tasks are created as."
+    },
+    status: {
+      title: "Status mapping",
+      about: "Map each Jira status of the project to a Backlog status."
+    },
+    sprints: {
+      title: "Sprints",
+      about: "Optionally sync the sprints of a Jira board as Backlog milestones."
+    },
+    fields: {
+      title: "Field mappings",
+      about: "Optionally sync extra Jira fields (story points, versions, custom fields)."
+    },
+    conflict: {
+      title: "Conflict strategy",
+      about: "Choose what sync does when a field changed on both sides."
+    },
+    filter: {
+      title: "Import filter",
+      about: "Choose the JQL of the Jira issues 'pull --import' brings in."
+    }
+  };
+  WizardCancelled = class WizardCancelled extends Error {
+    constructor() {
+      super("Configuration cancelled");
+      this.name = "WizardCancelled";
+    }
+  };
+  STEP_RUNNERS = {
+    credentials: credentialsStep,
+    connection: connectionStep,
+    project: projectStep,
+    status: statusStep,
+    sprints: sprintsStep,
+    fields: fieldsStep,
+    conflict: conflictStep,
+    filter: filterStep
+  };
+});
+
+// node_modules/commander/index.js
+var exports_commander = {};
+__exportCjs(exports_commander, {
+  program: () => $program,
+  createCommand: () => $createCommand,
+  createOption: () => $createOption,
+  createArgument: () => $createArgument,
+  Command: () => $Command,
+  Option: () => $Option,
+  Argument: () => $Argument,
+  Help: () => $Help,
+  CommanderError: () => $CommanderError,
+  InvalidArgumentError: () => $InvalidArgumentError,
+  InvalidOptionArgumentError: () => $InvalidOptionArgumentError
+}, {
+  program: (value) => $program = value,
+  createCommand: (value) => $createCommand = value,
+  createOption: (value) => $createOption = value,
+  createArgument: (value) => $createArgument = value,
+  Command: (value) => $Command = value,
+  Option: (value) => $Option = value,
+  Argument: (value) => $Argument = value,
+  Help: (value) => $Help = value,
+  CommanderError: (value) => $CommanderError = value,
+  InvalidArgumentError: (value) => $InvalidArgumentError = value,
+  InvalidOptionArgumentError: (value) => $InvalidOptionArgumentError = value
+});
+var { Argument } = require_argument();
+var { Command } = require_command();
+var { CommanderError, InvalidArgumentError } = require_error();
+var { Help } = require_help();
+var { Option } = require_option();
+var $program = new Command;
+var $createCommand = (name) => new Command(name);
+var $createOption = (flags, description) => new Option(flags, description);
+var $createArgument = (name, description) => new Argument(name, description);
+var $Command = Command;
+var $Option = Option;
+var $Argument = Argument;
+var $Help = Help;
+var $CommanderError = CommanderError;
+var $InvalidArgumentError = InvalidArgumentError;
+var $InvalidOptionArgumentError = InvalidArgumentError;
+
+// node_modules/commander/esm.mjs
+var {
+  program,
+  createCommand,
+  createArgument,
+  createOption,
+  CommanderError: CommanderError2,
+  InvalidArgumentError: InvalidArgumentError2,
+  InvalidOptionArgumentError,
+  Command: Command2,
+  Argument: Argument2,
+  Option: Option2,
+  Help: Help2
+} = exports_commander;
+// package.json
+var package_default = {
+  name: "backlog-jira",
+  version: "0.2.0",
+  description: "Bidirectional sync plugin between Backlog.md and Jira via MCP",
+  type: "module",
+  author: "Emanuel Ciuca <emanuel.ciuca@gmail.com>",
+  license: "MIT",
+  repository: {
+    type: "git",
+    url: "https://github.com/eciuca/Backlog.md-jira-plugin.git"
+  },
+  bugs: {
+    url: "https://github.com/eciuca/Backlog.md-jira-plugin/issues"
+  },
+  homepage: "https://github.com/eciuca/Backlog.md-jira-plugin#readme",
+  keywords: [
+    "backlog",
+    "jira",
+    "plugin",
+    "cli",
+    "sync",
+    "bidirectional",
+    "mcp",
+    "task-management",
+    "atlassian",
+    "project-management"
+  ],
+  bin: {
+    "backlog-jira": "dist/cli.js"
+  },
+  files: ["dist", "README.md", "LICENSE"],
+  scripts: {
+    build: "bun build --target=node --external pino --external pino-pretty src/cli.ts --outdir=dist",
+    dev: "bun run src/cli.ts",
+    test: "bun test",
+    "test:integration": "./tests/integration/test-clean-install.sh",
+    check: "biome check .",
+    "check:types": "tsc --noEmit",
+    "check:dist": "bun run build && git diff --exit-code --stat -- dist",
+    prepublishOnly: "npm run build && npm run check && npm run test"
+  },
+  dependencies: {
+    "@modelcontextprotocol/sdk": "^1.30.1",
+    chalk: "^5.6.2",
+    commander: "^12.1.0",
+    pino: "^8.21.0",
+    "pino-pretty": "^10.3.1",
+    prompts: "^2.4.2"
+  },
+  devDependencies: {
+    "@biomejs/biome": "^1.9.4",
+    "@types/node": "^20.19.43",
+    "@types/prompts": "^2.4.9",
+    "bun-types": "^1.4.2",
+    typescript: "^5.9.3"
+  },
+  engines: {
+    node: ">=20"
+  }
+};
+
+// src/cli.ts
+init_configure();
 
 // src/integrations/backlog.ts
-import { spawn as spawn3 } from "node:child_process";
+init_frontmatter();
+init_logger();
+init_task_links();
+import { spawn as spawn4 } from "node:child_process";
 var TASK_ID = "[A-Za-z][A-Za-z0-9_]*-\\d+(?:\\.\\d+)*";
 
 class BacklogClient {
@@ -27250,7 +29611,7 @@ class BacklogClient {
   async execute(args) {
     return new Promise((resolve, reject) => {
       logger.debug({ command: this.cliPath, args }, "Executing Backlog CLI command");
-      const proc = spawn3(this.cliPath, args, {
+      const proc = spawn4(this.cliPath, args, {
         stdio: ["inherit", "pipe", "pipe"]
       });
       let stdout = "";
@@ -27568,47 +29929,10 @@ class BacklogClient {
   }
 }
 
-// src/utils/jira-config.ts
-import { existsSync as existsSync6, readFileSync as readFileSync8 } from "node:fs";
-import { join as join7 } from "node:path";
-function getJiraClientOptions() {
-  try {
-    const configPath = join7(process.cwd(), ".backlog-jira", "config.json");
-    if (!existsSync6(configPath)) {
-      return {};
-    }
-    const raw = readFileSync8(configPath, "utf-8");
-    const config = JSON.parse(raw);
-    const options = {};
-    if (config.mcp) {
-      if (config.mcp.serverArgs && Array.isArray(config.mcp.serverArgs)) {
-        logger.debug({ dockerArgs: config.mcp.serverArgs }, "Using Docker args from config.json");
-        options.dockerArgs = config.mcp.serverArgs;
-      }
-      if (typeof config.mcp.useExternalServer === "boolean") {
-        options.useExternalServer = config.mcp.useExternalServer;
-      }
-      if (typeof config.mcp.fallbackToDocker === "boolean") {
-        options.fallbackToDocker = config.mcp.fallbackToDocker;
-      }
-      if (typeof config.mcp.serverCommand === "string") {
-        options.serverCommand = config.mcp.serverCommand;
-      }
-      if (config.mcp.serverArgs && Array.isArray(config.mcp.serverArgs)) {
-        options.serverArgs = config.mcp.serverArgs;
-      }
-      if (config.mcp.envVars && typeof config.mcp.envVars === "object") {
-        options.extraEnv = config.mcp.envVars;
-      }
-    }
-    return options;
-  } catch (error) {
-    logger.warn({ error }, "Failed to read MCP config from config.json");
-    return {};
-  }
-}
-
 // src/commands/connect.ts
+init_jira();
+init_jira_config();
+init_logger();
 async function connectCommand() {
   logger.info(`Verifying connections...
 `);
@@ -27624,19 +29948,14 @@ async function connectCommand() {
       allGood = false;
     }
   } catch (error) {
-    logger.error({ error }, "  ✗ Backlog CLI connection failed");
+    logger.error(`  ✗ Backlog CLI connection failed: ${error instanceof Error ? error.message : String(error)}`);
     allGood = false;
   }
-  try {
-    const jiraOk = await jiraClient.test();
-    if (jiraOk) {
-      logger.info("  ✓ MCP Atlassian connection successful");
-    } else {
-      logger.error("  ✗ MCP Atlassian connection failed");
-      allGood = false;
-    }
-  } catch (error) {
-    logger.error({ error }, "  ✗ MCP Atlassian connection failed");
+  const jira = await jiraClient.checkConnection();
+  if (jira.ok) {
+    logger.info("  ✓ MCP Atlassian connection successful");
+  } else {
+    logger.error(`  ✗ MCP Atlassian connection failed: ${jira.error}`);
     allGood = false;
   }
   if (allGood) {
@@ -27651,849 +29970,20 @@ async function connectCommand() {
 }
 
 // src/commands/create-issue.ts
-import { readFileSync as readFileSync11 } from "node:fs";
-import { join as join10 } from "node:path";
-
-// src/state/frontmatter-store.ts
-import {
-  existsSync as existsSync7,
-  mkdirSync as mkdirSync5,
-  readFileSync as readFileSync9,
-  readdirSync as readdirSync2,
-  writeFileSync as writeFileSync7
-} from "node:fs";
-import { join as join8 } from "node:path";
-class FrontmatterStore {
-  snapshotsDir;
-  opsLogPath;
-  constructor(configDir) {
-    const baseDir = configDir || join8(process.cwd(), ".backlog-jira");
-    if (!existsSync7(baseDir)) {
-      mkdirSync5(baseDir, { recursive: true });
-    }
-    this.snapshotsDir = join8(baseDir, "snapshots");
-    this.opsLogPath = join8(baseDir, "ops-log.jsonl");
-    if (!existsSync7(this.snapshotsDir)) {
-      mkdirSync5(this.snapshotsDir, { recursive: true });
-    }
-    logger.debug({ baseDir, snapshotsDir: this.snapshotsDir }, "FrontmatterStore initialized");
-  }
-  addMapping(backlogId, jiraKey) {
-    try {
-      const filePath = getTaskFilePath(backlogId);
-      updateJiraMetadata(filePath, { jiraKey });
-      logger.debug({ backlogId, jiraKey }, "Added mapping");
-    } catch (error) {
-      logger.error({ error, backlogId, jiraKey }, "Failed to add mapping");
-      throw error;
-    }
-  }
-  getMapping(backlogId) {
-    try {
-      const filePath = getTaskFilePath(backlogId);
-      const metadata = getJiraMetadata(filePath);
-      if (!metadata.jiraKey) {
-        return null;
-      }
-      const { frontmatter } = parseFrontmatter(readFileSync9(filePath, "utf-8"));
-      return {
-        backlogId,
-        jiraKey: metadata.jiraKey,
-        createdAt: frontmatter.created || new Date().toISOString(),
-        updatedAt: frontmatter.updated || new Date().toISOString()
-      };
-    } catch (error) {
-      return null;
-    }
-  }
-  getMappingByJiraKey(jiraKey) {
-    try {
-      const tasksDir = join8(process.cwd(), "backlog", "tasks");
-      const files = readdirSync2(tasksDir).filter((f) => f.endsWith(".md"));
-      for (const file of files) {
-        const backlogId = taskIdFromFilePath(file);
-        if (!backlogId)
-          continue;
-        const frontmatter = readPluginFrontmatter(join8(tasksDir, file));
-        if (frontmatter.jira_key === jiraKey) {
-          return {
-            backlogId,
-            jiraKey,
-            createdAt: frontmatter.created || new Date().toISOString(),
-            updatedAt: frontmatter.updated || new Date().toISOString()
-          };
-        }
-      }
-      return null;
-    } catch (error) {
-      logger.error({ error, jiraKey }, "Failed to get mapping by Jira key");
-      return null;
-    }
-  }
-  getAllMappings() {
-    const mappings = new Map;
-    try {
-      const tasksDir = join8(process.cwd(), "backlog", "tasks");
-      const files = readdirSync2(tasksDir).filter((f) => f.endsWith(".md"));
-      for (const file of files) {
-        const backlogId = taskIdFromFilePath(file);
-        if (!backlogId)
-          continue;
-        const frontmatter = readPluginFrontmatter(join8(tasksDir, file));
-        if (frontmatter.jira_key) {
-          mappings.set(backlogId, frontmatter.jira_key);
-        }
-      }
-    } catch (error) {
-      logger.error({ error }, "Failed to get all mappings");
-    }
-    return mappings;
-  }
-  deleteMapping(backlogId) {
-    try {
-      const filePath = getTaskFilePath(backlogId);
-      updateJiraMetadata(filePath, {
-        jiraKey: undefined,
-        jiraLastSync: undefined,
-        jiraSyncState: undefined,
-        jiraUrl: undefined
-      });
-      logger.debug({ backlogId }, "Deleted mapping");
-    } catch (error) {
-      logger.error({ error, backlogId }, "Failed to delete mapping");
-      throw error;
-    }
-  }
-  getSnapshotPath(backlogId, side) {
-    return join8(this.snapshotsDir, `${normalizeTaskId(backlogId)}-${side}.json`);
-  }
-  setSnapshot(backlogId, side, hash, payload) {
-    const snapshotPath = this.getSnapshotPath(backlogId, side);
-    const snapshot = {
-      backlogId,
-      side,
-      hash,
-      payload: JSON.stringify(payload),
-      updatedAt: new Date().toISOString()
-    };
-    try {
-      writeFileSync7(snapshotPath, JSON.stringify(snapshot, null, 2), "utf-8");
-      logger.debug({ backlogId, side, hash }, "Set snapshot");
-    } catch (error) {
-      logger.error({ error, backlogId, side }, "Failed to set snapshot");
-      throw error;
-    }
-  }
-  getSnapshot(backlogId, side) {
-    const snapshotPath = this.getSnapshotPath(backlogId, side);
-    if (!existsSync7(snapshotPath)) {
-      return null;
-    }
-    try {
-      const content = readFileSync9(snapshotPath, "utf-8");
-      return JSON.parse(content);
-    } catch (error) {
-      logger.error({ error, backlogId, side }, "Failed to get snapshot");
-      return null;
-    }
-  }
-  getSnapshots(backlogId) {
-    return {
-      backlog: this.getSnapshot(backlogId, "backlog"),
-      jira: this.getSnapshot(backlogId, "jira")
-    };
-  }
-  updateSyncState(backlogId, updates) {
-    try {
-      const filePath = getTaskFilePath(backlogId);
-      const metadata = getJiraMetadata(filePath);
-      updateJiraMetadata(filePath, {
-        jiraKey: metadata.jiraKey,
-        jiraLastSync: updates.lastSyncAt ?? metadata.jiraLastSync,
-        jiraSyncState: updates.conflictState ?? metadata.jiraSyncState,
-        jiraUrl: metadata.jiraUrl
-      });
-      logger.debug({ backlogId, updates }, "Updated sync state");
-    } catch (error) {
-      logger.error({ error, backlogId, updates }, "Failed to update sync state");
-      throw error;
-    }
-  }
-  getSyncState(backlogId) {
-    try {
-      const filePath = getTaskFilePath(backlogId);
-      const metadata = getJiraMetadata(filePath);
-      return {
-        backlogId,
-        lastSyncAt: metadata.jiraLastSync || null,
-        conflictState: metadata.jiraSyncState || null,
-        strategy: null
-      };
-    } catch (error) {
-      return null;
-    }
-  }
-  logOperation(op, backlogId, jiraKey, outcome, details) {
-    const logEntry = {
-      id: Date.now(),
-      ts: new Date().toISOString(),
-      op,
-      backlogId,
-      jiraKey,
-      outcome,
-      details: details || null
-    };
-    try {
-      const line = `${JSON.stringify(logEntry)}
-`;
-      writeFileSync7(this.opsLogPath, line, { flag: "a", encoding: "utf-8" });
-      logger.debug({ op, backlogId, jiraKey, outcome }, "Logged operation");
-    } catch (error) {
-      logger.error({ error, op }, "Failed to log operation");
-    }
-  }
-  getRecentOps(limit = 100) {
-    if (!existsSync7(this.opsLogPath)) {
-      return [];
-    }
-    try {
-      const content = readFileSync9(this.opsLogPath, "utf-8");
-      const lines = content.trim().split(`
-`).filter((l) => l.trim());
-      const ops = lines.map((line) => {
-        try {
-          return JSON.parse(line);
-        } catch {
-          return null;
-        }
-      }).filter((op) => op !== null).reverse().slice(0, limit);
-      return ops;
-    } catch (error) {
-      logger.error({ error }, "Failed to get recent ops");
-      return [];
-    }
-  }
-  testWriteAccess() {
-    const testFile = join8(this.snapshotsDir, ".write-test");
-    try {
-      writeFileSync7(testFile, "test", "utf-8");
-      readFileSync9(testFile, "utf-8");
-      const { unlinkSync } = __require("node:fs");
-      unlinkSync(testFile);
-    } catch (error) {
-      logger.error({ error }, "Write access test failed");
-      throw new Error("Cannot write to .backlog-jira directory");
-    }
-  }
-  close() {
-    logger.debug("FrontmatterStore closed (no-op)");
-  }
-}
-// src/utils/normalizer.ts
-import crypto from "node:crypto";
-
-// src/utils/status-mapping.ts
-import { existsSync as existsSync8, readFileSync as readFileSync10 } from "node:fs";
-import { join as join9 } from "node:path";
-function loadStatusMapping(cwd = process.cwd()) {
-  const configPath = join9(cwd, ".backlog-jira", "config.json");
-  if (!existsSync8(configPath)) {
-    logger.debug("No config.json found, using default status mapping");
-    return buildStatusMapping(getDefaultBacklogToJiraMapping());
-  }
-  try {
-    const config = JSON.parse(readFileSync10(configPath, "utf-8"));
-    return buildStatusMapping(config.backlog?.statusMapping || getDefaultBacklogToJiraMapping(), config.backlog?.projectOverrides);
-  } catch (error) {
-    logger.warn({ error }, "Failed to load status mapping config, using defaults");
-    return buildStatusMapping(getDefaultBacklogToJiraMapping());
-  }
-}
-function buildStatusMapping(backlogToJira, projectOverrides) {
-  const jiraToBacklog = {};
-  for (const [backlogStatus, jiraStatuses] of Object.entries(backlogToJira)) {
-    for (const jiraStatus of jiraStatuses) {
-      jiraToBacklog[jiraStatus.toLowerCase()] = backlogStatus;
-    }
-  }
-  return {
-    backlogToJira,
-    jiraToBacklog,
-    ...projectOverrides ? { projectOverrides } : undefined
-  };
-}
-function getDefaultBacklogToJiraMapping() {
-  return {
-    "To Do": ["To Do", "Open", "Backlog", "Todo"],
-    "In Progress": ["In Progress", "In Development", "In Review"],
-    Done: ["Done", "Closed", "Resolved", "Complete"]
-  };
-}
-function mapJiraStatusToBacklog(jiraStatus, projectKey, mapping = loadStatusMapping()) {
-  if (projectKey && mapping.projectOverrides?.[projectKey]) {
-    const override = mapping.projectOverrides[projectKey].jiraToBacklog;
-    if (override) {
-      const lower = jiraStatus.toLowerCase();
-      const exact = override[jiraStatus];
-      const lowerHit = override[lower];
-      if (exact)
-        return exact;
-      if (lowerHit)
-        return lowerHit;
-      for (const [k, v] of Object.entries(override)) {
-        if (k.toLowerCase() === lower)
-          return v;
-      }
-    }
-  }
-  const lower = jiraStatus.toLowerCase();
-  return mapping.jiraToBacklog[lower] || mapping.jiraToBacklog[jiraStatus] || jiraStatus;
-}
-async function findTransitionForStatus(jiraClient, issueKey, targetBacklogStatus, projectKey) {
-  try {
-    const transitions = await jiraClient.getTransitions(issueKey);
-    if (transitions.length === 0) {
-      return {
-        success: false,
-        error: `No transitions available for issue ${issueKey}`
-      };
-    }
-    const mapping = loadStatusMapping();
-    let acceptableJiraStatuses;
-    if (projectKey && mapping.projectOverrides?.[projectKey]) {
-      acceptableJiraStatuses = mapping.projectOverrides[projectKey].backlogToJira[targetBacklogStatus] || mapping.backlogToJira[targetBacklogStatus] || [];
-    } else {
-      acceptableJiraStatuses = mapping.backlogToJira[targetBacklogStatus] || [];
-    }
-    if (acceptableJiraStatuses.length === 0) {
-      return {
-        success: false,
-        error: `No Jira status mapping configured for Backlog status "${targetBacklogStatus}"`
-      };
-    }
-    const matchingTransition = findBestTransitionMatch(transitions, acceptableJiraStatuses);
-    if (!matchingTransition) {
-      const availableTransitions = transitions.map((t) => `"${t.name}" → "${t.to.name}"`).join(", ");
-      return {
-        success: false,
-        error: `No transition found from current status to "${targetBacklogStatus}". Available: ${availableTransitions}`
-      };
-    }
-    logger.debug({
-      issueKey,
-      targetBacklogStatus,
-      transitionId: matchingTransition.id,
-      transitionName: matchingTransition.name,
-      targetJiraStatus: matchingTransition.to.name
-    }, "Found matching transition");
-    return {
-      success: true,
-      transitionId: matchingTransition.id,
-      transitionName: matchingTransition.name
-    };
-  } catch (error) {
-    const errorMsg = error instanceof Error ? error.message : String(error);
-    logger.error({ error, issueKey, targetBacklogStatus }, "Failed to find transition");
-    return {
-      success: false,
-      error: `Failed to query transitions: ${errorMsg}`
-    };
-  }
-}
-function findBestTransitionMatch(transitions, acceptableStatuses) {
-  for (const acceptable of acceptableStatuses) {
-    const exact = transitions.find((t) => t.to.name && t.to.name === acceptable);
-    if (exact) {
-      return exact;
-    }
-  }
-  for (const acceptable of acceptableStatuses) {
-    const caseInsensitive = transitions.find((t) => t.to.name && t.to.name.toLowerCase() === acceptable.toLowerCase());
-    if (caseInsensitive) {
-      return caseInsensitive;
-    }
-  }
-  for (const acceptable of acceptableStatuses) {
-    const lowerAcceptable = acceptable.toLowerCase();
-    const nameMatch = transitions.find((t) => {
-      const lowerTransitionName = t.name.toLowerCase();
-      if (lowerTransitionName.includes(lowerAcceptable)) {
-        return true;
-      }
-      if (lowerAcceptable === "done" || lowerAcceptable === "closed" || lowerAcceptable === "resolved" || lowerAcceptable === "complete") {
-        if (lowerTransitionName.includes("resolve") || lowerTransitionName.includes("close") || lowerTransitionName.includes("done") || lowerTransitionName.includes("complete")) {
-          return true;
-        }
-      }
-      if (lowerAcceptable === "in progress" || lowerAcceptable === "in development") {
-        if (lowerTransitionName.includes("start") || lowerTransitionName.includes("progress")) {
-          return true;
-        }
-      }
-      return false;
-    });
-    if (nameMatch) {
-      logger.debug({
-        transitionName: nameMatch.name,
-        targetStatus: acceptable
-      }, "Matched transition by name (destination status not provided by MCP)");
-      return nameMatch;
-    }
-  }
-  return null;
-}
-
-// src/utils/normalizer.ts
-function getSprintSource(options) {
-  return options?.sprint === undefined ? loadSprintPayloadSource() : options.sprint;
-}
-function getMappedFieldMappings(options) {
-  return options?.fieldMappings ?? loadFieldMappings();
-}
-function normalizeBacklogTask(task, options) {
-  const payload = {
-    title: task.title.trim(),
-    description: (task.description || "").trim(),
-    status: canonicalStatus(task.status),
-    priority: task.priority?.toLowerCase(),
-    labels: (task.labels || []).map((l) => l.toLowerCase()).sort(),
-    assignee: task.assignee?.trim().toLowerCase(),
-    acceptanceCriteria: (task.acceptanceCriteria || []).map((ac) => ({
-      text: ac.text.trim(),
-      checked: ac.checked
-    }))
-  };
-  const mappings = getMappedFieldMappings(options).filter((m) => !isCoreOverrideTarget(m.backlog));
-  const sprint = getSprintSource(options);
-  if (mappings.length > 0 || sprint) {
-    const frontmatter = options?.frontmatter ?? readTaskFrontmatter(task.id);
-    payload.mappedFields = {};
-    for (const mapping of mappings) {
-      payload.mappedFields[mapping.backlog] = canonicalMappedValue(getBacklogTargetValue(frontmatter, mapping.backlog), mapping.backlog);
-    }
-    if (sprint) {
-      payload.mappedFields[SPRINT_PAYLOAD_KEY] = backlogSprintValue(sprint, frontmatter.milestone);
-    }
-  }
-  return payload;
-}
-function normalizeJiraIssue(issue, options) {
-  const payload = {
-    title: issue.summary.trim(),
-    description: (issue.description || "").trim(),
-    status: canonicalStatus(mapJiraStatusToBacklog(issue.status, issue.key.split("-")[0], options?.statusMapping ?? loadStatusMapping())),
-    priority: issue.priority?.toLowerCase(),
-    labels: (issue.labels || []).map((l) => l.toLowerCase()).sort(),
-    assignee: issue.assignee?.trim().toLowerCase(),
-    acceptanceCriteria: extractAcceptanceCriteria(issue.description || "")
-  };
-  for (const mapping of getMappedFieldMappings(options)) {
-    const value = getMappedJiraValue(issue, mapping);
-    if (mapping.backlog === "priority") {
-      payload.priority = typeof value === "string" ? value.toLowerCase() : undefined;
-    } else if (mapping.backlog === "labels") {
-      payload.labels = (Array.isArray(value) ? value : []).map((l) => l.toLowerCase()).sort();
-    } else {
-      payload.mappedFields = payload.mappedFields ?? {};
-      payload.mappedFields[mapping.backlog] = canonicalMappedValue(value, mapping.backlog);
-    }
-  }
-  const sprint = getSprintSource(options);
-  if (sprint) {
-    payload.mappedFields = payload.mappedFields ?? {};
-    payload.mappedFields[SPRINT_PAYLOAD_KEY] = jiraSprintValue(sprint, issue);
-  }
-  return payload;
-}
-var CANONICAL_STATUS_TOKENS = {
-  "to do": "todo",
-  "in progress": "in_progress"
-};
-function canonicalStatus(status) {
-  const normalized = status.toLowerCase().trim();
-  return CANONICAL_STATUS_TOKENS[normalized] ?? normalized;
-}
-function formatAcceptanceCriteriaForJira(acceptanceCriteria) {
-  if (!acceptanceCriteria || acceptanceCriteria.length === 0) {
-    return "";
-  }
-  const formatted = acceptanceCriteria.map((ac) => {
-    const checkbox = ac.checked ? "[x]" : "[ ]";
-    return `- ${checkbox} ${ac.text}`;
-  }).join(`
-`);
-  return `
-
-Acceptance Criteria:
-${formatted}`;
-}
-function stripAcceptanceCriteriaFromDescription(description) {
-  if (!description)
-    return "";
-  const withoutAc = description.replace(/\n\n?Acceptance Criteria:?\s*[\s\S]*?(?=\n\n|$)/i, "");
-  return withoutAc.trim();
-}
-function mergeDescriptionWithAc(description, acceptanceCriteria, implementationPlan, implementationNotes) {
-  const cleanDescription = stripAcceptanceCriteriaFromDescription(description);
-  const acSection = formatAcceptanceCriteriaForJira(acceptanceCriteria);
-  let fullDescription = cleanDescription + acSection;
-  if (implementationPlan?.trim()) {
-    fullDescription += `
-
-Implementation Plan:
-${implementationPlan.trim()}`;
-  }
-  if (implementationNotes?.trim()) {
-    fullDescription += `
-
-Implementation Notes:
-${implementationNotes.trim()}`;
-  }
-  return fullDescription;
-}
-function extractAcceptanceCriteria(description) {
-  const criteria = [];
-  const acMatch = description.match(/acceptance criteria:?\s*([\s\S]*?)(?=\n\n|$)/i);
-  if (!acMatch)
-    return criteria;
-  const acSection = acMatch[1];
-  const lines = acSection.split(`
-`);
-  for (const line of lines) {
-    const checkedMatch = line.match(/^[\s-]*\[x\]\s*(.+)/i);
-    const uncheckedMatch = line.match(/^[\s-]*\[ \]\s*(.+)/i);
-    const bulletMatch = line.match(/^[\s-]*[*•-]\s*(.+)/);
-    if (checkedMatch) {
-      criteria.push({ text: checkedMatch[1].trim(), checked: true });
-    } else if (uncheckedMatch) {
-      criteria.push({ text: uncheckedMatch[1].trim(), checked: false });
-    } else if (bulletMatch) {
-      criteria.push({ text: bulletMatch[1].trim(), checked: false });
-    }
-  }
-  return criteria;
-}
-function computeHash(payload) {
-  const stable = {
-    acceptanceCriteria: payload.acceptanceCriteria,
-    assignee: payload.assignee || "",
-    description: payload.description,
-    labels: payload.labels,
-    priority: payload.priority || "",
-    status: payload.status,
-    title: payload.title
-  };
-  const mappedKeys = Object.keys(payload.mappedFields ?? {}).sort();
-  if (mappedKeys.length > 0) {
-    const mappedFields = {};
-    for (const key of mappedKeys) {
-      mappedFields[key] = payload.mappedFields[key];
-    }
-    stable.mappedFields = mappedFields;
-  }
-  const json = JSON.stringify(stable);
-  return crypto.createHash("sha256").update(json).digest("hex");
-}
-function comparePayloads(a, b) {
-  const changes = [];
-  if (a.title !== b.title)
-    changes.push("title");
-  if (a.description !== b.description)
-    changes.push("description");
-  if (a.status !== b.status)
-    changes.push("status");
-  if (a.priority !== b.priority)
-    changes.push("priority");
-  if (a.assignee !== b.assignee)
-    changes.push("assignee");
-  if (JSON.stringify(a.labels) !== JSON.stringify(b.labels)) {
-    changes.push("labels");
-  }
-  if (JSON.stringify(a.acceptanceCriteria) !== JSON.stringify(b.acceptanceCriteria)) {
-    changes.push("acceptanceCriteria");
-  }
-  const mappedKeys = new Set([
-    ...Object.keys(a.mappedFields ?? {}),
-    ...Object.keys(b.mappedFields ?? {})
-  ]);
-  for (const key of [...mappedKeys].sort()) {
-    if ((a.mappedFields?.[key] ?? "") !== (b.mappedFields?.[key] ?? "")) {
-      changes.push(key);
-    }
-  }
-  return changes;
-}
-
-// src/utils/mapped-field-sync.ts
-class MappedFieldPushError extends Error {
-  issueKey;
-  failures;
-  constructor(issueKey, failures) {
-    super(formatMappedFieldFailures(issueKey, failures));
-    this.issueKey = issueKey;
-    this.failures = failures;
-    this.name = "MappedFieldPushError";
-  }
-}
-function formatMappedFieldFailures(issueKey, failures) {
-  const lines = failures.map((f) => `  - ${f.mapping.jira} (mapped to ${f.mapping.backlog}): ${firstLine(f.error)}`);
-  const hints = [];
-  if (failures.some((f) => f.mapping.type !== "sprint")) {
-    hints.push("Check the field is on the issue type's edit screen (backlog-jira doctor) or fix the mapping with backlog-jira map-fields.");
-  }
-  if (failures.some((f) => f.mapping.type === "sprint")) {
-    hints.push("Check the milestone matches a future or active sprint on the configured board (backlog-jira doctor).");
-  }
-  return `Mapped field${failures.length === 1 ? "" : "s"} could not be updated on ${issueKey}:
-${lines.join(`
-`)}
-${hints.join(`
-`)}`;
-}
-function firstLine(text) {
-  const line = text.trim().split(`
-`)[0] ?? "";
-  return line.length > 300 ? `${line.slice(0, 297)}...` : line;
-}
-function errorMessage(error) {
-  return error instanceof Error ? error.message : String(error);
-}
-async function updateIssueWithMappedFields(jira, issueKey, coreFields, mapped) {
-  const failures = [...mapped.errors];
-  const hasCore = Object.keys(coreFields).length > 0;
-  const mappedIds = Object.keys(mapped.fields);
-  if (mappedIds.length === 0) {
-    if (hasCore)
-      await jira.updateIssue(issueKey, coreFields);
-    return failures;
-  }
-  try {
-    await jira.updateIssue(issueKey, { ...coreFields, fields: mapped.fields });
-    return failures;
-  } catch (error) {
-    logger.warn({ issueKey, error: errorMessage(error), mappedFields: mappedIds }, "Update with mapped fields failed; retrying fields individually");
-  }
-  if (hasCore) {
-    await jira.updateIssue(issueKey, coreFields);
-  }
-  for (const fieldId of mappedIds) {
-    try {
-      await jira.updateIssue(issueKey, {
-        fields: { [fieldId]: mapped.fields[fieldId] }
-      });
-    } catch (error) {
-      for (const change of mapped.changes) {
-        if (change.mapping.jira === fieldId) {
-          failures.push({
-            mapping: change.mapping,
-            error: errorMessage(error)
-          });
-        }
-      }
-    }
-  }
-  return failures;
-}
-async function createIssueWithMappedFields(jira, projectKey, issueType, summary, options, mapped) {
-  const mappedIds = Object.keys(mapped.fields);
-  try {
-    const issue = await jira.createIssue(projectKey, issueType, summary, {
-      ...options,
-      ...mappedIds.length > 0 ? { fields: mapped.fields } : {}
-    });
-    return { issue, failures: [...mapped.errors] };
-  } catch (error) {
-    const message = errorMessage(error);
-    if (!mappedIds.some((id) => message.includes(id))) {
-      throw error;
-    }
-    logger.warn({ error: message, mappedFields: mappedIds }, "Create with mapped fields failed; creating without them");
-  }
-  const issue = await jira.createIssue(projectKey, issueType, summary, options);
-  const failures = await updateIssueWithMappedFields(jira, issue.key, {}, mapped);
-  return { issue, failures };
-}
-function payloadWithValuesFrom(payload, source, targets) {
-  const result = {
-    ...payload,
-    ...payload.mappedFields ? { mappedFields: { ...payload.mappedFields } } : {}
-  };
-  for (const key of targets) {
-    if (key === "priority") {
-      result.priority = source.priority;
-    } else if (key === "labels") {
-      result.labels = source.labels;
-    } else if (result.mappedFields) {
-      result.mappedFields[key] = source.mappedFields?.[key] ?? "";
-    }
-  }
-  return result;
-}
-function payloadWithFailedFields(backlogPayload, jiraPayload, failures) {
-  return payloadWithValuesFrom(backlogPayload, jiraPayload, failures.map((f) => f.mapping.backlog));
-}
-function markOwnerValues(payload, owner, mappings, ownedDirection) {
-  const targets = mappings.filter((m) => m.direction === ownedDirection && payloadValue(payload, m.backlog) !== payloadValue(owner, m.backlog)).map((m) => m.backlog);
-  return targets.length > 0 ? payloadWithValuesFrom(payload, owner, targets) : null;
-}
-function recordSyncedSnapshots(store, taskId, payloads, source, mappings) {
-  const syncedHash = computeHash(payloads[source]);
-  const target = source === "backlog" ? "jira" : "backlog";
-  const marked = markOwnerValues(payloads[source], payloads[target], mappings, source === "backlog" ? "pull" : "push");
-  store.setSnapshot(taskId, source, marked ? computeHash(marked) : syncedHash, marked ?? payloads[source]);
-  store.setSnapshot(taskId, target, syncedHash, payloads[target]);
-}
-function recordPartialPush(store, taskId, task, issue, failures, mappings = []) {
-  const jiraPayload = normalizeJiraIssue(issue);
-  const withFailures = payloadWithFailedFields(normalizeBacklogTask(task), jiraPayload, failures);
-  const backlogPayload = markOwnerValues(withFailures, jiraPayload, mappings, "pull") ?? withFailures;
-  store.setSnapshot(taskId, "backlog", computeHash(backlogPayload), backlogPayload);
-  store.setSnapshot(taskId, "jira", computeHash(jiraPayload), jiraPayload);
-  store.updateSyncState(taskId, { lastSyncAt: new Date().toISOString() });
-}
-async function writeBacklogMappedValues(backlog, taskId, values, currentFrontmatter) {
-  const updates = buildBacklogValueUpdates(values, currentFrontmatter);
-  if (Object.keys(updates.cli).length > 0) {
-    await backlog.updateTask(taskId, updates.cli);
-  }
-  if (Object.keys(updates.frontmatter).length > 0) {
-    updateFrontmatterFields(getTaskFilePath(taskId), updates.frontmatter);
-  }
-}
-function payloadValue(payload, target) {
-  if (!payload)
-    return "";
-  if (target === "priority")
-    return payload.priority ?? "";
-  if (target === "labels")
-    return JSON.stringify(payload.labels ?? []);
-  return payload.mappedFields?.[target] ?? "";
-}
-function fromCanonical(value, target) {
-  if (!value)
-    return null;
-  if (target === "labels" || value.startsWith("[")) {
-    try {
-      const parsed = JSON.parse(value);
-      if (Array.isArray(parsed))
-        return parsed.length > 0 ? parsed : null;
-    } catch {}
-  }
-  return value;
-}
-function sideChanges(state, target) {
-  const backlogNow = payloadValue(state.current.backlog, target);
-  const jiraNow = payloadValue(state.current.jira, target);
-  return {
-    backlogChanged: backlogNow !== payloadValue(state.base.backlog, target),
-    jiraChanged: jiraNow !== payloadValue(state.base.jira, target),
-    differ: backlogNow !== jiraNow
-  };
-}
-function detectMappedFieldConflicts(state, mappings) {
-  const conflicts = [];
-  if (!state.base.backlog || !state.base.jira)
-    return conflicts;
-  for (const mapping of mappings) {
-    if (mapping.direction !== "both")
-      continue;
-    const target = mapping.backlog;
-    const { backlogChanged, jiraChanged, differ } = sideChanges(state, target);
-    if (!backlogChanged || !jiraChanged || !differ)
-      continue;
-    conflicts.push({
-      field: target,
-      backlogValue: getBacklogTargetValue(state.frontmatter, target),
-      jiraValue: getMappedJiraValue(state.issue, mapping),
-      baseValue: fromCanonical(payloadValue(state.base.backlog, target), target),
-      mapping
-    });
-  }
-  return conflicts;
-}
-function parseManualMappedValue(value, mapping) {
-  if (value === null || value === undefined)
-    return null;
-  if (Array.isArray(value)) {
-    return coerceForTarget(value.map(String), mapping.backlog);
-  }
-  const text = String(value).trim();
-  if (!text)
-    return null;
-  const isList = mapping.type === "multi-option" || mapping.type === "array" || Array.isArray(coerceForTarget(text, mapping.backlog));
-  return isList ? text.split(",").map((v) => v.trim()).filter(Boolean) : text;
-}
-function planMappedFieldMerge(state, mappings, resolutions) {
-  const plan = [];
-  for (const mapping of mappings) {
-    const target = mapping.backlog;
-    const backlogValue = getBacklogTargetValue(state.frontmatter, target);
-    const jiraValue = getMappedJiraValue(state.issue, mapping);
-    if (resolutions.has(target) && mapping.direction === "both") {
-      plan.push({ mapping, value: resolutions.get(target) ?? null });
-      continue;
-    }
-    const { backlogChanged, jiraChanged, differ } = sideChanges(state, target);
-    if (!differ)
-      continue;
-    if (mapping.direction === "pull") {
-      plan.push({ mapping, value: jiraValue });
-    } else if (mapping.direction === "push") {
-      plan.push({ mapping, value: backlogValue });
-    } else if (backlogChanged && !jiraChanged) {
-      plan.push({ mapping, value: backlogValue });
-    } else if (jiraChanged && !backlogChanged) {
-      plan.push({ mapping, value: jiraValue });
-    }
-  }
-  return plan;
-}
-async function applyMappedFieldMerge(plan, context) {
-  const { taskId, issueKey, backlog, jira, frontmatter, issue } = context;
-  await writeBacklogMappedValues(backlog, taskId, plan.filter((p) => p.mapping.direction !== "push"), frontmatter);
-  const jiraUpdates = buildJiraValueUpdates(plan.filter((p) => p.mapping.direction !== "pull"), issue);
-  return updateIssueWithMappedFields(jira, issueKey, {}, jiraUpdates);
-}
-function displayValue(value) {
-  if (value === null)
-    return "(empty)";
-  return Array.isArray(value) ? value.join(", ") : value;
-}
-function formatMappedFieldsSection(mappings, frontmatter, issue, jiraUnavailableReason) {
-  if (mappings.length === 0)
-    return [];
-  const lines = ["", "Mapped Fields:", "-".repeat(50)];
-  for (const mapping of mappings) {
-    const backlogValue = getBacklogTargetValue(frontmatter, mapping.backlog);
-    lines.push(`${mapping.backlog} ↔ ${mapping.jira} (${mapping.type}, ${mapping.direction})`);
-    lines.push(`  Backlog: ${displayValue(backlogValue)}`);
-    if (issue) {
-      const jiraValue = getMappedJiraValue(issue, mapping);
-      const inSync = canonicalMappedValue(backlogValue, mapping.backlog) === canonicalMappedValue(jiraValue, mapping.backlog);
-      lines.push(`  Jira:    ${displayValue(jiraValue)}${inSync ? "" : "  [differs]"}`);
-    } else {
-      lines.push(`  Jira:    ${jiraUnavailableReason ?? "(unavailable)"}`);
-    }
-  }
-  return lines;
-}
-function verifyFieldMappings(mappings, knownFields, screenFieldIds, scope) {
-  const known = new Set(knownFields.map((f) => f.id));
-  return mappings.map((mapping) => {
-    const problems = [];
-    if (!known.has(mapping.jira)) {
-      problems.push(`Jira field "${mapping.jira}" does not exist`);
-    } else if (mapping.direction !== "pull" && screenFieldIds && !screenFieldIds.has(mapping.jira)) {
-      problems.push(`Jira field "${mapping.jira}" is not editable for ${scope.projectKey} / ${scope.issueType} (not on the issue type's screen)`);
-    }
-    return { mapping, problems };
-  });
-}
-function getOverriddenCoreFields(mappings) {
-  return new Set(withoutBuiltInMappings(mappings).map((m) => m.backlog).filter((t) => isCoreOverrideTarget(t)));
-}
+import { readFileSync as readFileSync13 } from "node:fs";
+import { join as join13 } from "node:path";
+init_jira();
+init_store();
+init_field_mapping();
+init_frontmatter();
+init_jira_config();
+init_logger();
+init_mapped_field_sync();
+init_normalizer();
 
 // src/utils/priority-mapping.ts
+init_field_mapping();
+init_logger();
 function mapJiraPriorityToBacklog(jiraPriority, mapping = loadPriorityMapping()) {
   if (!jiraPriority) {
     return;
@@ -28681,9 +30171,9 @@ function buildJiraIssueFromBacklogTask(task, priorityMapping) {
 }
 function loadConfig(configDir) {
   try {
-    const baseDir = configDir || join10(process.cwd(), ".backlog-jira");
-    const configPath = join10(baseDir, "config.json");
-    const content = readFileSync11(configPath, "utf-8");
+    const baseDir = configDir || join13(process.cwd(), ".backlog-jira");
+    const configPath = join13(baseDir, "config.json");
+    const content = readFileSync13(configPath, "utf-8");
     return JSON.parse(content);
   } catch (error) {
     logger.warn({ error }, "Failed to load config, using defaults");
@@ -28691,347 +30181,17 @@ function loadConfig(configDir) {
   }
 }
 
-// src/commands/doctor.ts
-import { spawn as spawn4 } from "node:child_process";
-import { existsSync as existsSync9 } from "node:fs";
-import { readFile } from "node:fs/promises";
-import { join as join11 } from "node:path";
-async function exec(command, args = []) {
-  return new Promise((resolve, reject) => {
-    const proc = spawn4(command, args, {
-      shell: false,
-      stdio: ["pipe", "pipe", "pipe"]
-    });
-    let stdout = "";
-    let stderr = "";
-    proc.stdout.on("data", (data) => {
-      stdout += data;
-    });
-    proc.stderr.on("data", (data) => {
-      stderr += data;
-    });
-    proc.on("close", (code) => {
-      if (code === 0) {
-        resolve(stdout.trim());
-      } else {
-        reject(new Error(`${command} failed: ${stderr}`));
-      }
-    });
-  });
-}
-async function checkNodeRuntime() {
-  const version = process.versions.node;
-  const major = Number.parseInt(version.split(".")[0], 10);
-  if (major < 20) {
-    throw new Error(`Node.js 20+ required, found: ${version}`);
-  }
-  const runtime = process.versions.bun ? `Bun ${process.versions.bun} (Node.js ${version} compatible)` : `Node.js ${version}`;
-  logger.info(`  ✓ Runtime: ${runtime}`);
-}
-async function checkBacklogCLI() {
-  const version = await exec("backlog", ["--version"]);
-  logger.info(`  ✓ Backlog CLI: ${version}`);
-}
-async function checkMCPServer() {
-  const result = await exec("backlog", ["task", "list", "--plain"]);
-  if (!result) {
-    logger.warn("  ⚠ No tasks found. Make sure you're in a Backlog.md project directory.");
-  } else {
-    logger.info("  ✓ Backlog.md project detected");
-  }
-}
-async function checkDatabasePerms() {
-  const configDir = join11(process.cwd(), ".backlog-jira");
-  if (!existsSync9(configDir)) {
-    throw new Error(".backlog-jira/ not found. Run 'backlog-jira init' first.");
-  }
-  const store = new FrontmatterStore;
-  store.testWriteAccess();
-  store.close();
-  logger.info("  ✓ Database permissions OK");
-}
-async function checkGitStatus() {
-  try {
-    const status = await exec("git", ["status", "--porcelain"]);
-    if (status.trim()) {
-      logger.warn("  ⚠ Working directory has uncommitted changes");
-    } else {
-      logger.info("  ✓ Git working directory clean");
-    }
-  } catch (error) {
-    logger.warn("  ⚠ Not a git repository");
-  }
-}
-async function checkMCPConnectivity() {
-  try {
-    const startTime = Date.now();
-    const result = await exec("backlog", [
-      "task",
-      "list",
-      "--plain",
-      "-s",
-      "To Do"
-    ]);
-    const duration = Date.now() - startTime;
-    if (duration > 5000) {
-      logger.warn(`  ⚠ MCP response slow (${duration}ms). Consider optimizing task count.`);
-    } else {
-      logger.info(`  ✓ MCP connectivity OK (${duration}ms)`);
-    }
-  } catch (error) {
-    throw new Error("Failed to connect to MCP server. Ensure backlog CLI is working.");
-  }
-}
-async function checkNodeModules() {
-  const nodeModulesPath = join11(process.cwd(), "node_modules");
-  if (!existsSync9(nodeModulesPath)) {
-    throw new Error("node_modules not found. Install dependencies first (npm, pnpm or bun install).");
-  }
-  logger.info("  ✓ Dependencies installed");
-}
-async function checkDiskSpace() {
-  try {
-    const result = await exec("df", ["-h", process.cwd()]);
-    const lines = result.split(`
-`);
-    if (lines.length > 1) {
-      const parts = lines[1].split(/\s+/);
-      const available = parts[3];
-      logger.info(`  ✓ Disk space: ${available} available`);
-    }
-  } catch (error) {
-    logger.warn("  ⚠ Could not check disk space");
-  }
-}
-async function checkConfigFile(cwd = process.cwd()) {
-  const configPath = join11(cwd, ".backlog-jira", "config.json");
-  if (!existsSync9(configPath)) {
-    throw new Error("Config file not found. Run 'backlog-jira init' first.");
-  }
-  let config;
-  try {
-    config = JSON.parse(await readFile(configPath, "utf8"));
-  } catch (error) {
-    if (error instanceof SyntaxError) {
-      throw new Error("Config file contains invalid JSON");
-    }
-    throw error;
-  }
-  const projectKey = config?.jira?.projectKey;
-  if (typeof projectKey !== "string" || projectKey.trim() === "") {
-    throw new Error("Missing required config field: jira.projectKey (set it in .backlog-jira/config.json)");
-  }
-  logger.info("  ✓ Configuration file valid");
-}
-async function checkFieldMappings(jira, cwd = process.cwd()) {
-  const mappings = loadFieldMappings(cwd);
-  if (mappings.length === 0) {
-    logger.info("  ✓ No field mappings configured");
-    return [];
-  }
-  const config = JSON.parse(await readFile(join11(cwd, ".backlog-jira", "config.json"), "utf8"));
-  const projectKey = config.jira?.projectKey || process.env.JIRA_PROJECT || "";
-  const issueType = config.jira?.issueType || "Task";
-  let knownFields;
-  try {
-    knownFields = await jira.searchFields("", 1000);
-  } catch (error) {
-    throw new Error(`Could not list Jira fields to verify field mappings: ${error instanceof Error ? error.message : String(error)}`);
-  }
-  let screenFieldIds = null;
-  const writesToJira = mappings.some((m) => m.direction !== "pull");
-  if (writesToJira) {
-    if (!projectKey) {
-      logger.warn("  ⚠ jira.projectKey is not configured; cannot check mapped fields are editable");
-    } else {
-      try {
-        const types = await jira.getProjectIssueTypes(projectKey);
-        const type = types.find((t) => t.name.toLowerCase() === issueType.toLowerCase());
-        if (!type) {
-          throw new Error(`issue type "${issueType}" not found in project ${projectKey}`);
-        }
-        screenFieldIds = new Set(await jira.getCreateFieldIds(projectKey, type.id));
-      } catch (error) {
-        logger.warn(`  ⚠ Could not read screen fields for ${projectKey} / ${issueType}, skipping editability check: ${error instanceof Error ? error.message : String(error)}`);
-      }
-    }
-  }
-  const results = verifyFieldMappings(mappings, knownFields, screenFieldIds, {
-    projectKey,
-    issueType
-  });
-  for (const { mapping, problems } of results) {
-    const label = `${mapping.backlog} ↔ ${mapping.jira} (${mapping.direction})`;
-    if (problems.length === 0) {
-      logger.info(`  ✓ Field mapping ${label}`);
-    } else {
-      for (const problem of problems) {
-        logger.error(`  ✗ Field mapping ${label}: ${problem}`);
-      }
-    }
-  }
-  const failed = results.filter((r) => r.problems.length > 0);
-  if (failed.length > 0) {
-    throw new Error(`${failed.length} field mapping${failed.length === 1 ? "" : "s"} failed verification (${failed.map((r) => r.mapping.jira).join(", ")})`);
-  }
-  return results;
-}
-async function checkSprintSync(jira, options = {}) {
-  const cwd = options.cwd ?? process.cwd();
-  const mapping = loadSprintMapping(cwd);
-  if (!mapping) {
-    logger.info("  ✓ Sprint sync not configured");
-    return 0;
-  }
-  const errors = [];
-  let warnings = 0;
-  const describe = (error) => error instanceof Error ? error.message.split(`
-`)[0] : String(error);
-  try {
-    const fieldId = await jira.getSprintFieldId();
-    if (fieldId) {
-      logger.info(`  ✓ Sprint field ${fieldId}`);
-      const stored = SprintRegistry.load(cwd).sprintFieldId;
-      if (stored && stored !== fieldId) {
-        logger.warn(`  ⚠ .backlog-jira/sprints.json records Sprint field ${stored} but Jira reports ${fieldId}; remove "sprintFieldId" from sprints.json so it is rediscovered`);
-        warnings++;
-      }
-    } else {
-      errors.push("Sprint field not found: this Jira site has no Jira Software Sprint field");
-    }
-  } catch (error) {
-    errors.push(`Could not discover the Sprint field: ${describe(error)}`);
-  }
-  let sprints = null;
-  try {
-    const board = await jira.getBoard(mapping.boardId);
-    if (!board) {
-      errors.push(`Board ${mapping.boardId} was not found or is not accessible (check "boardId" and board permissions)`);
-    } else if (!board.supportsSprints) {
-      errors.push(`Board ${mapping.boardId} (${board.name}) is a ${board.type} board without sprints; sprint sync needs a scrum board`);
-    } else {
-      sprints = await jira.getBoardSprints(mapping.boardId);
-      logger.info(`  ✓ Board ${board.id} (${board.name}, ${board.type}) with ${sprints.length} sprint${sprints.length === 1 ? "" : "s"}`);
-    }
-  } catch (error) {
-    errors.push(`Board ${mapping.boardId} is unreachable: ${describe(error)}`);
-  }
-  if (mapping.direction !== "pull") {
-    if (mapping.createSprints) {
-      logger.info(`  ℹ createSprints is on: pushing a task whose milestone matches no sprint creates a future sprint on board ${mapping.boardId}`);
-    } else if (sprints) {
-      const unmatched = findUnmatchedMilestones(options.taskIds ?? new FrontmatterStore().getAllMappings().keys(), sprints, cwd);
-      if (unmatched.length > 0) {
-        logger.warn(`  ⚠ ${unmatched.length} linked task${unmatched.length === 1 ? "" : "s"} ha${unmatched.length === 1 ? "s a milestone" : "ve milestones"} matching no future or active sprint on board ${mapping.boardId} (createSprints is off, so push will report them):`);
-        for (const { taskId, milestone } of unmatched) {
-          logger.warn(`      ${taskId}: ${milestone}`);
-        }
-        warnings++;
-      }
-    }
-  }
-  for (const refusal of readMilestoneRefusals(cwd)) {
-    logger.warn(`  ⚠ Milestone ${refusal.milestoneId}${refusal.title ? ` (${refusal.title})` : ""} was not updated (${refusal.fields.join(", ")}): ${refusal.reason}`);
-    warnings++;
-  }
-  if (errors.length > 0) {
-    for (const error of errors)
-      logger.error(`  ✗ ${error}`);
-    throw new Error(`${errors.length} sprint sync problem${errors.length === 1 ? "" : "s"}`);
-  }
-  return warnings;
-}
-function findUnmatchedMilestones(taskIds, sprints, cwd) {
-  const registry = SprintRegistry.load(cwd);
-  const milestones = new MilestoneAdapter({ cwd, registry });
-  const openNames = new Set(sprints.filter((s) => s.state !== "closed").map((s) => s.name.trim().toLowerCase()));
-  const unmatched = [];
-  for (const taskId of taskIds) {
-    const value = readTaskFrontmatter(taskId).milestone;
-    if (typeof value !== "string" || !value.trim())
-      continue;
-    const milestone = milestones.get(value) ?? milestones.findByTitle(value);
-    if (milestone && registry.findByMilestone(milestone.id))
-      continue;
-    const title = (milestone?.title ?? value).trim().toLowerCase();
-    if (openNames.has(title))
-      continue;
-    unmatched.push({
-      taskId,
-      milestone: milestone ? `${milestone.title} (${milestone.id})` : value
-    });
-  }
-  return unmatched;
-}
-async function checkSprintSyncWithJira() {
-  const jira = new JiraClient({ ...getJiraClientOptions(), silentMode: true });
-  try {
-    return await checkSprintSync(jira);
-  } finally {
-    await jira.close().catch(() => {});
-  }
-}
-async function checkFieldMappingsWithJira() {
-  const jira = new JiraClient({ ...getJiraClientOptions(), silentMode: true });
-  try {
-    await checkFieldMappings(jira);
-  } finally {
-    await jira.close().catch(() => {});
-  }
-}
-async function doctorCommand() {
-  logger.info(`Running environment checks...
-`);
-  const checks = [
-    { name: "Node.js runtime", fn: checkNodeRuntime, critical: true },
-    { name: "Backlog CLI", fn: checkBacklogCLI, critical: true },
-    { name: "Dependencies", fn: checkNodeModules, critical: true },
-    { name: "Configuration", fn: () => checkConfigFile(), critical: true },
-    { name: "Database", fn: checkDatabasePerms, critical: true },
-    { name: "MCP Connectivity", fn: checkMCPConnectivity, critical: true },
-    { name: "Field mappings", fn: checkFieldMappingsWithJira, critical: true },
-    { name: "Sprint sync", fn: checkSprintSyncWithJira, critical: true },
-    { name: "Backlog.md project", fn: checkMCPServer, critical: false },
-    { name: "Git status", fn: checkGitStatus, critical: false },
-    { name: "Disk space", fn: checkDiskSpace, critical: false }
-  ];
-  let criticalFailed = false;
-  let warningCount = 0;
-  for (const check of checks) {
-    try {
-      const warnings = await check.fn();
-      if (typeof warnings === "number")
-        warningCount += warnings;
-    } catch (error) {
-      const errorMsg = error instanceof Error ? error.message : String(error);
-      if (check.critical) {
-        logger.error(`  ✗ ${check.name}: ${errorMsg}`);
-        criticalFailed = true;
-      } else {
-        logger.warn(`  ⚠ ${check.name}: ${errorMsg}`);
-        warningCount++;
-      }
-    }
-  }
-  logger.info("");
-  if (criticalFailed) {
-    logger.error("Critical checks failed. Please fix the issues above before proceeding.");
-    process.exit(1);
-  }
-  if (warningCount > 0) {
-    logger.info(`✓ All critical checks passed! (${warningCount} warning${warningCount > 1 ? "s" : ""})`);
-  } else {
-    logger.info("✓ All checks passed! Ready to sync.");
-  }
-}
+// src/cli.ts
+init_doctor();
 
 // src/commands/init.ts
-import { existsSync as existsSync11, mkdirSync as mkdirSync6, writeFileSync as writeFileSync9 } from "node:fs";
-import { join as join12 } from "node:path";
+init_source();
 var import_prompts2 = __toESM(require_prompts3(), 1);
+import { existsSync as existsSync13 } from "node:fs";
+import { join as join14 } from "node:path";
 
 // src/utils/agent-instructions.ts
-import { existsSync as existsSync10, readFileSync as readFileSync12, writeFileSync as writeFileSync8 } from "node:fs";
+import { existsSync as existsSync12, readFileSync as readFileSync14, writeFileSync as writeFileSync10 } from "node:fs";
 function getMarkers(filePath) {
   const fileName = filePath.toLowerCase();
   if (fileName.endsWith(".md")) {
@@ -29080,7 +30240,8 @@ It allows you to work locally with Backlog.md's task management while staying sy
 
 ### Initialization
 \`\`\`bash
-backlog-jira init           # Initialize plugin configuration
+backlog-jira init           # Initialize plugin configuration, then offer the guided setup
+backlog-jira configure      # Guided setup wizard (credentials to import filter)
 backlog-jira connect        # Verify Jira connection
 backlog-jira doctor         # Check environment setup
 \`\`\`
@@ -29096,8 +30257,7 @@ backlog-jira watch          # Continuous sync mode
 ### Status & Configuration
 \`\`\`bash
 backlog-jira status         # View sync status
-backlog-jira map            # Configure status mappings
-backlog-jira configure      # Update configuration
+backlog-jira configure --step <step> # Revisit one setup step (credentials, connection, project, status, sprints, fields, conflict, filter)
 backlog-jira view <task-id> # View task sync details
 \`\`\`
 
@@ -29139,6 +30299,8 @@ export JIRA_API_TOKEN="your-api-token"
 \`\`\`
 
 Generate an API token at: https://id.atlassian.com/manage-profile/security/api-tokens
+
+For Jira Server/Data Center, export \`JIRA_URL\` and \`JIRA_PERSONAL_TOKEN\` instead. The variables must be exported to the process: the plugin does not read \`.env\` files (load one with direnv or \`set -a; . ./.env; set +a\`). \`backlog-jira configure --step credentials\` checks them. Tokens are never stored in \`.backlog-jira/config.json\`.
 
 ## Workflow Integration
 
@@ -29191,15 +30353,16 @@ When conflicts occur (both sides modified), the plugin will:
 
 Configure via:
 \`\`\`bash
-backlog-jira configure --conflict-strategy <strategy>
+backlog-jira configure --step conflict                                  # interactive
+backlog-jira configure --non-interactive --conflict-strategy <strategy>  # scripts and CI
 \`\`\`
 
 ## Status Mapping
 
-The plugin maps Backlog.md task statuses to Jira issue statuses. Configure mappings with:
+The plugin maps Backlog.md task statuses to Jira issue statuses. Configure mappings with (lists the project's Jira statuses per issue type):
 
 \`\`\`bash
-backlog-jira map
+backlog-jira configure --step status
 \`\`\`
 
 ## Acceptance Criteria Sync
@@ -29208,7 +30371,7 @@ The plugin can sync acceptance criteria between Backlog.md and Jira:
 
 - Backlog.md uses \`- [ ] #N criterion\` format
 - Jira uses subtasks or checklist custom field (if available)
-- Enable with: \`backlog-jira configure --enable-annotations\`
+- Enable with: \`backlog-jira configure --non-interactive --enable-annotations\`
 
 ## Best Practices
 
@@ -29264,6 +30427,7 @@ This project uses the \`backlog-jira\` MCP server for bidirectional synchronizat
 
 ### Core Commands
 - \`backlog-jira init\` - Initialize configuration
+- \`backlog-jira configure\` - Guided setup (\`--step <step>\` to revisit one step)
 - \`backlog-jira pull\` - Pull from Jira
 - \`backlog-jira push\` - Push to Jira
 - \`backlog-jira sync\` - Bidirectional sync
@@ -29280,13 +30444,13 @@ export JIRA_API_TOKEN="your-api-token"
 }
 function addAgentInstructions(filePath, mode = "cli") {
   try {
-    if (!existsSync10(filePath)) {
+    if (!existsSync12(filePath)) {
       return {
         success: false,
         message: `File not found: ${filePath}`
       };
     }
-    const currentContent = readFileSync12(filePath, "utf-8");
+    const currentContent = readFileSync14(filePath, "utf-8");
     const guidelinesContent = mode === "cli" ? getCliModeContent() : getMcpModeContent();
     let newContent = currentContent;
     if (hasBacklogJiraGuidelines(currentContent)) {
@@ -29296,7 +30460,7 @@ function addAgentInstructions(filePath, mode = "cli") {
     newContent = `${wrappedContent}
 
 ${newContent.trimStart()}`;
-    writeFileSync8(filePath, newContent, "utf-8");
+    writeFileSync10(filePath, newContent, "utf-8");
     return {
       success: true,
       message: `Successfully added ${mode.toUpperCase()} mode guidelines to ${filePath}`
@@ -29310,51 +30474,51 @@ ${newContent.trimStart()}`;
 }
 
 // src/commands/init.ts
+init_config_file();
+init_logger();
 async function initCommand(options = {}) {
   const baseDir = options.baseDir || process.cwd();
-  const configDir = join12(baseDir, ".backlog-jira");
-  if (existsSync11(configDir)) {
-    logger.warn(".backlog-jira/ already exists. Use 'backlog-jira config' to modify settings.");
+  const configDir = getConfigDir(baseDir);
+  if (existsSync13(configDir)) {
+    logger.warn(".backlog-jira/ already exists. Use 'backlog-jira configure' to modify settings.");
     return;
   }
-  mkdirSync6(join12(configDir, "logs"), { recursive: true });
-  const config = {
-    jira: {
-      baseUrl: "",
-      projectKey: "",
-      issueType: "Task",
-      jqlFilter: ""
-    },
-    backlog: {
-      statusMapping: {
-        "To Do": ["To Do", "Open", "Backlog"],
-        "In Progress": ["In Progress"],
-        Done: ["Done", "Closed", "Resolved"]
-      }
-    },
-    sync: {
-      conflictStrategy: "prompt",
-      enableAnnotations: false,
-      watchInterval: 60
-    }
-  };
-  const configPath = join12(configDir, "config.json");
-  writeFileSync9(configPath, JSON.stringify(config, null, 2));
-  const store = new FrontmatterStore(configDir);
-  store.close();
-  const gitignorePath = join12(configDir, ".gitignore");
-  writeFileSync9(gitignorePath, CONFIG_DIR_GITIGNORE);
+  bootstrapConfigDir(baseDir);
+  const configPath = getConfigPath(baseDir);
   await setupAgentInstructions(baseDir);
   logger.info("");
   logger.info("✓ Initialized .backlog-jira/ configuration");
   logger.info(`  - Config: ${configPath}`);
-  logger.info(`  - Snapshots: ${join12(configDir, "snapshots/")}`);
-  logger.info(`  - Operations log: ${join12(configDir, "ops-log.jsonl")}`);
-  logger.info("");
-  logger.info("Next steps:");
-  logger.info("  1. Edit .backlog-jira/config.json with your Jira project settings");
-  logger.info("  2. Run 'backlog-jira connect' to verify connections");
-  logger.info("  3. Run 'backlog-jira doctor' to check environment setup");
+  logger.info(`  - Snapshots: ${join14(configDir, "snapshots/")}`);
+  logger.info(`  - Operations log: ${join14(configDir, "ops-log.jsonl")}`);
+  await offerGuidedSetup(baseDir, options.runWizard);
+}
+async function offerGuidedSetup(baseDir, runWizard) {
+  console.log(source_default.bold.cyan(`
+\uD83D\uDD27 Guided Setup
+`));
+  console.log(source_default.gray(`The setup wizard checks your Jira credentials and connection, then walks through project, status mapping, sprints, field mappings, conflict strategy and import filter.
+`));
+  const response = await import_prompts2.default({
+    type: "confirm",
+    name: "runWizard",
+    message: "Run the guided setup now?",
+    initial: true
+  });
+  if (response.runWizard === true) {
+    const wizard = runWizard ?? (async (cwd) => {
+      await Promise.resolve().then(() => init_configure());
+      const result = await runConfigure({ cwd });
+      if (result.failed)
+        process.exitCode = 1;
+    });
+    await wizard(baseDir);
+    return;
+  }
+  console.log("");
+  console.log("A default configuration was written. Next steps:");
+  console.log("  1. Run 'backlog-jira configure' for the guided setup (or one step with 'backlog-jira configure --step <name>')");
+  console.log("  2. Run 'backlog-jira doctor' to check the setup");
 }
 async function setupAgentInstructions(projectRoot) {
   console.log(source_default.bold.cyan(`
@@ -29385,7 +30549,7 @@ async function setupAgentInstructions(projectRoot) {
     ".cursorrules",
     ".github/AGENTS.md"
   ];
-  const existingFiles = commonAgentFiles.map((file) => join12(projectRoot, file)).filter((filePath) => existsSync11(filePath));
+  const existingFiles = commonAgentFiles.map((file) => join14(projectRoot, file)).filter((filePath) => existsSync13(filePath));
   if (existingFiles.length === 0) {
     console.log(source_default.yellow("No agent instruction files found in project root (AGENTS.md, CLAUDE.md, etc.)"));
     console.log(source_default.gray("Create an agent instruction file first, then re-run initialization."));
@@ -29466,7 +30630,7 @@ async function offerGitCommit(files, mode) {
   const { exec } = await import("node:child_process");
   const { promisify } = await import("node:util");
   const execAsync = promisify(exec);
-  const projectRoot = files[0] ? join12(files[0], "..") : process.cwd();
+  const projectRoot = files[0] ? join14(files[0], "..") : process.cwd();
   try {
     await execAsync("git rev-parse --git-dir", { cwd: projectRoot });
   } catch {
@@ -29517,8 +30681,13 @@ Added via: backlog-jira init`;
 }
 
 // src/commands/map-assignees.ts
-import { existsSync as existsSync12, readFileSync as readFileSync13, writeFileSync as writeFileSync10 } from "node:fs";
-import { join as join13 } from "node:path";
+init_source();
+init_jira();
+init_assignee_mapping();
+init_jira_config();
+init_logger();
+import { existsSync as existsSync14, readFileSync as readFileSync15, writeFileSync as writeFileSync11 } from "node:fs";
+import { join as join15 } from "node:path";
 import { stdin as input, stdout as output } from "node:process";
 import * as readline from "node:readline/promises";
 async function showMappings() {
@@ -29529,13 +30698,13 @@ async function showMappings() {
   console.log();
 }
 async function addMapping(backlogUser, jiraUser, options = {}) {
-  const configPath = join13(process.cwd(), ".backlog-jira", "config.json");
-  if (!existsSync12(configPath)) {
+  const configPath = join15(process.cwd(), ".backlog-jira", "config.json");
+  if (!existsSync14(configPath)) {
     console.error(source_default.red("❌ Configuration not found"));
     console.log(source_default.gray("   Run 'backlog-jira init' first"));
     process.exit(1);
   }
-  const content = readFileSync13(configPath, "utf-8");
+  const content = readFileSync15(configPath, "utf-8");
   const config = JSON.parse(content);
   if (!config.backlog) {
     config.backlog = {};
@@ -29551,18 +30720,18 @@ async function addMapping(backlogUser, jiraUser, options = {}) {
     process.exit(1);
   }
   config.backlog.assigneeMapping[cleanBacklogUser] = jiraUser;
-  writeFileSync10(configPath, JSON.stringify(config, null, 2));
+  writeFileSync11(configPath, JSON.stringify(config, null, 2));
   console.log(source_default.green(`✓ Added mapping: @${cleanBacklogUser} → ${jiraUser}`));
   logger.info({ backlogUser: cleanBacklogUser, jiraUser }, "Added assignee mapping");
 }
 async function removeMapping(backlogUser) {
-  const configPath = join13(process.cwd(), ".backlog-jira", "config.json");
-  if (!existsSync12(configPath)) {
+  const configPath = join15(process.cwd(), ".backlog-jira", "config.json");
+  if (!existsSync14(configPath)) {
     console.error(source_default.red("❌ Configuration not found"));
     console.log(source_default.gray("   Run 'backlog-jira init' first"));
     process.exit(1);
   }
-  const content = readFileSync13(configPath, "utf-8");
+  const content = readFileSync15(configPath, "utf-8");
   const config = JSON.parse(content);
   const cleanBacklogUser = backlogUser.startsWith("@") ? backlogUser.substring(1) : backlogUser;
   const explicitMapping = config.backlog?.assigneeMapping?.[cleanBacklogUser];
@@ -29581,17 +30750,17 @@ async function removeMapping(backlogUser) {
     delete config.backlog.autoMappedAssignees[cleanBacklogUser];
     console.log(source_default.green(`✓ Removed auto-discovered mapping: @${cleanBacklogUser} → ${jiraUser}`));
   }
-  writeFileSync10(configPath, JSON.stringify(config, null, 2));
+  writeFileSync11(configPath, JSON.stringify(config, null, 2));
   logger.info({ backlogUser: cleanBacklogUser, jiraUser }, "Removed assignee mapping");
 }
 async function promoteMapping(backlogUser) {
-  const configPath = join13(process.cwd(), ".backlog-jira", "config.json");
-  if (!existsSync12(configPath)) {
+  const configPath = join15(process.cwd(), ".backlog-jira", "config.json");
+  if (!existsSync14(configPath)) {
     console.error(source_default.red("❌ Configuration not found"));
     console.log(source_default.gray("   Run 'backlog-jira init' first"));
     process.exit(1);
   }
-  const content = readFileSync13(configPath, "utf-8");
+  const content = readFileSync15(configPath, "utf-8");
   const config = JSON.parse(content);
   const cleanBacklogUser = backlogUser.startsWith("@") ? backlogUser.substring(1) : backlogUser;
   const autoMapping = config.backlog?.autoMappedAssignees?.[cleanBacklogUser];
@@ -29607,7 +30776,7 @@ async function promoteMapping(backlogUser) {
   }
   config.backlog.assigneeMapping[cleanBacklogUser] = autoMapping;
   delete config.backlog.autoMappedAssignees[cleanBacklogUser];
-  writeFileSync10(configPath, JSON.stringify(config, null, 2));
+  writeFileSync11(configPath, JSON.stringify(config, null, 2));
   console.log(source_default.green(`✓ Promoted auto-discovered mapping to explicit: @${cleanBacklogUser} → ${autoMapping}`));
   logger.info({ backlogUser: cleanBacklogUser, jiraUser: autoMapping }, "Promoted auto-discovered mapping to explicit");
 }
@@ -29717,215 +30886,18 @@ function registerMapAssigneesCommand(program) {
   });
 }
 
-// src/commands/map-fields.ts
-import { existsSync as existsSync13, readFileSync as readFileSync14, writeFileSync as writeFileSync11 } from "node:fs";
-import { join as join14 } from "node:path";
-function getConfigPath() {
-  return join14(process.cwd(), ".backlog-jira", "config.json");
-}
-function readConfig() {
-  const configPath = getConfigPath();
-  if (!existsSync13(configPath)) {
-    throw new Error("Configuration not found. Run 'backlog-jira init' first.");
-  }
-  return JSON.parse(readFileSync14(configPath, "utf-8"));
-}
-function writeConfig(config) {
-  writeFileSync11(getConfigPath(), `${JSON.stringify(config, null, 2)}
-`);
-}
-function parseValueMapEntries(entries = []) {
-  if (entries.length === 0)
-    return;
-  const valueMap = {};
-  for (const entry of entries) {
-    const separator = entry.indexOf("=");
-    if (separator <= 0) {
-      throw new Error(`Invalid --value-map entry "${entry}" (expected "Jira value=Backlog value")`);
-    }
-    valueMap[entry.slice(0, separator).trim()] = entry.slice(separator + 1).trim();
-  }
-  return valueMap;
-}
-function addFieldMapping(config, mapping, options = {}) {
-  const existing = Array.isArray(config.fieldMappings) ? [...config.fieldMappings] : [];
-  const index = existing.findIndex((m) => m?.backlog === mapping.backlog);
-  if (index >= 0 && !options.force) {
-    throw new Error(`A mapping for "${mapping.backlog}" already exists. Use --force to replace it.`);
-  }
-  const entry = {
-    backlog: mapping.backlog,
-    jira: mapping.jira,
-    type: mapping.type,
-    direction: mapping.direction ?? (isBuiltInPriorityMapping(mapping) ? "both" : "pull")
-  };
-  if (mapping.valueMap)
-    entry.valueMap = mapping.valueMap;
-  if (mapping.type === SPRINT_MAPPING_TYPE) {
-    entry.boardId = typeof mapping.boardId === "string" && /^\d+$/.test(mapping.boardId) ? Number(mapping.boardId) : mapping.boardId;
-    for (const key of [
-      "createSprints",
-      "archiveClosedSprints",
-      "pullScope"
-    ]) {
-      if (mapping[key] !== undefined)
-        entry[key] = mapping[key];
-    }
-  }
-  if (index >= 0)
-    existing[index] = entry;
-  else
-    existing.push(entry);
-  const { errors } = validateFieldMappings(existing);
-  if (errors.length > 0) {
-    throw new FieldMappingConfigError(errors);
-  }
-  return { ...config, fieldMappings: existing };
-}
-function removeFieldMapping(config, backlogTarget) {
-  const existing = Array.isArray(config.fieldMappings) ? config.fieldMappings : [];
-  const remaining = existing.filter((m) => m?.backlog !== backlogTarget);
-  if (remaining.length === existing.length) {
-    throw new Error(`No field mapping found for "${backlogTarget}"`);
-  }
-  return { ...config, fieldMappings: remaining };
-}
-function describeMapping(mapping) {
-  const valueMap = mapping.valueMap ? source_default.gray(` valueMap: ${Object.entries(mapping.valueMap).map(([from, to]) => `${from}→${to}`).join(", ")}`) : "";
-  const arrow = mapping.direction === "both" ? "↔" : mapping.direction === "push" ? "→" : "←";
-  return `  ${source_default.cyan(mapping.backlog)} ${arrow} ${source_default.yellow(mapping.jira)} ${source_default.gray(`(${mapping.type}, ${mapping.direction})`)}${valueMap}`;
-}
-function describeSprintMapping(mapping) {
-  const arrow = mapping.direction === "both" ? "↔" : mapping.direction === "push" ? "→" : "←";
-  const options = [
-    `board ${mapping.boardId}`,
-    mapping.direction,
-    `createSprints: ${mapping.createSprints}`,
-    `archiveClosedSprints: ${mapping.archiveClosedSprints}`,
-    `pullScope: ${mapping.pullScope}`
-  ];
-  return `  ${source_default.cyan(mapping.backlog)} ${arrow} ${source_default.yellow("sprint")} ${source_default.gray(`(sprint, ${options.join(", ")})`)}`;
-}
-async function listFieldMappings() {
-  const config = readConfig();
-  const { mappings, errors, sprintMapping } = validateFieldMappings(config.fieldMappings);
-  console.log(source_default.bold.cyan(`
-\uD83D\uDCCB Field Mappings
-`));
-  if (sprintMapping) {
-    console.log(describeSprintMapping(sprintMapping));
-  }
-  if (mappings.length === 0 && errors.length === 0 && !sprintMapping) {
-    console.log(source_default.gray("  No field mappings configured."));
-    console.log(source_default.gray("  Add one with: backlog-jira map-fields add <backlog-target> <jira-field> --type <type>"));
-  }
-  for (const mapping of mappings) {
-    console.log(describeMapping(mapping));
-  }
-  if (errors.length > 0) {
-    console.log(source_default.red(`
-❌ Invalid entries:`));
-    for (const error of errors) {
-      console.log(source_default.red(`  - ${error}`));
-    }
-    process.exitCode = 1;
-  }
-  console.log(source_default.gray(`
-  ← pull (Jira → Backlog)   → push (Backlog → Jira)   ↔ both
-`));
-}
-async function discoverFields(options) {
-  const jira = new JiraClient({ ...getJiraClientOptions(), silentMode: true });
-  try {
-    const fields = await jira.searchFields(options.search ?? "");
-    const filtered = options.customOnly ? fields.filter((f) => f.custom || f.id.startsWith("customfield_")) : fields;
-    if (filtered.length === 0) {
-      console.log(source_default.yellow("No Jira fields found."));
-      return;
-    }
-    console.log(source_default.bold.cyan(`
-\uD83D\uDD0E Jira fields (${filtered.length})
-`));
-    const sorted = [...filtered].sort((a, b) => a.name.localeCompare(b.name));
-    const idWidth = Math.max(...sorted.map((f) => f.id.length), 2);
-    for (const field of sorted) {
-      const schemaType = field.schema?.type ? field.schema.items ? `${field.schema.type}<${field.schema.items}>` : field.schema.type : "unknown";
-      const suggested = field.schema?.custom === SPRINT_FIELD_SCHEMA ? "sprint (map-fields add milestone sprint --type sprint --board <id>)" : suggestTypeForSchema(field.schema);
-      console.log(`  ${source_default.yellow(field.id.padEnd(idWidth))}  ${field.name} ${source_default.gray(`[${schemaType}]`)}${suggested ? source_default.green(` → --type ${suggested}`) : ""}`);
-    }
-    console.log();
-  } finally {
-    await jira.close();
-  }
-}
-async function listBoards(options) {
-  const jira = new JiraClient({ ...getJiraClientOptions(), silentMode: true });
-  try {
-    const boards = await jira.listBoards({ projectKey: options.project });
-    if (boards.length === 0) {
-      console.log(source_default.yellow("No Jira boards found."));
-      return;
-    }
-    console.log(source_default.bold.cyan(`
-\uD83D\uDCCB Jira boards (${boards.length})
-`));
-    const idWidth = Math.max(...boards.map((b) => b.id.length), 2);
-    for (const board of boards) {
-      console.log(`  ${source_default.yellow(board.id.padEnd(idWidth))}  ${board.name} ${source_default.gray(`[${board.type}]`)}${board.supportsSprints ? source_default.green(` → --board ${board.id}`) : source_default.gray(" (no sprints)")}`);
-    }
-    console.log(source_default.gray(`
-  Map sprints to milestones with: backlog-jira map-fields add milestone sprint --type sprint --board <id>
-`));
-  } finally {
-    await jira.close();
-  }
-}
-function registerMapFieldsCommand(program) {
-  const mapFieldsCmd = program.command("map-fields").description("Manage custom Jira → Backlog field mappings (applied on pull)");
-  const run = (label, fn) => async (...args) => {
-    try {
-      await fn(...args);
-    } catch (error) {
-      logger.error({ error }, `${label} failed`);
-      console.error(source_default.red(`Error: ${error instanceof Error ? error.message : String(error)}`));
-      process.exit(1);
-    }
-  };
-  mapFieldsCmd.command("list").alias("show").description("List configured field mappings").action(run("List field mappings", listFieldMappings));
-  mapFieldsCmd.command("add").description("Add a field mapping").argument("<backlog-target>", "milestone, dependencies, references, priority, labels, or frontmatter:<key>").argument("<jira-field>", 'Jira field ID (customfield_NNNNN), system field name (e.g. fixVersions), or "sprint" with --type sprint').requiredOption("--type <type>", `One of: ${[...FIELD_MAPPING_TYPES, SPRINT_MAPPING_TYPE].join(", ")} (sprint: Jira sprints of --board as milestones)`).option("--board <id>", "Sprint mappings: Jira board whose sprints sync").option("--create-sprints", "Sprint mappings: pushing an unmatched milestone creates a Jira sprint").option("--no-archive-closed-sprints", "Sprint mappings: keep milestones of closed sprints active").option("--pull-scope <scope>", 'Sprint mappings: "all" (default) or "open" (only issues in open sprints are imported)').option("--direction <direction>", `One of: ${FIELD_MAPPING_DIRECTIONS.join(", ")} (pull: Jira → Backlog, push: Backlog → Jira; default: pull, or both for priority ↔ priority)`).option("--value-map <entry>", 'Translate a Jira value, e.g. "Highest=high" (repeatable)', (value, previous = []) => [...previous, value]).option("--force", "Replace an existing mapping for the same target").action(run("Add field mapping", async (backlogTarget, jiraField, options) => {
-    const sprint = options.type === SPRINT_MAPPING_TYPE;
-    const config = addFieldMapping(readConfig(), {
-      backlog: backlogTarget,
-      jira: jiraField,
-      type: options.type,
-      direction: options.direction,
-      valueMap: parseValueMapEntries(options.valueMap),
-      ...sprint ? {
-        boardId: options.board,
-        createSprints: options.createSprints || undefined,
-        archiveClosedSprints: options.archiveClosedSprints === false ? false : undefined,
-        pullScope: options.pullScope
-      } : {}
-    }, { force: options.force });
-    writeConfig(config);
-    console.log(source_default.green(`✓ Added field mapping: ${backlogTarget} ← ${jiraField}`));
-    if (sprint) {
-      console.log(source_default.gray("  Run 'backlog-jira doctor' to check the board, then 'backlog-jira pull' to create sprint milestones."));
-      return;
-    }
-    console.log(source_default.gray("  Run 'backlog-jira pull' to apply it to mapped tasks."));
-  }));
-  mapFieldsCmd.command("remove").alias("rm").description("Remove the field mapping for a Backlog target").argument("<backlog-target>", "Backlog target of the mapping to remove").action(run("Remove field mapping", async (backlogTarget) => {
-    writeConfig(removeFieldMapping(readConfig(), backlogTarget));
-    console.log(source_default.green(`✓ Removed field mapping: ${backlogTarget}`));
-  }));
-  mapFieldsCmd.command("boards").description("List Jira boards and whether they have sprints").option("--project <key>", "Only boards of a project").action(run("List boards", listBoards));
-  mapFieldsCmd.command("discover").description("List Jira fields with their IDs and types").option("--search <keyword>", "Only show fields matching a keyword").option("--custom-only", "Only show custom fields").action(run("Discover fields", discoverFields));
-}
+// src/cli.ts
+init_map_fields();
 
 // src/commands/map.ts
 import { stdin as input2, stdout as output2 } from "node:process";
 import * as readline2 from "node:readline/promises";
+init_jira();
+init_store();
+init_frontmatter();
+init_jira_config();
+init_logger();
+init_normalizer();
 function calculateSimilarity2(a, b) {
   const aLower = a.toLowerCase().trim();
   const bLower = b.toLowerCase().trim();
@@ -30211,9 +31183,10 @@ function registerMapCommand(program) {
 }
 
 // src/commands/mcp.ts
+init_source();
 import { spawn as spawn5 } from "node:child_process";
-import { existsSync as existsSync14, readFileSync as readFileSync15 } from "node:fs";
-import { join as join15 } from "node:path";
+import { existsSync as existsSync15, readFileSync as readFileSync16 } from "node:fs";
+import { join as join16 } from "node:path";
 function registerMcpCommand(program) {
   const mcpCommand = program.command("mcp").description("MCP Atlassian server management");
   mcpCommand.command("start").description("Start MCP Atlassian server using plugin configuration").option("--debug", "Print startup info and debug output").option("-v, --verbose", "Display docker commands being executed").option("--dns-servers <servers...>", "DNS server IPs for the MCP server process (e.g., 8.8.8.8 1.1.1.1)").option("--dns-search-domains <domains...>", "DNS search domains for the MCP server process (e.g., company.com internal.local)").action(async (options) => {
@@ -30298,8 +31271,8 @@ function validateAndPrepareCredentials(debug) {
   return envVars;
 }
 function loadMcpConfiguration(debug) {
-  const configDir = join15(process.cwd(), ".backlog-jira");
-  const configPath = join15(configDir, "config.json");
+  const configDir = join16(process.cwd(), ".backlog-jira");
+  const configPath = join16(configDir, "config.json");
   const defaultConfig = {
     serverCommand: "mcp-atlassian",
     serverArgs: [],
@@ -30308,14 +31281,14 @@ function loadMcpConfiguration(debug) {
     dnsServers: [],
     dnsSearchDomains: []
   };
-  if (!existsSync14(configPath)) {
+  if (!existsSync15(configPath)) {
     if (debug) {
       console.log(source_default.yellow("⚠ No config.json found, using defaults"));
     }
     return defaultConfig;
   }
   try {
-    const configContent = readFileSync15(configPath, "utf-8");
+    const configContent = readFileSync16(configPath, "utf-8");
     const config = JSON.parse(configContent);
     const mcpConfig = {
       ...defaultConfig,
@@ -30480,10 +31453,25 @@ function logDockerCommand(command, args) {
 }
 
 // src/commands/pull.ts
-import { existsSync as existsSync15, readFileSync as readFileSync16 } from "node:fs";
-import { join as join16 } from "node:path";
+import { existsSync as existsSync16, readFileSync as readFileSync17 } from "node:fs";
+import { join as join17 } from "node:path";
+init_jira();
+init_store();
+init_assignee_mapping();
+init_field_mapping();
+init_frontmatter();
+init_jira_config();
+init_logger();
+init_mapped_field_sync();
+init_normalizer();
+init_sprint_pull();
+init_status_mapping();
 
 // src/utils/sync-state.ts
+init_field_mapping();
+init_logger();
+init_normalizer();
+init_sprint_payload();
 function classifySyncState(currentBacklogHash, currentJiraHash, backlogSnapshot, jiraSnapshot, currentPayloads, options) {
   logger.debug({
     currentBacklogHash,
@@ -30651,6 +31639,7 @@ function applyMappingDirections(current, backlogSnapshot, jiraSnapshot, directio
 }
 
 // src/utils/title-sanitizer.ts
+init_logger();
 function sanitizeTitle(title) {
   if (!title) {
     return title;
@@ -30807,23 +31796,25 @@ async function getTaskIds(options, backlog, jira, store, sprints) {
 }
 async function getIssuesForImport(options, jira, store, sprintMapping) {
   let jql = options.jql;
+  let configProjectKey;
   if (!jql) {
     try {
-      const configPath = join16(process.cwd(), ".backlog-jira", "config.json");
-      if (existsSync15(configPath)) {
-        const config = JSON.parse(readFileSync16(configPath, "utf-8"));
+      const configPath = join17(process.cwd(), ".backlog-jira", "config.json");
+      if (existsSync16(configPath)) {
+        const config = JSON.parse(readFileSync17(configPath, "utf-8"));
         jql = config.jira?.jqlFilter;
+        configProjectKey = config.jira?.projectKey;
       }
     } catch (error) {
       logger.warn({ error }, "Failed to load JQL from config");
     }
   }
   if (!jql) {
-    const projectKey = process.env.JIRA_PROJECT;
+    const projectKey = configProjectKey || process.env.JIRA_PROJECT;
     if (projectKey) {
       jql = `project = ${projectKey} ORDER BY created DESC`;
     } else {
-      throw new Error("No JQL filter provided. Use --jql option or configure jqlFilter in config.json");
+      throw new Error("No JQL filter provided. Use --jql, or set the import filter with 'backlog-jira configure --step filter'");
     }
   }
   jql = applySprintPullScope(jql, sprintMapping);
@@ -31149,10 +32140,25 @@ async function importJiraIssue(jiraKey, context) {
 }
 
 // src/commands/push.ts
-import { readFileSync as readFileSync17 } from "node:fs";
-import { join as join17 } from "node:path";
+import { readFileSync as readFileSync18 } from "node:fs";
+import { join as join18 } from "node:path";
+init_jira();
+init_store();
+init_assignee_mapping();
+init_field_mapping();
+init_frontmatter();
+init_jira_config();
+init_logger();
+init_mapped_field_sync();
+init_normalizer();
 
 // src/utils/sprint-push.ts
+init_milestones();
+init_sprint_registry();
+init_field_mapping();
+init_logger();
+init_sprint_pull();
+init_task_links();
 var OPEN_STATES = new Set(["active", "future"]);
 async function createSprintPushContext(mapping, jira, options = {}) {
   if (!mapping || mapping.direction === "pull")
@@ -31339,6 +32345,7 @@ async function pushTaskSprint(ctx, taskId, issue, options = {}) {
 }
 
 // src/commands/push.ts
+init_status_mapping();
 async function push(options = {}) {
   const originalLevel = logger.level;
   if (!options.verbose) {
@@ -31662,14 +32669,22 @@ async function buildJiraUpdates(task, currentIssue, jiraClient, projectKey, over
 }
 function loadConfig2() {
   try {
-    const configPath = join17(process.cwd(), ".backlog-jira", "config.json");
-    const content = readFileSync17(configPath, "utf-8");
+    const configPath = join18(process.cwd(), ".backlog-jira", "config.json");
+    const content = readFileSync18(configPath, "utf-8");
     return JSON.parse(content);
   } catch (error) {
     logger.warn({ error }, "Failed to load config, using defaults");
     return {};
   }
 }
+
+// src/commands/status.ts
+init_jira();
+init_store();
+init_jira_config();
+init_logger();
+init_normalizer();
+init_sprint_payload();
 
 // src/utils/sprint-report.ts
 function day(value) {
@@ -31864,10 +32879,14 @@ function registerStatusCommand(program) {
 }
 
 // src/commands/sync.ts
-import { readFileSync as readFileSync18, writeFileSync as writeFileSync12 } from "node:fs";
-import { join as join18 } from "node:path";
+import { readFileSync as readFileSync19, writeFileSync as writeFileSync12 } from "node:fs";
+import { join as join19 } from "node:path";
+init_jira();
+init_store();
 
 // src/ui/conflict-resolver.ts
+init_source();
+init_sprint_payload();
 var import_prompts3 = __toESM(require_prompts3(), 1);
 async function promptForConflictResolution(conflict) {
   console.log(source_default.bold.yellow(`
@@ -32004,7 +33023,22 @@ function truncate(text, maxWidth) {
   return `${text.substring(0, maxWidth - 3)}...`;
 }
 
+// src/commands/sync.ts
+init_field_mapping();
+init_frontmatter();
+init_jira_config();
+init_logger();
+init_mapped_field_sync();
+init_normalizer();
+init_sprint_payload();
+
 // src/utils/sprint-sync.ts
+init_jira_sprints();
+init_milestones();
+init_sprint_registry();
+init_field_mapping();
+init_sprint_payload();
+init_sprint_pull();
 async function createSprintSyncContext(mapping, clients, options = {}) {
   if (!mapping)
     return null;
@@ -32102,6 +33136,9 @@ async function applySprintMerge(side, ctx, taskId, issue) {
 }
 
 // src/commands/sync-merge.ts
+init_logger();
+init_mapped_field_sync();
+init_normalizer();
 var BUILTIN_FIELDS = {
   title: "title/summary",
   description: "description",
@@ -32616,8 +33653,8 @@ async function resolveConflict(conflict, strategy, context) {
 }
 function loadConfig3() {
   try {
-    const configPath = join18(process.cwd(), ".backlog-jira", "config.json");
-    const content = readFileSync18(configPath, "utf-8");
+    const configPath = join19(process.cwd(), ".backlog-jira", "config.json");
+    const content = readFileSync19(configPath, "utf-8");
     return JSON.parse(content);
   } catch (error) {
     logger.warn({ error }, "Failed to load config, using defaults");
@@ -32731,7 +33768,7 @@ function determinePreferredSource(resolutions) {
 }
 function saveConflictPreference(preference) {
   try {
-    const configPath = join18(process.cwd(), ".backlog-jira", "config.json");
+    const configPath = join19(process.cwd(), ".backlog-jira", "config.json");
     const config = loadConfig3();
     config.sync = config.sync || {};
     config.sync.conflictStrategy = preference;
@@ -32741,6 +33778,10 @@ function saveConflictPreference(preference) {
     logger.warn({ error }, "Failed to save conflict preference");
   }
 }
+
+// src/commands/view.ts
+init_jira();
+init_store();
 
 // src/ui/display-adapter.ts
 function formatJiraMetadataPlain(task) {
@@ -32794,6 +33835,11 @@ ${jiraMetadata.join(`
 }
 
 // src/commands/view.ts
+init_field_mapping();
+init_jira_config();
+init_logger();
+init_mapped_field_sync();
+init_task_links();
 async function viewTask(taskId, options) {
   const store = new FrontmatterStore;
   const backlog = new BacklogClient;
@@ -32899,6 +33945,7 @@ function registerViewCommand(program) {
 }
 
 // src/commands/watch.ts
+init_logger();
 function parseInterval(interval) {
   const match = interval.match(/^(\d+)([smh])$/);
   if (!match) {
@@ -33029,15 +34076,16 @@ Shutting down watch mode...`);
 // src/cli.ts
 var program2 = new Command2;
 program2.name("backlog-jira").description("Bidirectional sync plugin between Backlog.md and Jira").version(package_default.version);
-program2.command("init").description("Initialize .backlog-jira/ configuration directory").action(async () => {
+program2.command("init").description("Initialize .backlog-jira/ and optionally start the guided setup").action(async () => {
   try {
     await initCommand();
+    process.exit(process.exitCode ?? 0);
   } catch (error) {
     console.error("Error:", error instanceof Error ? error.message : String(error));
     process.exit(1);
   }
 });
-program2.command("configure").description("Interactive wizard to configure Jira connection settings").option("--non-interactive", "Non-interactive mode for CI/CD environments").option("-v, --verbose", "Show detailed logging output").action(async (options) => {
+program2.command("configure").description("Guided setup: credentials, connection, project, statuses, sprints, fields, conflicts and import filter").option("--step <step>", "Run one step: credentials, connection, project, status, sprints, fields, conflict or filter").option("--non-interactive", "Write settings from options and JIRA_URL without prompts (CI)").option("--project-key <key>", "Non-interactive: Jira project key").option("--issue-type <type>", "Non-interactive: Jira issue type").option("--conflict-strategy <strategy>", "Non-interactive: prompt, prefer-backlog or prefer-jira").option("--jql-filter <jql>", "Non-interactive: JQL of issues to import").option("--enable-annotations", "Non-interactive: enable annotations").option("-v, --verbose", "Show detailed logging output").action(async (options) => {
   try {
     await configureCommand(options);
   } catch (error) {

@@ -120,6 +120,24 @@ describe("doctor: field mappings", () => {
 		expect(jira.searchFields).not.toHaveBeenCalled();
 	});
 
+	it("does not report 'No field mappings configured' when a sprint mapping exists", async () => {
+		configure([
+			{ backlog: "milestone", jira: "sprint", type: "sprint", boardId: 12 },
+		]);
+		const { logger } = await import("../utils/logger.ts");
+		const info = spyOn(logger, "info");
+		try {
+			expect(await checkFieldMappings(fakeJira(), testDir)).toEqual([]);
+			const lines = info.mock.calls.map((call) => String(call[0]));
+			expect(lines).not.toContain("  ✓ No field mappings configured");
+			expect(lines).toContain(
+				"  ✓ No field mappings besides the sprint mapping",
+			);
+		} finally {
+			info.mockRestore();
+		}
+	});
+
 	it("verifies each mapped field against the configured project and issue type", async () => {
 		configure([
 			{

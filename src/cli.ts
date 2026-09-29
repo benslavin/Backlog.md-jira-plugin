@@ -31,10 +31,14 @@ program
 
 program
 	.command("init")
-	.description("Initialize .backlog-jira/ configuration directory")
+	.description(
+		"Initialize .backlog-jira/ and optionally start the guided setup",
+	)
 	.action(async () => {
 		try {
 			await initCommand();
+			// prompts keeps stdin open, so exit explicitly
+			process.exit(process.exitCode ?? 0);
 		} catch (error) {
 			console.error(
 				"Error:",
@@ -46,8 +50,25 @@ program
 
 program
 	.command("configure")
-	.description("Interactive wizard to configure Jira connection settings")
-	.option("--non-interactive", "Non-interactive mode for CI/CD environments")
+	.description(
+		"Guided setup: credentials, connection, project, statuses, sprints, fields, conflicts and import filter",
+	)
+	.option(
+		"--step <step>",
+		"Run one step: credentials, connection, project, status, sprints, fields, conflict or filter",
+	)
+	.option(
+		"--non-interactive",
+		"Write settings from options and JIRA_URL without prompts (CI)",
+	)
+	.option("--project-key <key>", "Non-interactive: Jira project key")
+	.option("--issue-type <type>", "Non-interactive: Jira issue type")
+	.option(
+		"--conflict-strategy <strategy>",
+		"Non-interactive: prompt, prefer-backlog or prefer-jira",
+	)
+	.option("--jql-filter <jql>", "Non-interactive: JQL of issues to import")
+	.option("--enable-annotations", "Non-interactive: enable annotations")
 	.option("-v, --verbose", "Show detailed logging output")
 	.action(async (options) => {
 		try {

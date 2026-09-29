@@ -165,6 +165,101 @@ describe("JiraClient", () => {
 		});
 	});
 
+	describe("getTransitions to_status", () => {
+		it("uses the to_status name MCP Atlassian returns", async () => {
+			const client = new JiraClient();
+			(client as unknown as { callMcpTool: unknown }).callMcpTool = mock(
+				async () => [{ id: "31", name: "Finish", to_status: "Done" }],
+			);
+
+			const [transition] = await client.getTransitions("PROJ-1");
+
+			expect(transition.to).toEqual({ id: "", name: "Done" });
+		});
+	});
+
+	describe("checkConnection", () => {
+		const names = [
+			"JIRA_URL",
+			"JIRA_EMAIL",
+			"JIRA_USERNAME",
+			"JIRA_API_TOKEN",
+			"JIRA_PERSONAL_TOKEN",
+		];
+		let saved: Record<string, string | undefined>;
+		beforeEach(() => {
+			saved = Object.fromEntries(names.map((n) => [n, process.env[n]]));
+			for (const n of names) delete process.env[n];
+		});
+		afterEach(() => {
+			for (const [n, v] of Object.entries(saved)) {
+				if (v === undefined) delete process.env[n];
+				else process.env[n] = v;
+			}
+		});
+
+		it("returns the underlying error message", async () => {
+			const client = new JiraClient({ silentMode: true });
+			const result = await client.checkConnection();
+			expect(result).toEqual({
+				ok: false,
+				error: "Missing JIRA_URL environment variable.",
+			});
+		});
+
+		it("returns tool errors and closes the connection", async () => {
+			const client = new JiraClient({ silentMode: true });
+			(client as unknown as { callMcpTool: unknown }).callMcpTool = mock(
+				async () => {
+					throw new Error("MCP tool jira_search_fields failed: 401");
+				},
+			);
+			const close = mock(async () => {});
+			client.close = close;
+
+			expect(await client.checkConnection()).toEqual({
+				ok: false,
+				error: "MCP tool jira_search_fields failed: 401",
+			});
+			expect(await client.test()).toBe(false);
+			expect(close).toHaveBeenCalledTimes(2);
+		});
+
+		it("succeeds when Jira lists fields", async () => {
+			const client = new JiraClient({ silentMode: true });
+			(client as unknown as { callMcpTool: unknown }).callMcpTool = mock(
+				async () => [{ id: "summary", name: "Summary" }],
+			);
+			expect(await client.checkConnection()).toEqual({ ok: true });
+		});
+
+		it("treats an empty field list as a failure and reports the search error", async () => {
+			const client = new JiraClient({ silentMode: true });
+			const callMcpTool = mock(async (tool: string) => {
+				if (tool === "jira_search_fields") return [];
+				throw new Error("Error searching issues: Name does not resolve");
+			});
+			(client as unknown as { callMcpTool: unknown }).callMcpTool = callMcpTool;
+
+			expect(await client.checkConnection()).toEqual({
+				ok: false,
+				error: "Error searching issues: Name does not resolve",
+			});
+			expect(callMcpTool.mock.calls[1][0]).toBe("jira_search");
+		});
+
+		it("fails when Jira lists no fields even if the search succeeds", async () => {
+			const client = new JiraClient({ silentMode: true });
+			(client as unknown as { callMcpTool: unknown }).callMcpTool = mock(
+				async (tool: string) =>
+					tool === "jira_search_fields" ? { fields: [] } : { issues: [] },
+			);
+			const result = await client.checkConnection();
+			expect(result.ok).toBe(false);
+			expect(result.error).toContain("Jira returned no fields");
+		});
+	});
+
 	describe("transitionIssue", () => {
 		it("should transition issue with correct parameters", async () => {
 			const client = new JiraClient();

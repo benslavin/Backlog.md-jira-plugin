@@ -1,920 +1,1289 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import chalk from "chalk";
 import prompts from "prompts";
+import { SPRINT_FIELD_SCHEMA } from "../integrations/jira-sprints.ts";
 import { JiraClient } from "../integrations/jira.ts";
+import {
+	CONFLICT_STRATEGIES,
+	type ConflictStrategy,
+	type RawConfig,
+	bootstrapConfigDir,
+	getConfigDir,
+	getSection,
+	readConfigFile,
+	setSectionValues,
+	writeConfigFile,
+} from "../utils/config-file.ts";
+import {
+	FIELD_MAPPING_DIRECTIONS,
+	FIELD_MAPPING_TYPES,
+	type FieldMappingDirection,
+	type SprintPullScope,
+	suggestTypeForSchema,
+	validateBacklogTarget,
+	validateFieldMappings,
+} from "../utils/field-mapping.ts";
+import { jiraClientOptionsFromConfig } from "../utils/jira-config.ts";
 import { getLogLevel, logger, setLogLevel } from "../utils/logger.ts";
-import { CONFIG_DIR_GITIGNORE } from "../utils/task-links.ts";
-import type { JiraConfig } from "./init.ts";
+import {
+	applyRequiredToolsets,
+	applySprintSettings,
+	buildStatusMappingConfig,
+	credentialHelpLines,
+	detectCredentials,
+	discoverProjectStatuses,
+	findSprintEntry,
+	mergeEnvFile,
+	readBacklogStatuses,
+	suggestBacklogStatus,
+	uncoveredJiraStatuses,
+} from "../utils/setup.ts";
+import { runDoctor } from "./doctor.ts";
+import { addFieldMapping, removeFieldMapping } from "./map-fields.ts";
 
-interface ConfigureOptions {
+/** Wizard steps, in the order the full wizard runs them */
+export const CONFIGURE_STEPS = [
+	"credentials",
+	"connection",
+	"project",
+	"status",
+	"sprints",
+	"fields",
+	"conflict",
+	"filter",
+] as const;
+export type ConfigureStep = (typeof CONFIGURE_STEPS)[number];
+
+const STEP_INFO: Record<ConfigureStep, { title: string; about: string }> = {
+	credentials: {
+		title: "Credentials",
+		about: "Check that JIRA_URL and a Jira token are exported to backlog-jira.",
+	},
+	connection: {
+		title: "Connection check",
+		about:
+			"Start the MCP Atlassian server and call Jira with your credentials.",
+	},
+	project: {
+		title: "Project and issue type",
+		about:
+			"Choose the Jira project and the issue type new tasks are created as.",
+	},
+	status: {
+		title: "Status mapping",
+		about: "Map each Jira status of the project to a Backlog status.",
+	},
+	sprints: {
+		title: "Sprints",
+		about: "Optionally sync the sprints of a Jira board as Backlog milestones.",
+	},
+	fields: {
+		title: "Field mappings",
+		about:
+			"Optionally sync extra Jira fields (story points, versions, custom fields).",
+	},
+	conflict: {
+		title: "Conflict strategy",
+		about: "Choose what sync does when a field changed on both sides.",
+	},
+	filter: {
+		title: "Import filter",
+		about: "Choose the JQL of the Jira issues 'pull --import' brings in.",
+	},
+};
+
+/** Maximum number of issues one `pull --import` run handles */
+const IMPORT_LIMIT = 50;
+
+/** Jira operations the wizard uses */
+export type WizardJira = Pick<
+	JiraClient,
+	| "checkConnection"
+	| "getAllProjects"
+	| "getProjectIssueTypes"
+	| "searchIssues"
+	| "getTransitions"
+	| "listBoards"
+	| "searchFields"
+	| "close"
+>;
+
+export interface ConfigureOptions {
+	/** Run a single step instead of the whole wizard */
+	step?: string;
 	nonInteractive?: boolean;
 	verbose?: boolean;
+	/** Non-interactive values */
+	projectKey?: string;
+	issueType?: string;
+	conflictStrategy?: string;
+	jqlFilter?: string;
+	enableAnnotations?: boolean;
+	/** Project directory (defaults to the current directory) */
+	cwd?: string;
+	/** Jira client factory, for tests */
+	createJira?: (config: RawConfig) => WizardJira;
+	/** Backlog statuses, for tests (defaults to `backlog config get statuses`) */
+	backlogStatuses?: () => string[];
+	/** Final health check (defaults to doctor) */
+	doctor?: () => Promise<{ ok: boolean }>;
 }
 
-interface JiraProjectInfo {
-	key: string;
-	name: string;
-	id: string;
+export interface ConfigureResult {
+	completed: ConfigureStep[];
+	skipped: ConfigureStep[];
+	/** The step the user cancelled (Ctrl+C) in, if any */
+	cancelledAt?: ConfigureStep;
+	/** Whether a check failed (connection, doctor) */
+	failed: boolean;
+}
+
+type StepOutcome = "done" | "skipped" | "failed";
+
+interface WizardContext {
+	cwd: string;
+	config: RawConfig;
+	createJira: (config: RawConfig) => WizardJira;
+	backlogStatuses: () => string[];
+	/** Client reused while the MCP settings and credentials stay the same */
+	jira?: { key: string; client: WizardJira };
+}
+
+class WizardCancelled extends Error {
+	constructor() {
+		super("Configuration cancelled");
+		this.name = "WizardCancelled";
+	}
 }
 
 /**
- * Set or unset an environment variable. Assigning undefined to process.env
- * stores the string "undefined", so unset values must be deleted instead.
+ * Ask one question; Ctrl+C (an undefined answer) cancels the wizard
  */
-function setEnv(name: string, value: string | undefined): void {
-	if (value === undefined) {
-		delete process.env[name];
+async function ask<T>(question: prompts.PromptObject): Promise<T> {
+	const name = String(question.name);
+	const response = await prompts(question);
+	const answer = response?.[name];
+	if (answer === undefined) throw new WizardCancelled();
+	return answer as T;
+}
+
+function describeError(error: unknown): string {
+	return error instanceof Error ? error.message : String(error);
+}
+
+function defaultCreateJira(config: RawConfig): WizardJira {
+	return new JiraClient({
+		...jiraClientOptionsFromConfig(config),
+		silentMode: true,
+	});
+}
+
+/**
+ * Run fn with a Jira client built from the given (by default the wizard's
+ * current) config. The client, and so its MCP server, is reused across steps
+ * until the MCP settings or credentials change.
+ */
+async function withJira<T>(
+	ctx: WizardContext,
+	fn: (jira: WizardJira) => Promise<T>,
+	config: RawConfig = ctx.config,
+): Promise<T> {
+	const key = JSON.stringify([
+		config.mcp ?? null,
+		...[
+			"JIRA_URL",
+			"JIRA_EMAIL",
+			"JIRA_USERNAME",
+			"JIRA_API_TOKEN",
+			"JIRA_PERSONAL_TOKEN",
+		].map((name) => process.env[name] ?? null),
+	]);
+	if (ctx.jira?.key !== key) {
+		await closeJira(ctx);
+		ctx.jira = { key, client: ctx.createJira(config) };
+	}
+	return fn(ctx.jira.client);
+}
+
+async function closeJira(ctx: WizardContext): Promise<void> {
+	const client = ctx.jira?.client;
+	ctx.jira = undefined;
+	await client?.close().catch(() => {});
+}
+
+function jiraSection(ctx: WizardContext): {
+	projectKey: string;
+	issueType: string;
+	jqlFilter: string;
+} {
+	const jira = getSection(ctx.config, "jira");
+	return {
+		projectKey: typeof jira.projectKey === "string" ? jira.projectKey : "",
+		issueType: typeof jira.issueType === "string" ? jira.issueType : "Task",
+		jqlFilter: typeof jira.jqlFilter === "string" ? jira.jqlFilter : "",
+	};
+}
+
+// ===== Steps =====
+
+async function credentialsStep(ctx: WizardContext): Promise<StepOutcome> {
+	let status = detectCredentials();
+	const mark = (ok: boolean) => (ok ? chalk.green("✓") : chalk.red("✗"));
+	console.log(`  ${mark(!!status.url)} JIRA_URL        ${status.url ?? ""}`);
+	if (status.hasPersonalToken) {
+		console.log(`  ${mark(true)} JIRA_PERSONAL_TOKEN (set, hidden)`);
 	} else {
-		process.env[name] = value;
-	}
-}
-
-function restoreEnv(snapshot: Record<string, string | undefined>): void {
-	for (const [name, value] of Object.entries(snapshot)) {
-		setEnv(name, value);
-	}
-}
-
-/**
- * Interactive wizard to configure Jira connection settings
- */
-export async function configureCommand(
-	options: ConfigureOptions = {},
-): Promise<void> {
-	// Suppress verbose logging unless --verbose flag is used
-	const originalLogLevel = getLogLevel();
-	if (!options.verbose) {
-		setLogLevel("warn"); // Only show warnings and errors
-	}
-
-	try {
-		if (options.nonInteractive) {
-			console.log(chalk.yellow("Non-interactive mode is not yet implemented."));
-			console.log("Please use environment variables for CI/CD setup:");
-			console.log("  - JIRA_URL");
-			console.log(
-				"  - JIRA_EMAIL (for Cloud) or JIRA_PERSONAL_TOKEN (for Server)",
-			);
-			console.log("  - JIRA_API_TOKEN (for Cloud)");
-			process.exit(1);
-		}
-
-		console.log(chalk.bold.cyan("\n🔧 Jira Configuration Wizard\n"));
 		console.log(
-			chalk.gray("Let's set up your Jira connection step by step.\n"),
-		);
-
-		const configDir = join(process.cwd(), ".backlog-jira");
-
-		// Create config directory if it doesn't exist
-		if (!existsSync(configDir)) {
-			console.log(chalk.yellow("Creating .backlog-jira/ directory...\n"));
-			mkdirSync(join(configDir, "logs"), { recursive: true });
-		}
-
-		// Step 1: Jira instance type
-		console.log(chalk.bold.green("Step 1: Jira Instance Type"));
-		console.log(chalk.gray("Select your Jira deployment type.\n"));
-
-		const instanceTypeResponse = await prompts({
-			type: "select",
-			name: "instanceType",
-			message: "What type of Jira instance are you using?",
-			choices: [
-				{
-					title: "Jira Cloud (atlassian.net)",
-					value: "cloud",
-					description: "Cloud-hosted Jira from Atlassian",
-				},
-				{
-					title: "Jira Server / Data Center (self-hosted)",
-					value: "server",
-					description: "Self-hosted Jira installation",
-				},
-			],
-		});
-
-		if (!instanceTypeResponse.instanceType) {
-			console.log(chalk.yellow("\n✗ Configuration cancelled.\n"));
-			process.exit(0);
-		}
-
-		const instanceType = instanceTypeResponse.instanceType as
-			| "cloud"
-			| "server";
-
-		// Step 2: Jira URL
-		console.log(chalk.bold.green("\n\nStep 2: Jira URL"));
-		console.log(chalk.gray("Enter your Jira instance URL.\n"));
-
-		let jiraUrl = "";
-		let urlValid = false;
-
-		while (!urlValid) {
-			const urlResponse = await prompts({
-				type: "text",
-				name: "url",
-				message: "Jira URL:",
-				initial:
-					instanceType === "cloud"
-						? "https://your-domain.atlassian.net"
-						: "https://jira.yourcompany.com",
-				validate: (value) => {
-					if (!value || value.trim() === "") {
-						return "URL is required";
-					}
-					if (!value.startsWith("http://") && !value.startsWith("https://")) {
-						return "URL must start with http:// or https://";
-					}
-					if (instanceType === "cloud" && !value.includes("atlassian.net")) {
-						return "Cloud URL should contain 'atlassian.net'";
-					}
-					return true;
-				},
-			});
-
-			if (!urlResponse.url) {
-				console.log(chalk.yellow("\n✗ Configuration cancelled.\n"));
-				process.exit(0);
-			}
-
-			jiraUrl = urlResponse.url;
-
-			// Remove trailing slash
-			jiraUrl = jiraUrl.trim().replace(/\/$/, "");
-
-			// Validate URL format
-			try {
-				new URL(jiraUrl);
-				urlValid = true;
-			} catch {
-				console.log(chalk.red("Invalid URL format. Please try again.\n"));
-			}
-		}
-
-		// Step 3: Credentials
-		console.log(chalk.bold.green("\n\nStep 3: Authentication"));
-
-		let jiraEmail = "";
-		let jiraApiToken = "";
-		let jiraPersonalToken = "";
-
-		if (instanceType === "cloud") {
-			console.log(chalk.gray("For Jira Cloud, you need an API token.\n"));
-			console.log(chalk.cyan("To create an API token:"));
-			console.log(
-				chalk.cyan(
-					"  1. Go to https://id.atlassian.com/manage-profile/security/api-tokens",
-				),
-			);
-			console.log(chalk.cyan("  2. Click 'Create API token'"));
-			console.log(chalk.cyan("  3. Copy the generated token\n"));
-
-			const emailResponse = await prompts({
-				type: "text",
-				name: "email",
-				message: "Jira account email:",
-				validate: (value) => {
-					if (!value || value.trim() === "") {
-						return "Email is required";
-					}
-					if (!value.includes("@")) {
-						return "Please enter a valid email address";
-					}
-					return true;
-				},
-			});
-
-			if (!emailResponse.email) {
-				console.log(chalk.yellow("\n✗ Configuration cancelled.\n"));
-				process.exit(0);
-			}
-
-			jiraEmail = emailResponse.email;
-
-			const tokenResponse = await prompts({
-				type: "password",
-				name: "token",
-				message: "API token:",
-				validate: (value) => {
-					if (!value || value.trim() === "") {
-						return "API token is required";
-					}
-					return true;
-				},
-			});
-
-			if (!tokenResponse.token) {
-				console.log(chalk.yellow("\n✗ Configuration cancelled.\n"));
-				process.exit(0);
-			}
-
-			jiraApiToken = tokenResponse.token;
-		} else {
-			console.log(
-				chalk.gray(
-					"For Jira Server/Data Center, you need a Personal Access Token.\n",
-				),
-			);
-			console.log(chalk.cyan("To create a Personal Access Token:"));
-			console.log(chalk.cyan("  1. Go to your Jira profile settings"));
-			console.log(chalk.cyan("  2. Navigate to 'Personal Access Tokens'"));
-			console.log(
-				chalk.cyan("  3. Create a new token with appropriate permissions\n"),
-			);
-
-			const patResponse = await prompts({
-				type: "password",
-				name: "pat",
-				message: "Personal Access Token:",
-				validate: (value) => {
-					if (!value || value.trim() === "") {
-						return "Personal Access Token is required";
-					}
-					return true;
-				},
-			});
-
-			if (!patResponse.pat) {
-				console.log(chalk.yellow("\n✗ Configuration cancelled.\n"));
-				process.exit(0);
-			}
-
-			jiraPersonalToken = patResponse.pat;
-		}
-
-		// Step 4: MCP Server Configuration (Optional)
-		console.log(
-			chalk.bold.green("\n\nStep 4: MCP Server Configuration (Optional)"),
+			`  ${mark(!!status.email)} JIRA_EMAIL      ${status.email ?? ""}`,
 		);
 		console.log(
-			chalk.gray(
-				"Configure additional arguments and environment variables for the MCP server.\n",
+			`  ${mark(status.hasApiToken)} JIRA_API_TOKEN  ${status.hasApiToken ? "(set, hidden)" : ""}`,
+		);
+	}
+
+	if (!status.auth) {
+		console.log(
+			chalk.yellow(
+				`\n  Not exported to this process: ${status.missing.join(", ")}\n`,
 			),
 		);
+		for (const line of credentialHelpLines()) {
+			console.log(chalk.gray(`  ${line}`));
+		}
+		console.log();
 
-		const mcpEnvVars: Record<string, string> = {};
-		const mcpServerArgs: string[] = [];
-
-		// First ask about server arguments
-		const useMcpArgsResponse = await prompts({
+		const enterNow = await ask<boolean>({
 			type: "confirm",
-			name: "useMcpArgs",
+			name: "enterCredentials",
 			message:
-				"Do you want to configure MCP server arguments (e.g., Docker options like --dns)?",
-			initial: false,
+				"Enter credentials for this session so setup can continue? (not saved to config.json)",
+			initial: true,
 		});
-
-		if (useMcpArgsResponse.useMcpArgs === undefined) {
-			console.log(chalk.yellow("\n✗ Configuration cancelled.\n"));
-			process.exit(0);
-		}
-
-		if (useMcpArgsResponse.useMcpArgs) {
-			console.log(chalk.cyan("\nEnter server arguments one by one."));
+		if (!enterNow) {
 			console.log(
-				chalk.gray("Examples: --dns 8.8.8.8, --dns-search company.com"),
-			);
-			console.log(chalk.gray("Leave empty to finish.\n"));
-
-			let addingArgs = true;
-			while (addingArgs) {
-				const argResponse = await prompts({
-					type: "text",
-					name: "arg",
-					message: "Server argument:",
-				});
-
-				if (argResponse.arg === undefined) {
-					console.log(chalk.yellow("\n✗ Configuration cancelled.\n"));
-					process.exit(0);
-				}
-
-				const arg = argResponse.arg.trim();
-
-				// Empty arg means done
-				if (arg === "") {
-					addingArgs = false;
-					continue;
-				}
-
-				mcpServerArgs.push(arg);
-				console.log(chalk.green(`  ✓ Added argument: ${arg}\n`));
-			}
-
-			if (mcpServerArgs.length > 0) {
-				console.log(chalk.cyan("\nConfigured server arguments:"));
-				for (const arg of mcpServerArgs) {
-					console.log(chalk.gray(`  ${arg}`));
-				}
-				console.log();
-			}
-		}
-
-		// Then ask about environment variables
-		const useMcpEnvResponse = await prompts({
-			type: "confirm",
-			name: "useMcpEnv",
-			message:
-				"Do you want to configure additional MCP server environment variables?",
-			initial: false,
-		});
-
-		if (useMcpEnvResponse.useMcpEnv === undefined) {
-			console.log(chalk.yellow("\n✗ Configuration cancelled.\n"));
-			process.exit(0);
-		}
-
-		if (useMcpEnvResponse.useMcpEnv) {
-			console.log(
-				chalk.cyan("\nEnter key-value pairs for environment variables."),
-			);
-			console.log(chalk.gray("Leave the key empty to finish.\n"));
-
-			let addingVars = true;
-			while (addingVars) {
-				const keyResponse = await prompts({
-					type: "text",
-					name: "key",
-					message: "Environment variable name:",
-					validate: (value) => {
-						// Empty means done
-						if (value.trim() === "") {
-							return true;
-						}
-						// Check for valid env var name
-						if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(value)) {
-							return "Invalid variable name. Use only letters, numbers, and underscores.";
-						}
-						// Check if already exists
-						if (mcpEnvVars[value]) {
-							return "This variable already exists.";
-						}
-						return true;
-					},
-				});
-
-				if (keyResponse.key === undefined) {
-					console.log(chalk.yellow("\n✗ Configuration cancelled.\n"));
-					process.exit(0);
-				}
-
-				const key = keyResponse.key.trim();
-
-				// Empty key means done
-				if (key === "") {
-					addingVars = false;
-					continue;
-				}
-
-				const valueResponse = await prompts({
-					type: "text",
-					name: "value",
-					message: `Value for ${key}:`,
-					validate: (value) => {
-						if (value === undefined || value === null) {
-							return "Value is required";
-						}
-						return true;
-					},
-				});
-
-				if (valueResponse.value === undefined) {
-					console.log(chalk.yellow("\n✗ Configuration cancelled.\n"));
-					process.exit(0);
-				}
-
-				mcpEnvVars[key] = valueResponse.value;
-				console.log(chalk.green(`  ✓ Added ${key}\n`));
-			}
-
-			if (Object.keys(mcpEnvVars).length > 0) {
-				console.log(chalk.cyan("\nConfigured environment variables:"));
-				for (const [key, value] of Object.entries(mcpEnvVars)) {
-					console.log(
-						chalk.gray(`  ${key}: ${"*".repeat(Math.min(value.length, 20))}`),
-					);
-				}
-				console.log();
-			}
-		}
-
-		// Step 5: Test connection
-		console.log(chalk.bold.green("\n\nStep 5: Testing Connection"));
-		console.log(
-			chalk.gray("Validating credentials by connecting to Jira...\n"),
-		);
-
-		// Temporarily set environment variables for testing
-		const originalEnv = {
-			JIRA_URL: process.env.JIRA_URL,
-			JIRA_EMAIL: process.env.JIRA_EMAIL,
-			JIRA_API_TOKEN: process.env.JIRA_API_TOKEN,
-			JIRA_PERSONAL_TOKEN: process.env.JIRA_PERSONAL_TOKEN,
-		};
-
-		process.env.JIRA_URL = jiraUrl;
-		if (instanceType === "cloud") {
-			process.env.JIRA_EMAIL = jiraEmail;
-			process.env.JIRA_API_TOKEN = jiraApiToken;
-			setEnv("JIRA_PERSONAL_TOKEN", undefined);
-		} else {
-			process.env.JIRA_PERSONAL_TOKEN = jiraPersonalToken;
-			setEnv("JIRA_EMAIL", undefined);
-			setEnv("JIRA_API_TOKEN", undefined);
-		}
-
-		// Apply MCP environment variables for testing
-		for (const [key, value] of Object.entries(mcpEnvVars)) {
-			process.env[key] = value;
-		}
-
-		let connectionOk = false;
-		let availableProjects: JiraProjectInfo[] = [];
-
-		try {
-			// Pass MCP server arguments to JiraClient for testing
-			// Use silent mode to suppress retry errors during connection test
-			const jiraClient = new JiraClient({
-				dockerArgs: mcpServerArgs,
-				silentMode: true,
-			});
-			connectionOk = await jiraClient.test();
-
-			if (connectionOk) {
-				console.log(chalk.green("✓ Connection successful!\n"));
-
-				// Fetch available projects
-				try {
-					// Create a new client for fetching projects since test() closes the connection
-					// No need for silent mode here as connection is already verified
-					const projectsClient = new JiraClient({
-						dockerArgs: mcpServerArgs,
-						silentMode: true,
-					});
-					const projects = await projectsClient.getAllProjects();
-					availableProjects = projects;
-					await projectsClient.close();
-				} catch (error) {
-					console.log(chalk.yellow("⚠ Could not fetch projects list"));
-					logger.debug({ error }, "Failed to fetch projects");
-				}
-			} else {
-				console.log(
-					chalk.red("✗ Connection failed. Please check your credentials.\n"),
-				);
-				// Restore original environment
-				restoreEnv(originalEnv);
-				process.exit(1);
-			}
-		} catch (error) {
-			console.log(chalk.red("✗ Connection failed:"));
-			console.log(
-				chalk.red(
-					`  ${error instanceof Error ? error.message : String(error)}\n`,
+				chalk.gray(
+					"  Export the variables, then run: backlog-jira configure --step credentials",
 				),
 			);
-			// Restore original environment
-			restoreEnv(originalEnv);
-			process.exit(1);
+			return "skipped";
 		}
+		const values = await promptCredentials(ctx);
+		for (const [name, value] of Object.entries(values)) {
+			process.env[name] = value;
+		}
+		status = detectCredentials();
+		await offerEnvFile(ctx, values);
+	} else {
+		console.log(chalk.green("\n  Credentials are exported."));
+	}
 
-		// Step 6: Project selection
-		console.log(chalk.bold.green("\nStep 6: Project Selection"));
-		console.log(chalk.gray("Select or enter the Jira project key.\n"));
+	// The URL is not secret; keep it in config.json for reference
+	if (status.url) {
+		setSectionValues(ctx.config, "jira", {
+			baseUrl: status.url.replace(/\/+$/, ""),
+		});
+	}
+	return status.auth ? "done" : "skipped";
+}
 
-		let projectKey = "";
-
-		if (availableProjects.length > 0) {
-			const projectChoices = availableProjects.map((p) => ({
-				name: `${p.key} - ${p.name}`,
-				value: p.key,
-			}));
-
-			projectChoices.push({
-				name: "Enter manually",
-				value: "___manual___",
-			});
-
-			const projectChoiceResponse = await prompts({
-				type: "select",
-				name: "choice",
-				message: "Select your project:",
-				choices: projectChoices.map((c) => ({
-					title: c.name,
-					value: c.value,
-				})),
-			});
-
-			if (!projectChoiceResponse.choice) {
-				console.log(chalk.yellow("\n✗ Configuration cancelled.\n"));
-				process.exit(0);
+async function promptCredentials(
+	ctx: WizardContext,
+): Promise<Record<string, string>> {
+	const instance = await ask<"cloud" | "server">({
+		type: "select",
+		name: "instanceType",
+		message: "Jira deployment:",
+		choices: [
+			{
+				title: "Jira Cloud (atlassian.net) - email + API token",
+				value: "cloud",
+			},
+			{
+				title: "Jira Server / Data Center - personal access token",
+				value: "server",
+			},
+		],
+	});
+	const baseUrl = getSection(ctx.config, "jira").baseUrl;
+	const url = await ask<string>({
+		type: "text",
+		name: "jiraUrl",
+		message: "Jira URL:",
+		initial:
+			process.env.JIRA_URL ||
+			(typeof baseUrl === "string" && baseUrl) ||
+			(instance === "cloud" ? "https://your-domain.atlassian.net" : ""),
+		validate: (value: string) => {
+			try {
+				const parsed = new URL(value.trim());
+				return /^https?:$/.test(parsed.protocol)
+					? true
+					: "URL must start with http:// or https://";
+			} catch {
+				return "Enter a URL such as https://your-domain.atlassian.net";
 			}
-
-			const projectChoice = projectChoiceResponse.choice;
-
-			if (projectChoice === "___manual___") {
-				const keyResponse = await prompts({
-					type: "text",
-					name: "key",
-					message: "Project key (e.g., PROJ, DEV):",
-					validate: (value) => {
-						if (!value || value.trim() === "") {
-							return "Project key is required";
-						}
-						if (!/^[A-Z][A-Z0-9]*$/.test(value.trim())) {
-							return "Project key should be uppercase letters and numbers";
-						}
-						return true;
-					},
-				});
-
-				if (!keyResponse.key) {
-					console.log(chalk.yellow("\n✗ Configuration cancelled.\n"));
-					process.exit(0);
-				}
-
-				projectKey = keyResponse.key;
-			} else {
-				projectKey = projectChoice;
-			}
-		} else {
-			const keyResponse = await prompts({
+		},
+	});
+	const values: Record<string, string> = {
+		JIRA_URL: url.trim().replace(/\/+$/, ""),
+	};
+	if (instance === "cloud") {
+		console.log(
+			chalk.gray(
+				"  Create an API token at https://id.atlassian.com/manage-profile/security/api-tokens",
+			),
+		);
+		values.JIRA_EMAIL = (
+			await ask<string>({
 				type: "text",
-				name: "key",
-				message: "Project key (e.g., PROJ, DEV):",
-				validate: (value) => {
-					if (!value || value.trim() === "") {
-						return "Project key is required";
-					}
-					if (!/^[A-Z][A-Z0-9]*$/.test(value.trim())) {
-						return "Project key should be uppercase letters and numbers";
-					}
-					return true;
-				},
-			});
+				name: "jiraEmail",
+				message: "Jira account email:",
+				initial: process.env.JIRA_EMAIL ?? "",
+				validate: (value: string) =>
+					value.includes("@")
+						? true
+						: "Enter the email you log in to Jira with",
+			})
+		).trim();
+		values.JIRA_API_TOKEN = await ask<string>({
+			type: "password",
+			name: "jiraApiToken",
+			message: "API token:",
+			validate: (value: string) => (value.trim() ? true : "Token is required"),
+		});
+	} else {
+		values.JIRA_PERSONAL_TOKEN = await ask<string>({
+			type: "password",
+			name: "jiraPersonalToken",
+			message: "Personal access token:",
+			validate: (value: string) => (value.trim() ? true : "Token is required"),
+		});
+	}
+	return values;
+}
 
-			if (!keyResponse.key) {
-				console.log(chalk.yellow("\n✗ Configuration cancelled.\n"));
-				process.exit(0);
-			}
+async function offerEnvFile(
+	ctx: WizardContext,
+	values: Record<string, string>,
+): Promise<void> {
+	const save = await ask<boolean>({
+		type: "confirm",
+		name: "saveEnvFile",
+		message: "Also write them to .env for later runs? (added to .gitignore)",
+		initial: false,
+	});
+	if (!save) {
+		console.log(
+			chalk.gray(
+				"  They are set for this session only. Export them before running backlog-jira again.",
+			),
+		);
+		return;
+	}
+	const envPath = join(ctx.cwd, ".env");
+	const existing = existsSync(envPath) ? readFileSync(envPath, "utf-8") : "";
+	writeFileSync(envPath, mergeEnvFile(existing, values), { mode: 0o600 });
+	console.log(chalk.green(`  ✓ Wrote ${envPath}`));
 
-			projectKey = keyResponse.key;
-		}
+	const gitignorePath = join(ctx.cwd, ".gitignore");
+	const gitignore = existsSync(gitignorePath)
+		? readFileSync(gitignorePath, "utf-8")
+		: "";
+	if (!gitignore.split("\n").some((line) => line.trim() === ".env")) {
+		writeFileSync(
+			gitignorePath,
+			`${gitignore}${gitignore && !gitignore.endsWith("\n") ? "\n" : ""}.env\n`,
+		);
+		console.log(chalk.green("  ✓ Added .env to .gitignore"));
+	}
+	console.log(
+		chalk.yellow(
+			"  backlog-jira does not read .env itself: load it with direnv ('dotenv' in .envrc) or 'set -a; . ./.env; set +a'.",
+		),
+	);
+}
 
-		projectKey = projectKey.trim().toUpperCase();
+async function connectionStep(ctx: WizardContext): Promise<StepOutcome> {
+	if (!detectCredentials().auth) {
+		console.log(
+			chalk.red(
+				"  ✗ Credentials are not exported, so the MCP server cannot log in to Jira.",
+			),
+		);
+		console.log(
+			chalk.gray("    Run: backlog-jira configure --step credentials"),
+		);
+		return "failed";
+	}
+	console.log(chalk.gray("  Starting the MCP Atlassian server..."));
+	const result = await withJira(ctx, (jira) => jira.checkConnection());
+	if (result.ok) {
+		console.log(chalk.green("  ✓ Connected to Jira"));
+		return "done";
+	}
+	console.log(chalk.red("  ✗ Connection failed:"));
+	for (const line of (result.error ?? "Unknown error").split("\n")) {
+		console.log(chalk.red(`    ${line}`));
+	}
+	console.log(
+		chalk.gray(
+			"    Check the credentials, that Docker is running (or mcp.useExternalServer), and proxy settings in mcp.envVars.",
+		),
+	);
+	return "failed";
+}
 
-		// Step 7: Issue type
-		console.log(chalk.bold.green("\n\nStep 7: Issue Type"));
-		console.log(chalk.gray("What type of issues should be synced?\n"));
+async function projectStep(ctx: WizardContext): Promise<StepOutcome> {
+	const current = jiraSection(ctx);
+	// A restricted TOOLSETS must include the project tools setup relies on
+	const envVars = getSection(getSection(ctx.config, "mcp"), "envVars");
+	if (typeof envVars.TOOLSETS === "string") applyRequiredToolsets(ctx.config);
 
-		// TODO: In the future, we could fetch available issue types from the project
-		const issueTypeResponse = await prompts({
+	let projects: Array<{ key: string; name: string }> = [];
+	try {
+		projects = await withJira(ctx, (jira) => jira.getAllProjects());
+	} catch (error) {
+		console.log(
+			chalk.yellow(`  ⚠ Could not list Jira projects: ${describeError(error)}`),
+		);
+	}
+
+	let projectKey: string;
+	const manualKey = () =>
+		ask<string>({
+			type: "text",
+			name: "projectKey",
+			message: "Jira project key (e.g. PROJ):",
+			initial: current.projectKey,
+			validate: (value: string) =>
+				/^[A-Za-z][A-Za-z0-9_]*$/.test(value.trim())
+					? true
+					: "Enter a project key such as PROJ",
+		});
+	if (projects.length > 0) {
+		const sorted = [...projects].sort((a, b) => a.key.localeCompare(b.key));
+		const choices = [
+			...sorted.map((p) => ({ title: `${p.key} - ${p.name}`, value: p.key })),
+			{ title: "Enter a key manually", value: "__manual__" },
+		];
+		const index = sorted.findIndex((p) => p.key === current.projectKey);
+		const choice = await ask<string>({
+			type: "autocomplete",
+			name: "project",
+			message: "Jira project (type to filter):",
+			choices,
+			initial: index >= 0 ? index : 0,
+			suggest: filterChoices,
+		});
+		projectKey = choice === "__manual__" ? await manualKey() : choice;
+	} else {
+		projectKey = await manualKey();
+	}
+	projectKey = projectKey.trim().toUpperCase();
+
+	let issueTypes: Array<{ name: string }> = [];
+	try {
+		issueTypes = await withJira(ctx, (jira) =>
+			jira.getProjectIssueTypes(projectKey),
+		);
+	} catch (error) {
+		console.log(
+			chalk.yellow(
+				`  ⚠ Could not list issue types of ${projectKey}: ${describeError(error)}`,
+			),
+		);
+	}
+	let issueType: string;
+	if (issueTypes.length > 0) {
+		const names = issueTypes.map((t) => t.name);
+		const index = names.findIndex(
+			(n) => n.toLowerCase() === current.issueType.toLowerCase(),
+		);
+		issueType = await ask<string>({
 			type: "select",
 			name: "issueType",
-			message: "Default issue type:",
-			choices: [
-				{ title: "Task", value: "Task" },
-				{ title: "Story", value: "Story" },
-				{ title: "Bug", value: "Bug" },
-				{ title: "Epic", value: "Epic" },
-				{ title: "Other (enter manually)", value: "___manual___" },
-			],
+			message: "Issue type for tasks created in Jira:",
+			choices: names.map((n) => ({ title: n, value: n })),
+			initial: index >= 0 ? index : 0,
 		});
+	} else {
+		issueType = await ask<string>({
+			type: "text",
+			name: "issueType",
+			message: "Issue type for tasks created in Jira:",
+			initial: current.issueType,
+			validate: (value: string) => (value.trim() ? true : "Required"),
+		});
+	}
 
-		if (!issueTypeResponse.issueType) {
-			console.log(chalk.yellow("\n✗ Configuration cancelled.\n"));
-			process.exit(0);
-		}
+	setSectionValues(ctx.config, "jira", {
+		projectKey,
+		issueType: issueType.trim(),
+	});
+	console.log(
+		chalk.green(`  ✓ Project ${projectKey}, issue type ${issueType}`),
+	);
+	return "done";
+}
 
-		const issueType = issueTypeResponse.issueType;
+function filterChoices(
+	input: string,
+	choices: Array<{ title: string }>,
+): Promise<Array<{ title: string }>> {
+	const needle = input.trim().toLowerCase();
+	return Promise.resolve(
+		needle
+			? choices.filter((c) => c.title.toLowerCase().includes(needle))
+			: choices,
+	);
+}
 
-		let finalIssueType = issueType;
-		if (issueType === "___manual___") {
-			const typeResponse = await prompts({
-				type: "text",
-				name: "type",
-				message: "Issue type name:",
-				validate: (value) => {
-					if (!value || value.trim() === "") {
-						return "Issue type is required";
-					}
-					return true;
-				},
-			});
+function splitList(value: string): string[] {
+	return value
+		.split(",")
+		.map((s) => s.trim())
+		.filter(Boolean);
+}
 
-			if (!typeResponse.type) {
-				console.log(chalk.yellow("\n✗ Configuration cancelled.\n"));
-				process.exit(0);
-			}
-
-			finalIssueType = typeResponse.type;
-		}
-
-		// Step 8: JQL Filter (optional)
-		console.log(chalk.bold.green("\n\nStep 8: JQL Filter (Optional)"));
+async function statusStep(ctx: WizardContext): Promise<StepOutcome> {
+	const { projectKey, issueType } = jiraSection(ctx);
+	if (!projectKey) {
 		console.log(
-			chalk.gray("Add a JQL filter to limit which issues are synced.\n"),
+			chalk.yellow(
+				"  Choose a project first: backlog-jira configure --step project",
+			),
 		);
+		return "skipped";
+	}
+	const backlog = getSection(ctx.config, "backlog");
+	const previous = (
+		backlog.statusMapping && typeof backlog.statusMapping === "object"
+			? backlog.statusMapping
+			: {}
+	) as Record<string, string[]>;
+	const previousUnmapped = Array.isArray(backlog.unmappedJiraStatuses)
+		? backlog.unmappedJiraStatuses.map(String)
+		: [];
+	const backlogStatuses = ctx.backlogStatuses();
 
-		const jqlFilterResponse = await prompts({
-			type: "confirm",
-			name: "useJqlFilter",
-			message: "Do you want to add a JQL filter?",
-			initial: false,
-		});
-
-		if (jqlFilterResponse.useJqlFilter === undefined) {
-			console.log(chalk.yellow("\n✗ Configuration cancelled.\n"));
-			process.exit(0);
-		}
-
-		let jqlFilter = "";
-		if (jqlFilterResponse.useJqlFilter) {
-			const filterResponse = await prompts({
-				type: "text",
-				name: "filter",
-				message: "JQL filter (e.g., labels = 'sync' AND status != Done):",
-				initial: "",
-			});
-
-			if (filterResponse.filter === undefined) {
-				console.log(chalk.yellow("\n✗ Configuration cancelled.\n"));
-				process.exit(0);
+	let perType: Array<{ issueType: string; statuses: string[] }> = [];
+	try {
+		perType = await withJira(ctx, async (jira) => {
+			let types = [issueType];
+			try {
+				types = (await jira.getProjectIssueTypes(projectKey)).map(
+					(t) => t.name,
+				);
+			} catch (error) {
+				logger.debug({ error }, "Could not list issue types");
 			}
-
-			jqlFilter = filterResponse.filter;
-		}
-
-		// Step 9: Status mapping
-		console.log(chalk.bold.green("\n\nStep 9: Status Mapping"));
-		console.log(chalk.gray("Map Backlog.md statuses to Jira statuses.\n"));
-
-		const mappingResponse = await prompts({
-			type: "confirm",
-			name: "useCustomMapping",
-			message: "Customize status mapping? (default mapping will be used if No)",
-			initial: false,
+			return discoverProjectStatuses(jira, projectKey, types);
 		});
+	} catch (error) {
+		console.log(
+			chalk.yellow(
+				`  ⚠ Could not read Jira statuses of ${projectKey}: ${describeError(error)}`,
+			),
+		);
+	}
 
-		if (mappingResponse.useCustomMapping === undefined) {
-			console.log(chalk.yellow("\n✗ Configuration cancelled.\n"));
-			process.exit(0);
+	console.log(`  Backlog statuses: ${chalk.cyan(backlogStatuses.join(", "))}`);
+	const jiraStatuses: string[] = [];
+	const addStatus = (status: string) => {
+		if (!jiraStatuses.some((s) => s.toLowerCase() === status.toLowerCase())) {
+			jiraStatuses.push(status);
 		}
-
-		const useCustomMapping = mappingResponse.useCustomMapping;
-
-		const statusMapping: Record<string, string[]> = {
-			"To Do": ["To Do", "Open", "Backlog"],
-			"In Progress": ["In Progress"],
-			Done: ["Done", "Closed", "Resolved"],
-		};
-
-		if (useCustomMapping) {
-			console.log(chalk.cyan("\nDefault mapping:"));
-			console.log(chalk.gray("  To Do → To Do, Open, Backlog"));
-			console.log(chalk.gray("  In Progress → In Progress"));
-			console.log(chalk.gray("  Done → Done, Closed, Resolved\n"));
-
-			// TODO: Could make this more interactive in the future
+	};
+	if (perType.length > 0) {
+		console.log(`  Jira statuses of ${projectKey} by issue type:`);
+		for (const entry of perType) {
 			console.log(
-				chalk.yellow(
-					"Note: Using default mapping for now. Edit .backlog-jira/config.json to customize.",
-				),
+				`    ${entry.issueType.padEnd(12)} ${chalk.yellow(entry.statuses.join(", "))}`,
+			);
+			for (const status of entry.statuses) addStatus(status);
+		}
+		console.log(
+			chalk.gray(
+				"  (Found from the project's issues and their transitions; add statuses no issue has used yet below.)",
+			),
+		);
+		for (const status of splitList(
+			await ask<string>({
+				type: "text",
+				name: "extraStatuses",
+				message: "Other Jira statuses to map (comma-separated, optional):",
+				initial: "",
+			}),
+		)) {
+			addStatus(status);
+		}
+	} else {
+		console.log(
+			chalk.yellow(
+				`  No Jira statuses found for ${projectKey}. Enter them manually.`,
+			),
+		);
+		const known = [...Object.values(previous).flat(), ...previousUnmapped].map(
+			String,
+		);
+		for (const status of splitList(
+			await ask<string>({
+				type: "text",
+				name: "extraStatuses",
+				message: "Jira statuses (comma-separated):",
+				initial: known.join(", "),
+			}),
+		)) {
+			addStatus(status);
+		}
+	}
+	if (jiraStatuses.length === 0) {
+		console.log(
+			chalk.yellow("  No statuses to map; keeping the current mapping."),
+		);
+		return "skipped";
+	}
+
+	const UNMAPPED = "__unmapped__";
+	const choices: Record<string, string | null> = {};
+	for (const status of jiraStatuses) {
+		const wasUnmapped = previousUnmapped.some(
+			(s) => s.toLowerCase() === status.toLowerCase(),
+		);
+		const suggestion = suggestBacklogStatus(status, backlogStatuses, previous);
+		const options = [
+			...backlogStatuses.map((s) => ({ title: s, value: s })),
+			{ title: "Leave unmapped (keep the Jira status name)", value: UNMAPPED },
+		];
+		const answer = await ask<string>({
+			type: "select",
+			name: "backlogStatus",
+			message: `Jira "${status}" →`,
+			choices: options,
+			initial: wasUnmapped
+				? options.length - 1
+				: Math.max(0, backlogStatuses.indexOf(suggestion)),
+		});
+		choices[status] = answer === UNMAPPED ? null : answer;
+	}
+
+	const { statusMapping, unmappedJiraStatuses } = buildStatusMappingConfig(
+		choices,
+		previous,
+		previousUnmapped,
+	);
+	const uncovered = uncoveredJiraStatuses(
+		jiraStatuses,
+		statusMapping,
+		unmappedJiraStatuses,
+	);
+	const values: RawConfig = { statusMapping };
+	setSectionValues(ctx.config, "backlog", values);
+	const section = getSection(ctx.config, "backlog");
+	if (unmappedJiraStatuses.length > 0) {
+		section.unmappedJiraStatuses = unmappedJiraStatuses;
+	} else {
+		section.unmappedJiraStatuses = undefined;
+	}
+
+	console.log(chalk.green("  ✓ Status mapping:"));
+	for (const [backlogStatus, list] of Object.entries(statusMapping)) {
+		console.log(`    ${backlogStatus.padEnd(14)} ← ${list.join(", ")}`);
+	}
+	if (unmappedJiraStatuses.length > 0) {
+		console.log(
+			chalk.gray(`    Left unmapped: ${unmappedJiraStatuses.join(", ")}`),
+		);
+	}
+	if (uncovered.length > 0) {
+		console.log(chalk.yellow(`    Not covered: ${uncovered.join(", ")}`));
+	}
+	const unused = backlogStatuses.filter((s) => !statusMapping[s]);
+	if (unused.length > 0) {
+		console.log(
+			chalk.gray(
+				`    Backlog statuses without a Jira status (cannot be pushed): ${unused.join(", ")}`,
+			),
+		);
+	}
+	return "done";
+}
+
+async function sprintsStep(ctx: WizardContext): Promise<StepOutcome> {
+	const { projectKey } = jiraSection(ctx);
+	const existing = findSprintEntry(ctx.config);
+	// List boards with the toolsets sprint sync will use
+	const listingConfig = applyRequiredToolsets(structuredClone(ctx.config));
+
+	let boards: Awaited<ReturnType<WizardJira["listBoards"]>> = [];
+	try {
+		boards = await withJira(
+			ctx,
+			(jira) => jira.listBoards(projectKey ? { projectKey } : undefined),
+			listingConfig,
+		);
+	} catch (error) {
+		console.log(
+			chalk.yellow(`  ⚠ Could not list Jira boards: ${describeError(error)}`),
+		);
+	}
+	const sprintBoards = boards.filter((b) => b.supportsSprints);
+	if (boards.length > 0) {
+		console.log(
+			`  Boards${projectKey ? ` of ${projectKey}` : ""} (sprint sync needs a board with sprints):`,
+		);
+		for (const board of boards) {
+			console.log(
+				`    ${board.id.padEnd(6)} ${board.name} ${chalk.gray(`[${board.type}]`)}${board.supportsSprints ? "" : chalk.gray(" (no sprints)")}`,
 			);
 		}
+	} else {
+		console.log(chalk.gray("  No boards found."));
+	}
+	if (existing) {
+		console.log(
+			`  Current: board ${String(existing.boardId)}, ${String(existing.direction ?? "both")}`,
+		);
+	}
 
-		// Step 10: Conflict resolution strategy
-		console.log(chalk.bold.green("\n\nStep 10: Conflict Resolution Strategy"));
-		console.log(chalk.gray("How should conflicts be handled during sync?\n"));
+	const choices = [
+		...sprintBoards.map((b) => ({
+			title: `Sync sprints of board ${b.id} - ${b.name}`,
+			value: b.id,
+		})),
+		{ title: "Enter a board id", value: "__manual__" },
+		...(existing ? [{ title: "Turn sprint sync off", value: "__off__" }] : []),
+		{
+			title: existing ? "Keep the current setting" : "No sprint sync",
+			value: "__skip__",
+		},
+	];
+	const currentIndex = existing
+		? sprintBoards.findIndex((b) => b.id === String(existing.boardId))
+		: -1;
+	let boardId = await ask<string>({
+		type: "select",
+		name: "board",
+		message: "Sprint sync:",
+		choices,
+		initial:
+			currentIndex >= 0
+				? currentIndex
+				: sprintBoards.length > 0 && !existing
+					? 0
+					: choices.length - 1,
+	});
+	if (boardId === "__skip__") return "skipped";
+	if (boardId === "__off__") {
+		ctx.config = removeFieldMapping(ctx.config, String(existing?.backlog));
+		console.log(chalk.green("  ✓ Sprint sync turned off"));
+		return "done";
+	}
+	if (boardId === "__manual__") {
+		boardId = (
+			await ask<string>({
+				type: "text",
+				name: "boardId",
+				message: "Board id:",
+				initial: existing ? String(existing.boardId) : "",
+				validate: (value: string) =>
+					/^\d+$/.test(value.trim()) ? true : "Enter the numeric board id",
+			})
+		).trim();
+	}
 
-		const conflictStrategyResponse = await prompts({
+	const directions: FieldMappingDirection[] = ["both", "pull", "push"];
+	const direction = await ask<FieldMappingDirection>({
+		type: "select",
+		name: "sprintDirection",
+		message: "Direction:",
+		choices: [
+			{ title: "both - Jira sprints ↔ Backlog milestones", value: "both" },
+			{ title: "pull - Jira → Backlog only", value: "pull" },
+			{ title: "push - Backlog → Jira only", value: "push" },
+		],
+		initial: Math.max(
+			0,
+			directions.indexOf(existing?.direction as FieldMappingDirection),
+		),
+	});
+	const createSprints =
+		direction === "pull"
+			? false
+			: await ask<boolean>({
+					type: "confirm",
+					name: "createSprints",
+					message:
+						"Create a Jira sprint when a pushed milestone matches none? (otherwise it is reported)",
+					initial: existing?.createSprints === true,
+				});
+	const archiveClosedSprints = await ask<boolean>({
+		type: "confirm",
+		name: "archiveClosedSprints",
+		message: "Archive the milestone when its sprint closes?",
+		initial: existing?.archiveClosedSprints !== false,
+	});
+	const pullScope: SprintPullScope =
+		direction === "push"
+			? "all"
+			: await ask<SprintPullScope>({
+					type: "select",
+					name: "pullScope",
+					message: "Issues 'pull --import' brings in:",
+					choices: [
+						{
+							title: "all - every issue matching the import filter",
+							value: "all",
+						},
+						{
+							title:
+								"open - only issues in open sprints (sprint in openSprints())",
+							value: "open",
+						},
+					],
+					initial: existing?.pullScope === "open" ? 1 : 0,
+				});
+
+	try {
+		ctx.config = applySprintSettings(ctx.config, {
+			boardId,
+			direction,
+			createSprints,
+			archiveClosedSprints,
+			pullScope,
+		});
+	} catch (error) {
+		console.log(chalk.red(`  ✗ ${describeError(error)}`));
+		return "failed";
+	}
+	const toolsets = getSection(
+		getSection(ctx.config, "mcp"),
+		"envVars",
+	).TOOLSETS;
+	console.log(
+		chalk.green(
+			`  ✓ Sprints of board ${boardId} sync as milestones (${direction})`,
+		),
+	);
+	console.log(
+		chalk.gray(
+			`    mcp.envVars.TOOLSETS=${String(toolsets)} keeps the jira_agile tools enabled`,
+		),
+	);
+	return "done";
+}
+
+async function fieldsStep(ctx: WizardContext): Promise<StepOutcome> {
+	const { mappings, sprintMapping } = validateFieldMappings(
+		ctx.config.fieldMappings,
+	);
+	if (mappings.length > 0 || sprintMapping) {
+		console.log("  Current mappings:");
+		if (sprintMapping) {
+			console.log(`    milestone ↔ sprint (board ${sprintMapping.boardId})`);
+		}
+		for (const m of mappings) {
+			console.log(`    ${m.backlog} ← ${m.jira} (${m.type}, ${m.direction})`);
+		}
+	}
+
+	type Field = Awaited<ReturnType<WizardJira["searchFields"]>>[number];
+	let fields: Field[] = [];
+	try {
+		fields = await withJira(ctx, (jira) => jira.searchFields("", 1000));
+	} catch (error) {
+		console.log(
+			chalk.yellow(`  ⚠ Could not list Jira fields: ${describeError(error)}`),
+		);
+	}
+	// Sprints are set up in their own step
+	fields = fields
+		.filter((f) => f.schema?.custom !== SPRINT_FIELD_SCHEMA)
+		.sort((a, b) => a.name.localeCompare(b.name));
+	const byId = new Map(fields.map((f) => [f.id, f]));
+	const describe = (f: Field) => {
+		const schema = f.schema?.type
+			? f.schema.items
+				? `${f.schema.type}<${f.schema.items}>`
+				: f.schema.type
+			: "unknown";
+		const suggested = suggestTypeForSchema(f.schema);
+		return `${f.name} (${f.id}) [${schema}]${suggested ? ` → ${suggested}` : ""}`;
+	};
+
+	let added = 0;
+	for (;;) {
+		const more = await ask<boolean>({
+			type: "confirm",
+			name: "addField",
+			message:
+				added === 0 ? "Add a field mapping?" : "Add another field mapping?",
+			initial: false,
+		});
+		if (!more) break;
+
+		const jiraField =
+			fields.length > 0
+				? await ask<string>({
+						type: "autocomplete",
+						name: "jiraField",
+						message: "Jira field (type to filter):",
+						choices: fields.map((f) => ({ title: describe(f), value: f.id })),
+						suggest: filterChoices,
+					})
+				: (
+						await ask<string>({
+							type: "text",
+							name: "jiraField",
+							message: "Jira field id (customfield_NNNNN or a system field):",
+							validate: (value: string) => (value.trim() ? true : "Required"),
+						})
+					).trim();
+		const field = byId.get(jiraField);
+		const slug = (field?.name ?? jiraField)
+			.toLowerCase()
+			.replace(/[^a-z0-9]+/g, "_")
+			.replace(/^_+|_+$/g, "");
+		const backlog = (
+			await ask<string>({
+				type: "text",
+				name: "backlogTarget",
+				message:
+					"Backlog target (milestone, dependencies, references, priority, labels or frontmatter:<key>):",
+				initial: `frontmatter:${slug}`,
+				validate: (value: string) =>
+					validateBacklogTarget(value.trim()) ?? true,
+			})
+		).trim();
+		const suggested = suggestTypeForSchema(field?.schema);
+		const type = await ask<string>({
 			type: "select",
-			name: "strategy",
-			message: "Conflict resolution strategy:",
-			choices: [
-				{
-					title: "Prompt (ask for each conflict)",
-					value: "prompt",
-					description: "Interactive resolution for each conflict",
-				},
-				{
-					title: "Prefer Backlog",
-					value: "prefer-backlog",
-					description: "Automatically use Backlog version when conflicts occur",
-				},
-				{
-					title: "Prefer Jira",
-					value: "prefer-jira",
-					description: "Automatically use Jira version when conflicts occur",
-				},
-			],
+			name: "fieldType",
+			message: "Value type:",
+			choices: FIELD_MAPPING_TYPES.map((t) => ({ title: t, value: t })),
+			initial: suggested ? FIELD_MAPPING_TYPES.indexOf(suggested) : 0,
+		});
+		const direction = await ask<string>({
+			type: "select",
+			name: "fieldDirection",
+			message: "Direction:",
+			choices: FIELD_MAPPING_DIRECTIONS.map((d) => ({
+				title:
+					d === "pull"
+						? "pull - Jira → Backlog"
+						: d === "push"
+							? "push - Backlog → Jira"
+							: "both",
+				value: d,
+			})),
 			initial: 0,
 		});
 
-		if (!conflictStrategyResponse.strategy) {
-			console.log(chalk.yellow("\n✗ Configuration cancelled.\n"));
-			process.exit(0);
+		const mapping = { backlog, jira: jiraField, type, direction };
+		try {
+			let force = false;
+			if (
+				Array.isArray(ctx.config.fieldMappings) &&
+				ctx.config.fieldMappings.some(
+					(m) => (m as { backlog?: unknown })?.backlog === backlog,
+				)
+			) {
+				force = await ask<boolean>({
+					type: "confirm",
+					name: "replaceMapping",
+					message: `A mapping for "${backlog}" exists. Replace it?`,
+					initial: false,
+				});
+				if (!force) continue;
+			}
+			ctx.config = addFieldMapping(ctx.config, mapping, { force });
+			added++;
+			console.log(
+				chalk.green(`  ✓ ${backlog} ← ${jiraField} (${type}, ${direction})`),
+			);
+		} catch (error) {
+			console.log(chalk.red(`  ✗ ${describeError(error)}`));
 		}
-
-		const conflictStrategy = conflictStrategyResponse.strategy as
-			| "prompt"
-			| "prefer-backlog"
-			| "prefer-jira";
-
-		// Step 11: Save configuration
-		console.log(chalk.bold.green("\n\nStep 11: Save Configuration"));
-		console.log(chalk.gray("Review and save your configuration.\n"));
-
-		// Display configuration summary
-		console.log(chalk.bold.cyan("Configuration Summary:"));
-		console.log(chalk.gray("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"));
+	}
+	if (added > 0) {
 		console.log(
-			`  Instance Type: ${instanceType === "cloud" ? "Jira Cloud" : "Jira Server/Data Center"}`,
+			chalk.gray(
+				"  Value maps: backlog-jira map-fields add <target> <field> --type <type> --value-map 'Jira=Backlog' --force",
+			),
 		);
-		console.log(`  Jira URL:      ${jiraUrl}`);
-		if (instanceType === "cloud") {
-			console.log(`  Email:         ${jiraEmail}`);
-			console.log(
-				`  API Token:     ${"*".repeat(Math.min(jiraApiToken.length, 20))}`,
-			);
-		} else {
-			console.log(
-				`  PAT:           ${"*".repeat(Math.min(jiraPersonalToken.length, 20))}`,
+	}
+	return added > 0 ? "done" : "skipped";
+}
+
+async function conflictStep(ctx: WizardContext): Promise<StepOutcome> {
+	const current = getSection(ctx.config, "sync").conflictStrategy;
+	const strategy = await ask<ConflictStrategy>({
+		type: "select",
+		name: "conflictStrategy",
+		message: "When a field changed in both Backlog and Jira:",
+		choices: [
+			{
+				title: "prompt - ask which side to keep for each conflicting field",
+				value: "prompt",
+			},
+			{
+				title: "prefer-backlog - keep the Backlog value",
+				value: "prefer-backlog",
+			},
+			{ title: "prefer-jira - keep the Jira value", value: "prefer-jira" },
+		],
+		initial: Math.max(
+			0,
+			CONFLICT_STRATEGIES.indexOf(current as ConflictStrategy),
+		),
+	});
+	setSectionValues(ctx.config, "sync", { conflictStrategy: strategy });
+	console.log(chalk.green(`  ✓ Conflict strategy: ${strategy}`));
+	return "done";
+}
+
+async function filterStep(ctx: WizardContext): Promise<StepOutcome> {
+	const { projectKey, jqlFilter } = jiraSection(ctx);
+	const suggested = projectKey
+		? `project = ${projectKey} ORDER BY created DESC`
+		: "";
+	console.log(
+		chalk.gray(
+			`  'backlog-jira pull --import' imports up to ${IMPORT_LIMIT} unlinked issues matching this JQL per run.`,
+		),
+	);
+	if (findSprintEntry(ctx.config)?.pullScope === "open") {
+		console.log(
+			chalk.gray('  pullScope "open" adds: AND sprint in openSprints()'),
+		);
+	}
+	for (;;) {
+		const jql = (
+			await ask<string>({
+				type: "text",
+				name: "jqlFilter",
+				message: "Import filter (JQL):",
+				initial: jqlFilter || suggested,
+				validate: (value: string) =>
+					value.trim() ? true : "Enter a JQL query",
+			})
+		).trim();
+
+		let problem: string | null = null;
+		if (detectCredentials().auth) {
+			try {
+				const result = await withJira(ctx, (jira) =>
+					jira.searchIssues(jql, { maxResults: 1, fields: "summary" }),
+				);
+				if (typeof result.total === "number" && result.total >= 0) {
+					console.log(
+						`  ${result.total} issue${result.total === 1 ? "" : "s"} match`,
+					);
+					if (result.total > IMPORT_LIMIT) {
+						console.log(
+							chalk.yellow(
+								`  More than ${IMPORT_LIMIT} issues match: one import run takes the first ${IMPORT_LIMIT}. Import in batches with narrower filters (pull --import --jql '...'), e.g. by sprint or created date.`,
+							),
+						);
+					}
+				}
+			} catch (error) {
+				problem = describeError(error);
+			}
+		}
+		if (problem) {
+			console.log(chalk.red(`  ✗ Jira rejected the filter: ${problem}`));
+			const keep = await ask<boolean>({
+				type: "confirm",
+				name: "keepFilter",
+				message: "Keep this filter anyway?",
+				initial: false,
+			});
+			if (!keep) continue;
+		}
+		setSectionValues(ctx.config, "jira", { jqlFilter: jql });
+		console.log(chalk.green(`  ✓ Import filter: ${jql}`));
+		return "done";
+	}
+}
+
+const STEP_RUNNERS: Record<
+	ConfigureStep,
+	(ctx: WizardContext) => Promise<StepOutcome>
+> = {
+	credentials: credentialsStep,
+	connection: connectionStep,
+	project: projectStep,
+	status: statusStep,
+	sprints: sprintsStep,
+	fields: fieldsStep,
+	conflict: conflictStep,
+	filter: filterStep,
+};
+
+// ===== Wizard =====
+
+function printNextSteps(): void {
+	console.log(chalk.bold.cyan("\nNext steps:"));
+	console.log(
+		"  1. Preview the import:   backlog-jira pull --import --dry-run",
+	);
+	console.log(
+		`  2. Import:               backlog-jira pull --import   (at most ${IMPORT_LIMIT} issues per run; narrow with --jql to import more)`,
+	);
+	console.log(
+		'  3. Commit the setup:     git add .backlog-jira && git commit -m "Configure backlog-jira"',
+	);
+	console.log(
+		chalk.gray(
+			`\n  Revisit a step any time: backlog-jira configure --step <${CONFIGURE_STEPS.join("|")}>\n`,
+		),
+	);
+}
+
+/**
+ * Configure the plugin: the guided wizard, a single step (--step), or
+ * non-interactive mode for CI. Returns instead of exiting the process.
+ */
+export async function runConfigure(
+	options: ConfigureOptions = {},
+): Promise<ConfigureResult> {
+	const originalLogLevel = getLogLevel();
+	if (!options.verbose) setLogLevel("warn");
+	try {
+		if (options.nonInteractive) return configureNonInteractive(options);
+
+		const step = options.step?.trim().toLowerCase();
+		if (step && !CONFIGURE_STEPS.includes(step as ConfigureStep)) {
+			throw new Error(
+				`Unknown step "${options.step}". Steps: ${CONFIGURE_STEPS.join(", ")}`,
 			);
 		}
-		console.log(`  Project Key:   ${projectKey}`);
-		console.log(`  Issue Type:    ${finalIssueType}`);
-		console.log(`  JQL Filter:    ${jqlFilter || "(none)"}`);
-		console.log(`  Conflict:      ${conflictStrategy}`);
-		console.log(chalk.gray("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"));
+		const steps: ConfigureStep[] = step
+			? [step as ConfigureStep]
+			: [...CONFIGURE_STEPS];
 
-		const confirmSaveResponse = await prompts({
-			type: "confirm",
-			name: "confirmSave",
-			message: "Save this configuration?",
-			initial: true,
-		});
-
-		if (
-			confirmSaveResponse.confirmSave === undefined ||
-			!confirmSaveResponse.confirmSave
-		) {
-			console.log(chalk.yellow("\n✗ Configuration cancelled.\n"));
-			// Restore original environment
-			restoreEnv(originalEnv);
-			process.exit(0);
+		const cwd = options.cwd ?? process.cwd();
+		if (bootstrapConfigDir(cwd)) {
+			console.log(
+				chalk.gray(`Created ${getConfigDir(cwd)}/ with default settings.`),
+			);
 		}
-
-		// Save to config.json
-		const configPath = join(configDir, "config.json");
-		const config: JiraConfig = {
-			jira: {
-				baseUrl: jiraUrl,
-				projectKey,
-				issueType: finalIssueType,
-				jqlFilter,
-			},
-			backlog: {
-				statusMapping,
-			},
-			sync: {
-				conflictStrategy,
-				enableAnnotations: false,
-				watchInterval: 60,
-			},
+		const ctx: WizardContext = {
+			cwd,
+			config: readConfigFile(cwd) ?? {},
+			createJira: options.createJira ?? defaultCreateJira,
+			backlogStatuses:
+				options.backlogStatuses ?? (() => readBacklogStatuses(cwd)),
 		};
 
-		// Add MCP configuration if server args or env vars were configured
-		if (mcpServerArgs.length > 0 || Object.keys(mcpEnvVars).length > 0) {
-			config.mcp = {};
-			if (mcpServerArgs.length > 0) {
-				config.mcp.serverArgs = mcpServerArgs;
-			}
-			if (Object.keys(mcpEnvVars).length > 0) {
-				config.mcp.envVars = mcpEnvVars;
-			}
+		if (!step) {
+			console.log(chalk.bold.cyan("\n🔧 backlog-jira setup\n"));
+			console.log(
+				chalk.gray(
+					`${steps.length} steps; skip any of them and come back later with --step <name>. Each step is saved as it completes.`,
+				),
+			);
 		}
 
-		writeFileSync(configPath, JSON.stringify(config, null, 2));
-		console.log(chalk.green(`✓ Configuration saved to ${configPath}`));
-
-		// Ask about .env file
-		const saveToEnvResponse = await prompts({
-			type: "confirm",
-			name: "saveToEnv",
-			message: "Save credentials to .env file?",
-			initial: true,
-		});
-
-		if (saveToEnvResponse.saveToEnv === undefined) {
-			console.log(chalk.yellow("\n✗ Configuration cancelled.\n"));
-			process.exit(0);
-		}
-
-		const saveToEnv = saveToEnvResponse.saveToEnv;
-
-		if (saveToEnv) {
-			const envPath = join(process.cwd(), ".env");
-			let envContent = "";
-
-			if (existsSync(envPath)) {
-				// Read existing .env and preserve non-JIRA variables
-				const existingContent = readFileSync(envPath, "utf-8");
-				const lines = existingContent.split("\n");
-				const filteredLines = lines.filter((line) => {
-					const trimmed = line.trim();
-					return !trimmed.startsWith("JIRA_") && trimmed !== "";
-				});
-				if (filteredLines.length > 0) {
-					envContent = `${filteredLines.join("\n")}\n\n`;
-				}
-			}
-
-			envContent += "# Jira Configuration\n";
-			envContent += `JIRA_URL=${jiraUrl}\n`;
-			if (instanceType === "cloud") {
-				envContent += `JIRA_EMAIL=${jiraEmail}\n`;
-				envContent += `JIRA_API_TOKEN=${jiraApiToken}\n`;
-			} else {
-				envContent += `JIRA_PERSONAL_TOKEN=${jiraPersonalToken}\n`;
-			}
-
-			// Add MCP environment variables if configured
-			if (Object.keys(mcpEnvVars).length > 0) {
-				envContent += "\n# MCP Server Environment Variables\n";
-				for (const [key, value] of Object.entries(mcpEnvVars)) {
-					envContent += `${key}=${value}\n`;
-				}
-			}
-
-			writeFileSync(envPath, envContent);
-			console.log(chalk.green(`✓ Credentials saved to ${envPath}`));
-
-			// Check .gitignore
-			const gitignorePath = join(process.cwd(), ".gitignore");
-			let gitignoreContent = "";
-
-			if (existsSync(gitignorePath)) {
-				gitignoreContent = readFileSync(gitignorePath, "utf-8");
-			}
-
-			if (!gitignoreContent.includes(".env")) {
-				console.log(chalk.yellow("\n⚠️  WARNING: .env is not in .gitignore"));
+		try {
+			const result: ConfigureResult = {
+				completed: [],
+				skipped: [],
+				failed: false,
+			};
+			for (const [index, name] of steps.entries()) {
+				const info = STEP_INFO[name];
 				console.log(
-					chalk.yellow(
-						"   Your credentials may be committed to version control!",
+					chalk.bold.green(
+						`\n${step ? "" : `Step ${index + 1}/${steps.length}: `}${info.title}`,
 					),
 				);
-
-				const addToGitignoreResponse = await prompts({
-					type: "confirm",
-					name: "addToGitignore",
-					message: "Add .env to .gitignore?",
-					initial: true,
-				});
-
-				if (addToGitignoreResponse.addToGitignore === undefined) {
-					console.log(chalk.yellow("\n✗ Configuration cancelled.\n"));
-					process.exit(0);
-				}
-
-				if (addToGitignoreResponse.addToGitignore) {
-					const newGitignore = `${gitignoreContent + (gitignoreContent.endsWith("\n") ? "" : "\n")}.env\n`;
-					writeFileSync(gitignorePath, newGitignore);
-					console.log(chalk.green("✓ Added .env to .gitignore"));
+				console.log(chalk.gray(`  ${info.about}\n`));
+				try {
+					if (!step) {
+						const run = await ask<boolean>({
+							type: "confirm",
+							name: `run_${name}`,
+							message: `Set up ${info.title.toLowerCase()} now?`,
+							initial: true,
+						});
+						if (!run) {
+							console.log(
+								chalk.gray(
+									`  Skipped. Later: backlog-jira configure --step ${name}`,
+								),
+							);
+							result.skipped.push(name);
+							continue;
+						}
+					}
+					const outcome = await STEP_RUNNERS[name](ctx);
+					writeConfigFile(ctx.config, cwd);
+					if (outcome === "done") result.completed.push(name);
+					else result.skipped.push(name);
+					if (outcome === "failed") {
+						result.failed = true;
+						if (!step && name === "connection") {
+							const proceed = await ask<boolean>({
+								type: "confirm",
+								name: "continueOffline",
+								message:
+									"Continue without a connection? (later steps fall back to manual entry)",
+								initial: true,
+							});
+							if (!proceed) {
+								console.log(
+									chalk.gray(
+										"  Fix the connection, then run: backlog-jira configure",
+									),
+								);
+								return result;
+							}
+						}
+					}
+				} catch (error) {
+					if (error instanceof WizardCancelled) {
+						writeConfigFile(ctx.config, cwd);
+						console.log(
+							chalk.yellow(
+								`\n✗ Setup cancelled. Completed steps are saved; resume with: backlog-jira configure --step ${name}\n`,
+							),
+						);
+						return { ...result, cancelledAt: name };
+					}
+					throw error;
 				}
 			}
+
+			console.log(
+				chalk.gray(`\n  Saved ${join(getConfigDir(cwd), "config.json")}`),
+			);
+			if (!step) {
+				// doctor starts its own MCP server
+				await closeJira(ctx);
+				console.log(
+					chalk.bold.cyan("\nChecking the setup (backlog-jira doctor)\n"),
+				);
+				setLogLevel("info");
+				try {
+					const doctor = await (options.doctor ?? runDoctor)();
+					if (!doctor.ok) result.failed = true;
+				} catch (error) {
+					console.log(chalk.red(`  ✗ doctor failed: ${describeError(error)}`));
+					result.failed = true;
+				} finally {
+					if (!options.verbose) setLogLevel("warn");
+				}
+				printNextSteps();
+			}
+			return result;
+		} finally {
+			// Stops the MCP server
+			await closeJira(ctx);
 		}
-
-		// Create .gitignore for .backlog-jira if it doesn't exist
-		const backlogGitignorePath = join(configDir, ".gitignore");
-		if (!existsSync(backlogGitignorePath)) {
-			writeFileSync(backlogGitignorePath, CONFIG_DIR_GITIGNORE);
-		}
-
-		// Success!
-		console.log(chalk.bold.green("\n✓ Configuration complete!\n"));
-		console.log(chalk.cyan("Next steps:"));
-		console.log(
-			chalk.gray("  1. Run 'backlog-jira connect' to verify connections"),
-		);
-		console.log(
-			chalk.gray("  2. Run 'backlog-jira doctor' to check environment setup"),
-		);
-		console.log(
-			chalk.gray("  3. Start syncing with 'backlog-jira sync --all'\n"),
-		);
-
-		// Restore original environment (keeping the new values)
-		// This ensures the process continues with the new configuration
-
-		// Exit cleanly to return control to the terminal
-		// Without this, the prompts library keeps stdin open and the terminal hangs
-		process.exit(0);
 	} finally {
-		// Restore original log level
 		setLogLevel(
 			originalLogLevel as
 				| "trace"
@@ -925,4 +1294,68 @@ export async function configureCommand(
 				| "fatal",
 		);
 	}
+}
+
+/**
+ * Non-interactive configuration for CI: creates .backlog-jira/ if needed and
+ * applies the given values and JIRA_URL, keeping everything else
+ */
+function configureNonInteractive(options: ConfigureOptions): ConfigureResult {
+	const cwd = options.cwd ?? process.cwd();
+	bootstrapConfigDir(cwd);
+	const config = readConfigFile(cwd) ?? {};
+
+	if (
+		options.conflictStrategy !== undefined &&
+		!CONFLICT_STRATEGIES.includes(options.conflictStrategy as ConflictStrategy)
+	) {
+		throw new Error(
+			`Invalid conflict strategy "${options.conflictStrategy}". Use one of: ${CONFLICT_STRATEGIES.join(", ")}`,
+		);
+	}
+
+	const credentials = detectCredentials();
+	const jira: RawConfig = {};
+	if (credentials.url) jira.baseUrl = credentials.url.replace(/\/+$/, "");
+	if (options.projectKey)
+		jira.projectKey = options.projectKey.trim().toUpperCase();
+	if (options.issueType) jira.issueType = options.issueType.trim();
+	if (options.jqlFilter !== undefined)
+		jira.jqlFilter = options.jqlFilter.trim();
+	setSectionValues(config, "jira", jira);
+
+	const sync: RawConfig = {};
+	if (options.conflictStrategy)
+		sync.conflictStrategy = options.conflictStrategy;
+	if (options.enableAnnotations) sync.enableAnnotations = true;
+	if (Object.keys(sync).length > 0) setSectionValues(config, "sync", sync);
+
+	writeConfigFile(config, cwd);
+	console.log(`Saved ${join(getConfigDir(cwd), "config.json")}`);
+
+	if (!credentials.auth) {
+		console.log(
+			chalk.yellow(
+				`Warning: not exported to this process: ${credentials.missing.join(", ")} (or JIRA_URL and JIRA_PERSONAL_TOKEN)`,
+			),
+		);
+	}
+	const projectKey = getSection(config, "jira").projectKey;
+	if (!projectKey) {
+		console.log(
+			chalk.yellow("Warning: jira.projectKey is not set (use --project-key)"),
+		);
+	}
+	return { completed: [], skipped: [], failed: false };
+}
+
+/**
+ * CLI entry point
+ */
+export async function configureCommand(
+	options: ConfigureOptions = {},
+): Promise<void> {
+	const result = await runConfigure(options);
+	// prompts keeps stdin open, so exit explicitly
+	process.exit(result.failed ? 1 : 0);
 }

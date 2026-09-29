@@ -8,6 +8,14 @@ The Backlog-Jira sync system supports flexible status mapping between Backlog an
 
 Status mappings are defined in `.backlog-jira/config.json` under the `backlog.statusMapping` key.
 
+## Guided Setup
+
+```bash
+backlog-jira configure --step status
+```
+
+lists the Jira statuses of the configured project per issue type next to the Backlog statuses from `backlog config get statuses`, and asks for the Backlog status of each Jira status (pre-selecting the current mapping or a likely match). MCP Atlassian has no workflow API, so statuses are collected from the project's issues and the transitions available on them; add statuses no issue has used yet when asked. A Jira status can be left unmapped on purpose: it is recorded in `backlog.unmappedJiraStatuses` and pulled as-is. Mappings for Jira statuses not shown are kept.
+
 ## Configuration Format
 
 ### Basic Configuration

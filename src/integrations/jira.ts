@@ -618,18 +618,52 @@ export class JiraClient {
 	 * Test if MCP Jira tools are accessible
 	 */
 	async test(): Promise<boolean> {
+		return (await this.checkConnection()).ok;
+	}
+
+	/**
+	 * Test the MCP server and Jira credentials, returning the underlying error
+	 * message (missing credentials, Docker or server start failure, Jira API
+	 * error) when the check fails. Always closes the connection.
+	 */
+	async checkConnection(): Promise<{ ok: boolean; error?: string }> {
 		try {
-			// Use jira_get_all_projects as a simpler connection test
-			// This doesn't require a specific user identifier
-			await this.callMcpTool("jira_get_all_projects", {});
-			logger.debug("MCP Jira tools are accessible");
-			return true;
+			// MCP Atlassian answers field and project listings with an empty
+			// list when Jira is unreachable or rejects the credentials, but every
+			// Jira site has system fields
+			const fields = await this.callMcpTool("jira_search_fields", {
+				keyword: "",
+				limit: 1,
+			});
+			const list = Array.isArray(fields)
+				? fields
+				: (fields as { fields?: unknown[] } | null)?.fields;
+			if (Array.isArray(list) && list.length > 0) {
+				logger.debug("MCP Jira tools are accessible");
+				return { ok: true };
+			}
+			// Issue search reports the underlying error (DNS, TLS, HTTP status)
+			await this.callMcpTool("jira_search", {
+				jql: "updated >= -1d ORDER BY updated DESC",
+				limit: 1,
+				fields: "summary",
+			});
+			return {
+				ok: false,
+				error:
+					"Jira returned no fields. Check that JIRA_URL points to your Jira site and the credentials are valid.",
+			};
 		} catch (error) {
-			logger.error({ error }, "MCP Jira tools test failed");
-			return false;
+			const message = error instanceof Error ? error.message : String(error);
+			if (this.silentMode) {
+				logger.debug({ error }, "MCP Jira tools test failed");
+			} else {
+				logger.error({ error }, "MCP Jira tools test failed");
+			}
+			return { ok: false, error: message || "Unknown error" };
 		} finally {
 			// Always close the connection after testing
-			await this.close();
+			await this.close().catch(() => {});
 		}
 	}
 
@@ -1276,6 +1310,7 @@ export class JiraClient {
 					id: string;
 					name: string;
 				};
+				to_status?: unknown;
 			}>;
 
 			if (Array.isArray(result)) {
@@ -1304,9 +1339,11 @@ export class JiraClient {
 				return {
 					id: String(t.id),
 					name: t.name,
+					// MCP Atlassian reports the target status as to_status
 					to: t.to || {
 						id: "",
-						name: "", // Will be matched by transition name instead
+						// Empty names are matched by transition name instead
+						name: typeof t.to_status === "string" ? t.to_status : "",
 					},
 				};
 			});

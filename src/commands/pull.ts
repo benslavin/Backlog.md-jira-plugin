@@ -324,6 +324,7 @@ async function getIssuesForImport(
 ): Promise<{ mapped: string[]; unmapped: string[] }> {
 	// Get JQL from options or config
 	let jql = options.jql;
+	let configProjectKey: string | undefined;
 
 	if (!jql) {
 		// Try to load from config
@@ -332,6 +333,7 @@ async function getIssuesForImport(
 			if (existsSync(configPath)) {
 				const config = JSON.parse(readFileSync(configPath, "utf-8"));
 				jql = config.jira?.jqlFilter;
+				configProjectKey = config.jira?.projectKey;
 			}
 		} catch (error) {
 			logger.warn({ error }, "Failed to load JQL from config");
@@ -340,12 +342,12 @@ async function getIssuesForImport(
 
 	if (!jql) {
 		// Default JQL: project = PROJECTKEY
-		const projectKey = process.env.JIRA_PROJECT;
+		const projectKey = configProjectKey || process.env.JIRA_PROJECT;
 		if (projectKey) {
 			jql = `project = ${projectKey} ORDER BY created DESC`;
 		} else {
 			throw new Error(
-				"No JQL filter provided. Use --jql option or configure jqlFilter in config.json",
+				"No JQL filter provided. Use --jql, or set the import filter with 'backlog-jira configure --step filter'",
 			);
 		}
 	}

@@ -10,7 +10,8 @@ It allows you to work locally with Backlog.md's task management while staying sy
 
 ### Initialization
 ```bash
-backlog-jira init           # Initialize plugin configuration
+backlog-jira init           # Initialize plugin configuration, then offer the guided setup
+backlog-jira configure      # Guided setup wizard (credentials to import filter)
 backlog-jira connect        # Verify Jira connection
 backlog-jira doctor         # Check environment setup
 ```
@@ -26,9 +27,9 @@ backlog-jira watch          # Continuous sync mode
 ### Status & Configuration
 ```bash
 backlog-jira status         # View sync status
-backlog-jira map            # Configure status mappings
+backlog-jira configure --step <step> # Revisit one setup step (credentials, connection, project, status, sprints, fields, conflict, filter)
+backlog-jira map            # Link Backlog tasks to Jira issues
 backlog-jira map-fields     # Map extra Jira fields (or a board's sprints) onto Backlog tasks
-backlog-jira configure      # Update configuration
 backlog-jira view <task-id> # View task sync details
 ```
 
@@ -73,7 +74,7 @@ A `fieldMappings` entry of type `sprint` represents the Jira sprints of one boar
 - **Sync**: sprints are compared by Jira sprint id, so renames are not changes. One-sided changes propagate, and changes on both sides follow the conflict strategy (`sprint` in the prompt).
 - `pullScope: "open"` limits `pull --import` to `sprint in openSprints()`.
 
-Set up with `backlog-jira map-fields boards` and `backlog-jira map-fields add milestone sprint --type sprint --board <id>`, then check with `backlog-jira doctor`. `backlog-jira view <task-id>` shows a task's sprint history and `backlog-jira status` counts tasks per sprint.
+Set up with `backlog-jira configure --step sprints` (or `backlog-jira map-fields boards` and `backlog-jira map-fields add milestone sprint --type sprint --board <id>`), then check with `backlog-jira doctor`. `backlog-jira view <task-id>` shows a task's sprint history and `backlog-jira status` counts tasks per sprint.
 
 To move a task to another sprint, change its milestone with `backlog task edit <id> -m <milestone>` and push. Do not create, rename or delete sprint milestones by hand: the plugin keeps them in step with Jira.
 
@@ -90,6 +91,8 @@ export JIRA_API_TOKEN="your-api-token"
 ```
 
 Generate an API token at: https://id.atlassian.com/manage-profile/security/api-tokens
+
+For Jira Server/Data Center, export `JIRA_URL` and `JIRA_PERSONAL_TOKEN` instead. The variables must be exported to the process: the plugin does not read `.env` files (load one with direnv or `set -a; . ./.env; set +a`). `backlog-jira configure --step credentials` checks them. Tokens are never stored in `.backlog-jira/config.json`.
 
 ## Workflow Integration
 
@@ -142,15 +145,16 @@ When conflicts occur (both sides modified), the plugin will:
 
 Configure via:
 ```bash
-backlog-jira configure --conflict-strategy <strategy>
+backlog-jira configure --step conflict                                  # interactive
+backlog-jira configure --non-interactive --conflict-strategy <strategy>  # scripts and CI
 ```
 
 ## Status Mapping
 
-The plugin maps Backlog.md task statuses to Jira issue statuses. Configure mappings with:
+The plugin maps Backlog.md task statuses to Jira issue statuses. Configure mappings with (lists the project's Jira statuses per issue type):
 
 ```bash
-backlog-jira map
+backlog-jira configure --step status
 ```
 
 ## Acceptance Criteria Sync
@@ -159,7 +163,7 @@ The plugin can sync acceptance criteria between Backlog.md and Jira:
 
 - Backlog.md uses `- [ ] #N criterion` format
 - Jira uses subtasks or checklist custom field (if available)
-- Enable with: `backlog-jira configure --enable-annotations`
+- Enable with: `backlog-jira configure --non-interactive --enable-annotations`
 
 ## Best Practices
 
