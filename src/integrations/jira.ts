@@ -2,9 +2,19 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import {
 	getIssueFieldsParam,
+	getJiraFieldValue,
 	loadFieldMappings,
 } from "../utils/field-mapping.ts";
 import { logger } from "../utils/logger.ts";
+import {
+	type JiraBoard,
+	type JiraSprint,
+	type JiraSprintState,
+	findSprintFieldId,
+	parseBoard,
+	parseSprint,
+	parseSprintFieldValue,
+} from "./jira-sprints.ts";
 
 export interface JiraIssue {
 	key: string;
@@ -62,6 +72,7 @@ export class JiraClient {
 	private fallbackToDocker: boolean;
 	private silentMode: boolean;
 	private extraEnv: Record<string, string>;
+	private sprintFieldId: string | null | undefined;
 
 	constructor(options: JiraClientOptions = {}) {
 		this.dockerImage =
@@ -700,6 +711,193 @@ export class JiraClient {
 			logger.error({ error, keyword }, "Failed to search Jira fields");
 			throw error;
 		}
+	}
+
+	/**
+	 * Id of the Jira Software Sprint custom field, discovered by its gh-sprint
+	 * schema since the customfield id differs between sites.
+	 * Returns null when the site has no Sprint field.
+	 */
+	async getSprintFieldId(): Promise<string | null> {
+		if (this.sprintFieldId !== undefined) return this.sprintFieldId;
+		const fields = await this.searchFields("sprint", 50);
+		this.sprintFieldId = findSprintFieldId(fields);
+		logger.debug(
+			{ sprintFieldId: this.sprintFieldId },
+			"Discovered Jira Sprint field",
+		);
+		return this.sprintFieldId;
+	}
+
+	/**
+	 * Call an MCP tool from the jira_agile toolset, explaining how to enable
+	 * the toolset when the server does not expose it
+	 */
+	private async callAgileTool(
+		toolName: string,
+		input: Record<string, unknown>,
+	): Promise<unknown> {
+		try {
+			return await this.callMcpTool(toolName, input);
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			if (/unknown tool|tool .*not found/i.test(message)) {
+				throw new Error(
+					`MCP tool ${toolName} is not available. Sprint sync needs the MCP Atlassian "jira_agile" toolset; if TOOLSETS is set for the MCP server, include jira_agile (e.g. TOOLSETS=default,jira_agile) in .backlog-jira/config.json -> mcp.envVars.\nOriginal error: ${message}`,
+				);
+			}
+			throw error;
+		}
+	}
+
+	/**
+	 * A board by id, with its type and whether it supports sprints.
+	 * Returns null when the board is not found or not accessible.
+	 */
+	async getBoard(
+		boardId: string | number,
+		options?: { projectKey?: string },
+	): Promise<JiraBoard | null> {
+		const id = String(boardId);
+		const limit = 50;
+		for (let startAt = 0; startAt < MAX_AGILE_RESULTS; startAt += limit) {
+			const input: Record<string, unknown> = { start_at: startAt, limit };
+			if (options?.projectKey) input.project_key = options.projectKey;
+			const result = await this.callAgileTool("jira_get_agile_boards", input);
+			const values = agileValues(result);
+			const board = values
+				.map((value) => parseBoard(value))
+				.find((b) => b?.id === id);
+			if (board) {
+				logger.debug({ board }, "Retrieved Jira board");
+				return board;
+			}
+			if (values.length < limit) break;
+		}
+		logger.debug({ boardId: id }, "Jira board not found");
+		return null;
+	}
+
+	/**
+	 * All sprints of a board (future, active and closed unless filtered by state)
+	 */
+	async getBoardSprints(
+		boardId: string | number,
+		options?: { state?: JiraSprintState | JiraSprintState[] },
+	): Promise<JiraSprint[]> {
+		const limit = 50;
+		const sprints: JiraSprint[] = [];
+		const seen = new Set<string>();
+		const state = Array.isArray(options?.state)
+			? options.state.join(",")
+			: options?.state;
+		for (let startAt = 0; startAt < MAX_AGILE_RESULTS; startAt += limit) {
+			const input: Record<string, unknown> = {
+				board_id: String(boardId),
+				start_at: startAt,
+				limit,
+			};
+			if (state) input.state = state;
+			const values = agileValues(
+				await this.callAgileTool("jira_get_sprints_from_board", input),
+			);
+			for (const value of values) {
+				const sprint = parseSprint(value);
+				if (sprint && !seen.has(sprint.id)) {
+					seen.add(sprint.id);
+					sprints.push({ boardId: String(boardId), ...sprint });
+				}
+			}
+			if (values.length < limit) break;
+		}
+		logger.debug(
+			{ boardId, count: sprints.length },
+			"Retrieved Jira board sprints",
+		);
+		return sprints;
+	}
+
+	/**
+	 * Create a future sprint on a board.
+	 * MCP Atlassian requires a start date that is not in the past, so it
+	 * defaults to a minute from now; the sprint stays in the future state.
+	 */
+	async createSprint(
+		boardId: string | number,
+		sprint: {
+			name: string;
+			endDate?: string;
+			goal?: string;
+			startDate?: string;
+		},
+	): Promise<JiraSprint> {
+		const startDate =
+			sprint.startDate ?? new Date(Date.now() + 60_000).toISOString();
+		if (
+			sprint.endDate &&
+			!(Date.parse(sprint.endDate) > Date.parse(startDate))
+		) {
+			throw new Error(
+				`Cannot create sprint "${sprint.name}": end date ${sprint.endDate} must be after its start date ${startDate}`,
+			);
+		}
+		const input: Record<string, unknown> = {
+			board_id: String(boardId),
+			name: sprint.name,
+			start_date: startDate,
+			end_date: sprint.endDate ?? "",
+		};
+		if (sprint.goal) input.goal = sprint.goal;
+
+		const created = parseSprint(
+			await this.callAgileTool("jira_create_sprint", input),
+		);
+		if (!created) {
+			throw new Error(
+				`Invalid response from jira_create_sprint for "${sprint.name}"`,
+			);
+		}
+		logger.info(
+			{ boardId, sprintId: created.id, name: created.name },
+			"Created Jira sprint",
+		);
+		return { boardId: String(boardId), ...created };
+	}
+
+	/**
+	 * Move an issue into a sprint
+	 */
+	async moveIssueToSprint(
+		issueKey: string,
+		sprintId: string | number,
+	): Promise<void> {
+		await this.callAgileTool("jira_add_issues_to_sprint", {
+			sprint_id: String(sprintId),
+			issue_keys: issueKey,
+		});
+		logger.info({ issueKey, sprintId }, "Moved Jira issue to sprint");
+	}
+
+	/**
+	 * Move an issue out of its sprint back to the backlog
+	 */
+	async moveIssueToBacklog(issueKey: string): Promise<void> {
+		await this.callAgileTool("jira_move_issues_to_backlog", {
+			issue_keys: issueKey,
+		});
+		logger.info({ issueKey }, "Moved Jira issue to backlog");
+	}
+
+	/**
+	 * Typed sprints of an issue's Sprint field (discovered when not given)
+	 */
+	async getIssueSprints(
+		issue: JiraIssue,
+		sprintFieldId?: string,
+	): Promise<JiraSprint[]> {
+		const fieldId = sprintFieldId ?? (await this.getSprintFieldId());
+		if (!fieldId) return [];
+		return parseSprintFieldValue(getJiraFieldValue(issue, fieldId));
 	}
 
 	/**
@@ -1376,6 +1574,19 @@ export class JiraClient {
 			throw error;
 		}
 	}
+}
+
+/** Upper bound on paginated Agile results, guarding against endless paging */
+const MAX_AGILE_RESULTS = 5000;
+
+/**
+ * List items of an Agile tool result: a plain array (MCP Atlassian) or an
+ * Agile API page ({ values: [...] })
+ */
+function agileValues(result: unknown): unknown[] {
+	if (Array.isArray(result)) return result;
+	const values = (result as { values?: unknown } | null)?.values;
+	return Array.isArray(values) ? values : [];
 }
 
 /**

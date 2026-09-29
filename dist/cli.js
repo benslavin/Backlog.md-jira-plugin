@@ -24460,6 +24460,96 @@ function buildJiraValueUpdates(values, issue) {
   return result;
 }
 
+// src/integrations/jira-sprints.ts
+var SPRINT_FIELD_SCHEMA = "com.pyxis.greenhopper.jira:gh-sprint";
+var SPRINT_STATES = [
+  "future",
+  "active",
+  "closed"
+];
+function text(value) {
+  if (value === undefined || value === null)
+    return;
+  const s = String(value).trim();
+  return s && s !== "<null>" ? s : undefined;
+}
+function sprintState(value) {
+  const state = text(value)?.toLowerCase();
+  return SPRINT_STATES.find((s) => s === state);
+}
+function parseLegacySprintString(value) {
+  const match = value.match(/\[(.*)\]\s*$/s);
+  if (!match)
+    return null;
+  const record = {};
+  for (const part of match[1].split(/,(?=[A-Za-z]+=)/)) {
+    const eq = part.indexOf("=");
+    if (eq > 0)
+      record[part.slice(0, eq)] = part.slice(eq + 1);
+  }
+  return record;
+}
+function parseSprint(value) {
+  let raw = null;
+  if (typeof value === "string") {
+    raw = parseLegacySprintString(value);
+  } else if (value && typeof value === "object" && !Array.isArray(value)) {
+    raw = value;
+  }
+  if (!raw)
+    return null;
+  const id = text(raw.id);
+  const name = text(raw.name);
+  const state = sprintState(raw.state);
+  if (!id || id === "-1" || !name || !state)
+    return null;
+  const sprint = { id, name, state };
+  const startDate = text(raw.startDate ?? raw.start_date);
+  const endDate = text(raw.endDate ?? raw.end_date);
+  const completeDate = text(raw.completeDate ?? raw.complete_date);
+  const goal = text(raw.goal);
+  const boardId = text(raw.boardId ?? raw.originBoardId ?? raw.origin_board_id ?? raw.board_id ?? raw.rapidViewId);
+  if (startDate)
+    sprint.startDate = startDate;
+  if (endDate)
+    sprint.endDate = endDate;
+  if (completeDate)
+    sprint.completeDate = completeDate;
+  if (goal)
+    sprint.goal = goal;
+  if (boardId && boardId !== "-1")
+    sprint.boardId = boardId;
+  return sprint;
+}
+function parseSprintFieldValue(value) {
+  if (value === undefined || value === null)
+    return [];
+  if (!Array.isArray(value) && typeof value === "object" && "value" in value && !("id" in value)) {
+    return parseSprintFieldValue(value.value);
+  }
+  const items = Array.isArray(value) ? value : [value];
+  return items.map((item) => parseSprint(item)).filter((sprint) => sprint !== null);
+}
+function findSprintFieldId(fields) {
+  const field = fields.find((f) => f.schema?.custom === SPRINT_FIELD_SCHEMA);
+  return field?.id ?? null;
+}
+function parseBoard(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value))
+    return null;
+  const raw = value;
+  const id = text(raw.id);
+  if (!id || id === "-1")
+    return null;
+  const type = text(raw.type)?.toLowerCase() ?? "unknown";
+  return {
+    id,
+    name: text(raw.name) ?? "",
+    type,
+    supportsSprints: type !== "kanban"
+  };
+}
+
 // src/integrations/jira.ts
 class JiraClient {
   client = null;
@@ -24471,6 +24561,7 @@ class JiraClient {
   fallbackToDocker;
   silentMode;
   extraEnv;
+  sprintFieldId;
   constructor(options = {}) {
     this.dockerImage = options.dockerImage || "ghcr.io/sooperset/mcp-atlassian:latest";
     this.useExternalServer = options.useExternalServer || false;
@@ -24857,6 +24948,112 @@ Current tool: ${toolName}`;
       throw error;
     }
   }
+  async getSprintFieldId() {
+    if (this.sprintFieldId !== undefined)
+      return this.sprintFieldId;
+    const fields = await this.searchFields("sprint", 50);
+    this.sprintFieldId = findSprintFieldId(fields);
+    logger.debug({ sprintFieldId: this.sprintFieldId }, "Discovered Jira Sprint field");
+    return this.sprintFieldId;
+  }
+  async callAgileTool(toolName, input) {
+    try {
+      return await this.callMcpTool(toolName, input);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (/unknown tool|tool .*not found/i.test(message)) {
+        throw new Error(`MCP tool ${toolName} is not available. Sprint sync needs the MCP Atlassian "jira_agile" toolset; if TOOLSETS is set for the MCP server, include jira_agile (e.g. TOOLSETS=default,jira_agile) in .backlog-jira/config.json -> mcp.envVars.
+Original error: ${message}`);
+      }
+      throw error;
+    }
+  }
+  async getBoard(boardId, options) {
+    const id = String(boardId);
+    const limit = 50;
+    for (let startAt = 0;startAt < MAX_AGILE_RESULTS; startAt += limit) {
+      const input = { start_at: startAt, limit };
+      if (options?.projectKey)
+        input.project_key = options.projectKey;
+      const result = await this.callAgileTool("jira_get_agile_boards", input);
+      const values = agileValues(result);
+      const board = values.map((value) => parseBoard(value)).find((b) => b?.id === id);
+      if (board) {
+        logger.debug({ board }, "Retrieved Jira board");
+        return board;
+      }
+      if (values.length < limit)
+        break;
+    }
+    logger.debug({ boardId: id }, "Jira board not found");
+    return null;
+  }
+  async getBoardSprints(boardId, options) {
+    const limit = 50;
+    const sprints = [];
+    const seen = new Set;
+    const state = Array.isArray(options?.state) ? options.state.join(",") : options?.state;
+    for (let startAt = 0;startAt < MAX_AGILE_RESULTS; startAt += limit) {
+      const input = {
+        board_id: String(boardId),
+        start_at: startAt,
+        limit
+      };
+      if (state)
+        input.state = state;
+      const values = agileValues(await this.callAgileTool("jira_get_sprints_from_board", input));
+      for (const value of values) {
+        const sprint = parseSprint(value);
+        if (sprint && !seen.has(sprint.id)) {
+          seen.add(sprint.id);
+          sprints.push({ boardId: String(boardId), ...sprint });
+        }
+      }
+      if (values.length < limit)
+        break;
+    }
+    logger.debug({ boardId, count: sprints.length }, "Retrieved Jira board sprints");
+    return sprints;
+  }
+  async createSprint(boardId, sprint) {
+    const startDate = sprint.startDate ?? new Date(Date.now() + 60000).toISOString();
+    if (sprint.endDate && !(Date.parse(sprint.endDate) > Date.parse(startDate))) {
+      throw new Error(`Cannot create sprint "${sprint.name}": end date ${sprint.endDate} must be after its start date ${startDate}`);
+    }
+    const input = {
+      board_id: String(boardId),
+      name: sprint.name,
+      start_date: startDate,
+      end_date: sprint.endDate ?? ""
+    };
+    if (sprint.goal)
+      input.goal = sprint.goal;
+    const created = parseSprint(await this.callAgileTool("jira_create_sprint", input));
+    if (!created) {
+      throw new Error(`Invalid response from jira_create_sprint for "${sprint.name}"`);
+    }
+    logger.info({ boardId, sprintId: created.id, name: created.name }, "Created Jira sprint");
+    return { boardId: String(boardId), ...created };
+  }
+  async moveIssueToSprint(issueKey, sprintId) {
+    await this.callAgileTool("jira_add_issues_to_sprint", {
+      sprint_id: String(sprintId),
+      issue_keys: issueKey
+    });
+    logger.info({ issueKey, sprintId }, "Moved Jira issue to sprint");
+  }
+  async moveIssueToBacklog(issueKey) {
+    await this.callAgileTool("jira_move_issues_to_backlog", {
+      issue_keys: issueKey
+    });
+    logger.info({ issueKey }, "Moved Jira issue to backlog");
+  }
+  async getIssueSprints(issue, sprintFieldId) {
+    const fieldId = sprintFieldId ?? await this.getSprintFieldId();
+    if (!fieldId)
+      return [];
+    return parseSprintFieldValue(getJiraFieldValue(issue, fieldId));
+  }
   async getProjectIssueTypes(projectKey) {
     const result = await this.callMcpTool("jira_get_project_issue_types", {
       project_key: projectKey
@@ -25211,6 +25408,13 @@ Current tool: ${toolName}`;
       throw error;
     }
   }
+}
+var MAX_AGILE_RESULTS = 5000;
+function agileValues(result) {
+  if (Array.isArray(result))
+    return result;
+  const values = result?.values;
+  return Array.isArray(values) ? values : [];
 }
 function parseJsonObject(text) {
   const trimmed = text.trim();
