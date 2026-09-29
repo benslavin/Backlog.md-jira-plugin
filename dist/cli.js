@@ -27474,10 +27474,18 @@ class MappedFieldPushError extends Error {
 }
 function formatMappedFieldFailures(issueKey, failures) {
   const lines = failures.map((f) => `  - ${f.mapping.jira} (mapped to ${f.mapping.backlog}): ${firstLine(f.error)}`);
+  const hints = [];
+  if (failures.some((f) => f.mapping.type !== "sprint")) {
+    hints.push("Check the field is on the issue type's edit screen (backlog-jira doctor) or fix the mapping with backlog-jira map-fields.");
+  }
+  if (failures.some((f) => f.mapping.type === "sprint")) {
+    hints.push("Check the milestone matches a future or active sprint on the configured board (backlog-jira doctor).");
+  }
   return `Mapped field${failures.length === 1 ? "" : "s"} could not be updated on ${issueKey}:
 ${lines.join(`
 `)}
-Check the field is on the issue type's edit screen (backlog-jira doctor) or fix the mapping with backlog-jira map-fields.`;
+${hints.join(`
+`)}`;
 }
 function firstLine(text) {
   const line = text.trim().split(`
@@ -30821,6 +30829,194 @@ async function importJiraIssue(jiraKey, context) {
 // src/commands/push.ts
 import { readFileSync as readFileSync17 } from "node:fs";
 import { join as join17 } from "node:path";
+
+// src/utils/sprint-push.ts
+var OPEN_STATES = new Set(["active", "future"]);
+async function createSprintPushContext(mapping, jira, options = {}) {
+  if (!mapping || mapping.direction === "pull")
+    return null;
+  const sprintFieldId = await jira.getSprintFieldId();
+  if (!sprintFieldId) {
+    throw new Error("Sprint sync is configured but this Jira site has no Sprint field (Jira Software). Remove the sprint fieldMappings entry or check the site.");
+  }
+  jira.includeIssueFields([sprintFieldId]);
+  const cwd = options.cwd ?? process.cwd();
+  const registry = options.registry ?? SprintRegistry.load(cwd);
+  return {
+    mapping,
+    sprintFieldId,
+    jira,
+    registry,
+    milestones: options.milestones ?? new MilestoneAdapter({ cwd, registry }),
+    boardSprints: null,
+    targets: new Map,
+    dryRun: options.dryRun ?? false
+  };
+}
+function isSubtaskIssue(issue) {
+  if (/^sub-?task$/i.test(issue.issueType.trim()))
+    return true;
+  for (const key of ["issuetype", "issue_type"]) {
+    const type = getJiraFieldValue(issue, key);
+    if (type?.subtask === true || type?.hierarchyLevel === -1)
+      return true;
+  }
+  return false;
+}
+function sprintNeedsPush(taskId) {
+  const current = readTaskFrontmatter(taskId).milestone;
+  const synced = readTaskLink(taskId)?.sprintSync;
+  return synced ? !sameMilestone(current, synced.milestoneId) : typeof current === "string" && current.trim() !== "";
+}
+function boardSprints(ctx) {
+  if (!ctx.boardSprints) {
+    ctx.boardSprints = ctx.jira.getBoardSprints(ctx.mapping.boardId);
+    ctx.boardSprints.catch(() => {
+      ctx.boardSprints = null;
+    });
+  }
+  return ctx.boardSprints;
+}
+function sprintEndDate(dueDate) {
+  return dueDate ? `${dueDate}T23:59:59.000Z` : undefined;
+}
+function sprintGoal(milestone) {
+  const description = milestone.description?.trim();
+  if (!description || description === `Milestone: ${milestone.title}`) {
+    return;
+  }
+  return description;
+}
+function resolveMilestoneSprint(ctx, milestone) {
+  const key = milestone.id.toLowerCase();
+  let pending = ctx.targets.get(key);
+  if (!pending) {
+    pending = findOrCreateSprint(ctx, milestone);
+    ctx.targets.set(key, pending);
+  }
+  return pending;
+}
+async function findOrCreateSprint(ctx, milestone) {
+  const { registry, mapping } = ctx;
+  const sprints = await boardSprints(ctx);
+  const entry = registry.findByMilestone(milestone.id);
+  if (entry) {
+    const sprint = sprints.find((s) => s.id === entry.sprintId) ?? {
+      id: entry.sprintId,
+      name: entry.name,
+      state: entry.state,
+      ...entry.boardId ? { boardId: entry.boardId } : {}
+    };
+    return { sprint, created: false };
+  }
+  const title = milestone.title.trim().toLowerCase();
+  const named = sprints.filter((s) => OPEN_STATES.has(s.state) && s.name.trim().toLowerCase() === title);
+  const match = named.find((s) => s.state === "active") ?? named.sort((a, b) => Number(a.id) - Number(b.id))[0];
+  if (match) {
+    if (!ctx.dryRun) {
+      registry.upsert(match, milestone.id);
+      registry.save();
+    }
+    return { sprint: match, created: false };
+  }
+  if (!mapping.createSprints) {
+    return {
+      error: `milestone "${milestone.title}" matches no future or active sprint on board ${mapping.boardId}; create the sprint in Jira or set "createSprints": true`
+    };
+  }
+  if (ctx.dryRun) {
+    logger.info({ milestone: milestone.title, boardId: mapping.boardId }, "DRY RUN: Would create Jira sprint");
+    return {
+      sprint: { id: "dry-run", name: milestone.title, state: "future" },
+      created: true
+    };
+  }
+  try {
+    const sprint = await ctx.jira.createSprint(mapping.boardId, {
+      name: milestone.title.trim(),
+      endDate: sprintEndDate(milestone.dueDate),
+      goal: sprintGoal(milestone)
+    });
+    registry.upsert(sprint, milestone.id);
+    registry.save();
+    logger.info({ sprintId: sprint.id, milestone: milestone.id }, "Created Jira sprint for milestone");
+    return { sprint, created: true };
+  } catch (error) {
+    return {
+      error: `could not create sprint "${milestone.title}" on board ${mapping.boardId}: ${error instanceof Error ? error.message : String(error)}`
+    };
+  }
+}
+function findMilestone(ctx, value) {
+  return ctx.milestones.get(value) ?? ctx.milestones.findByTitle(value);
+}
+async function pushTaskSprint(ctx, taskId, issue) {
+  if (isSubtaskIssue(issue)) {
+    return {
+      status: "skipped",
+      reason: "subtasks follow their parent's sprint"
+    };
+  }
+  const raw = readTaskFrontmatter(taskId).milestone;
+  const current = typeof raw === "string" && raw.trim() ? raw.trim() : null;
+  const link = readTaskLink(taskId) ?? {};
+  if (ctx.mapping.direction === "both" && link.sprintSync && sameMilestone(current, link.sprintSync.milestoneId)) {
+    return { status: "unchanged" };
+  }
+  const sprints = getIssueSprints(ctx, issue);
+  const openSprint = sprints.find((s) => OPEN_STATES.has(s.state)) ?? null;
+  const displayed = selectDisplayedSprint(sprints);
+  let result;
+  if (!current) {
+    if (!openSprint) {
+      result = { status: "unchanged", sprintId: null };
+    } else if (ctx.dryRun) {
+      logger.info({ taskId, issue: issue.key }, "DRY RUN: Would move issue to backlog");
+      return { status: "moved", sprintId: null };
+    } else {
+      await ctx.jira.moveIssueToBacklog(issue.key);
+      result = { status: "moved", sprintId: null };
+    }
+  } else {
+    const milestone = findMilestone(ctx, current);
+    if (!milestone) {
+      return { status: "failed", reason: `milestone "${current}" not found` };
+    }
+    const target = await resolveMilestoneSprint(ctx, milestone);
+    if ("error" in target) {
+      return { status: "failed", reason: target.error };
+    }
+    const { sprint } = target;
+    if (sprint.state === "closed") {
+      if (displayed?.id !== sprint.id) {
+        return {
+          status: "failed",
+          reason: `sprint "${sprint.name}" is closed; issues can only be moved into future or active sprints`
+        };
+      }
+      result = { status: "unchanged", sprintId: sprint.id };
+    } else if (openSprint?.id === sprint.id) {
+      result = { status: "unchanged", sprintId: sprint.id };
+    } else if (ctx.dryRun) {
+      logger.info({ taskId, issue: issue.key, sprint: sprint.name }, "DRY RUN: Would move issue to sprint");
+      return { status: "moved", sprintId: sprint.id };
+    } else {
+      await ctx.jira.moveIssueToSprint(issue.key, sprint.id);
+      result = { status: "moved", sprintId: sprint.id };
+    }
+  }
+  if (ctx.dryRun)
+    return result;
+  const shown = result.sprintId ?? selectDisplayedSprint(sprints.filter((s) => !OPEN_STATES.has(s.state)))?.id ?? null;
+  writeTaskLink(taskId, {
+    ...readTaskLink(taskId) ?? {},
+    sprintSync: { sprintId: shown, milestoneId: current }
+  });
+  logger.info({ taskId, issue: issue.key, result }, "Pushed task sprint");
+  return result;
+}
+
+// src/commands/push.ts
 async function push(options = {}) {
   const originalLevel = logger.level;
   if (!options.verbose) {
@@ -30828,8 +31024,10 @@ async function push(options = {}) {
   }
   logger.info({ options }, "Starting push operation");
   let fieldMappings;
+  let sprintMapping;
   try {
     fieldMappings = loadFieldMappings();
+    sprintMapping = loadSprintMapping();
   } catch (error) {
     logger.level = originalLevel;
     throw error;
@@ -30850,7 +31048,10 @@ async function push(options = {}) {
     skipped: []
   };
   try {
-    const taskIds = await getTaskIds2(options, backlog, jira, store);
+    const sprints = await createSprintPushContext(sprintMapping, jira, {
+      dryRun: options.dryRun
+    });
+    const taskIds = await getTaskIds2(options, backlog, jira, store, sprints);
     logger.info({ count: taskIds.length }, "Tasks to process");
     const batchSize = 10;
     for (let i = 0;i < taskIds.length; i += batchSize) {
@@ -30864,6 +31065,7 @@ async function push(options = {}) {
             projectKey,
             issueType,
             fieldMappings,
+            sprints,
             force: options.force || false,
             dryRun: options.dryRun || false
           });
@@ -30893,7 +31095,7 @@ async function push(options = {}) {
   logger.info({ result }, "Push operation completed");
   return result;
 }
-async function getTaskIds2(options, backlog, jira, store) {
+async function getTaskIds2(options, backlog, jira, store, sprints) {
   if (options.taskIds && options.taskIds.length > 0) {
     return options.taskIds;
   }
@@ -30913,7 +31115,7 @@ async function getTaskIds2(options, backlog, jira, store) {
       const jiraHash = computeHash(jiraPayload);
       const snapshots = store.getSnapshots(taskId);
       const state = classifySyncState(backlogHash, jiraHash, snapshots.backlog, snapshots.jira, { backlog: backlogPayload, jira: jiraPayload });
-      if (state.state === "NeedsPush") {
+      if (state.state === "NeedsPush" || state.state === "InSync" && sprints && sprintNeedsPush(taskId)) {
         needsPush.push(taskId);
       }
     } catch (error) {
@@ -30930,6 +31132,7 @@ async function pushTask(taskId, context) {
     projectKey,
     issueType,
     fieldMappings,
+    sprints,
     force,
     dryRun
   } = context;
@@ -30958,6 +31161,8 @@ async function pushTask(taskId, context) {
         updates,
         mappedFields: mappedUpdates.fields
       }, "DRY RUN: Would update Jira issue");
+      if (sprints)
+        await pushSprint(sprints, taskId, issue);
     } else {
       const failures = await updateIssueWithMappedFields(jira, mapping.jiraKey, updates.fields, mappedUpdates);
       if (updates.transition) {
@@ -30965,10 +31170,14 @@ async function pushTask(taskId, context) {
           comment: updates.transition.comment
         });
       }
+      const sprintFailures = sprints ? await pushSprint(sprints, taskId, issue) : [];
       const updatedIssue = await jira.getIssue(mapping.jiraKey);
       if (failures.length > 0) {
         recordPartialPush(store, taskId, task, updatedIssue, failures, fieldMappings);
-        throw new MappedFieldPushError(mapping.jiraKey, failures);
+        throw new MappedFieldPushError(mapping.jiraKey, [
+          ...failures,
+          ...sprintFailures
+        ]);
       }
       recordSyncedSnapshots(store, taskId, {
         backlog: normalizeBacklogTask(task),
@@ -30990,6 +31199,9 @@ async function pushTask(taskId, context) {
       } catch (error) {
         logger.error({ taskId, error }, "Failed to update frontmatter, but push was successful");
       }
+      if (sprintFailures.length > 0) {
+        throw new MappedFieldPushError(mapping.jiraKey, sprintFailures);
+      }
     }
   } else {
     const mappedUpdates = buildMappedJiraFields(readTaskFrontmatter(taskId), null, fieldMappings);
@@ -31008,6 +31220,7 @@ async function pushTask(taskId, context) {
         labels: overridden.has("labels") ? undefined : task.labels
       }, mappedUpdates);
       store.addMapping(taskId, issue.key);
+      const sprintFailures = sprints ? await pushSprint(sprints, taskId, issue) : [];
       if (failures.length > 0) {
         const createdIssue = await jira.getIssue(issue.key);
         recordPartialPush(store, taskId, task, createdIssue, failures, fieldMappings);
@@ -31031,11 +31244,30 @@ async function pushTask(taskId, context) {
       } catch (error) {
         logger.error({ taskId, error }, "Failed to update frontmatter, but push was successful");
       }
-      if (failures.length > 0) {
-        throw new MappedFieldPushError(issue.key, failures);
+      if (failures.length > 0 || sprintFailures.length > 0) {
+        throw new MappedFieldPushError(issue.key, [
+          ...failures,
+          ...sprintFailures
+        ]);
       }
       logger.info({ taskId, jiraKey: issue.key }, "Created new Jira issue");
     }
+  }
+}
+async function pushSprint(sprints, taskId, issue) {
+  try {
+    const result = await pushTaskSprint(sprints, taskId, issue);
+    if (result.status === "skipped") {
+      logger.debug({ taskId, reason: result.reason }, "Sprint not pushed");
+    }
+    return result.status === "failed" ? [{ mapping: sprints.mapping, error: result.reason ?? "unknown error" }] : [];
+  } catch (error) {
+    return [
+      {
+        mapping: sprints.mapping,
+        error: error instanceof Error ? error.message : String(error)
+      }
+    ];
   }
 }
 async function buildJiraUpdates(task, currentIssue, jiraClient, projectKey, overridden = new Set) {

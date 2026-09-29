@@ -5,6 +5,7 @@ import {
 	type FieldMapping,
 	type MappedJiraFieldUpdates,
 	type MappedValue,
+	type SprintMapping,
 	buildBacklogValueUpdates,
 	buildJiraValueUpdates,
 	canonicalMappedValue,
@@ -32,7 +33,7 @@ import {
 // ===== Writing mapped fields to Jira =====
 
 export interface MappedFieldFailure {
-	mapping: FieldMapping;
+	mapping: FieldMapping | SprintMapping;
 	error: string;
 }
 
@@ -61,7 +62,18 @@ export function formatMappedFieldFailures(
 		(f) =>
 			`  - ${f.mapping.jira} (mapped to ${f.mapping.backlog}): ${firstLine(f.error)}`,
 	);
-	return `Mapped field${failures.length === 1 ? "" : "s"} could not be updated on ${issueKey}:\n${lines.join("\n")}\nCheck the field is on the issue type's edit screen (backlog-jira doctor) or fix the mapping with backlog-jira map-fields.`;
+	const hints: string[] = [];
+	if (failures.some((f) => f.mapping.type !== "sprint")) {
+		hints.push(
+			"Check the field is on the issue type's edit screen (backlog-jira doctor) or fix the mapping with backlog-jira map-fields.",
+		);
+	}
+	if (failures.some((f) => f.mapping.type === "sprint")) {
+		hints.push(
+			"Check the milestone matches a future or active sprint on the configured board (backlog-jira doctor).",
+		);
+	}
+	return `Mapped field${failures.length === 1 ? "" : "s"} could not be updated on ${issueKey}:\n${lines.join("\n")}\n${hints.join("\n")}`;
 }
 
 function firstLine(text: string): string {

@@ -311,7 +311,14 @@ function history(sprints: JiraSprint[]): SprintHistoryEntry[] {
 	});
 }
 
-function sameMilestone(a: unknown, b: string | null | undefined): boolean {
+/**
+ * Whether a task's milestone value and a milestone id are the same
+ * (both empty counts as the same)
+ */
+export function sameMilestone(
+	a: unknown,
+	b: string | null | undefined,
+): boolean {
 	const left =
 		typeof a === "string" && a.trim() ? a.trim().toLowerCase() : null;
 	const right = b ? b.toLowerCase() : null;

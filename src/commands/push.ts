@@ -6,14 +6,17 @@ import { FrontmatterStore } from "../state/store.ts";
 import { mapBacklogAssigneeToJira } from "../utils/assignee-mapping.ts";
 import {
 	type FieldMapping,
+	type SprintMapping,
 	buildMappedJiraFields,
 	loadFieldMappings,
+	loadSprintMapping,
 	readTaskFrontmatter,
 } from "../utils/field-mapping.ts";
 import { getTaskFilePath, updateJiraMetadata } from "../utils/frontmatter.ts";
 import { getJiraClientOptions } from "../utils/jira-config.ts";
 import { logger } from "../utils/logger.ts";
 import {
+	type MappedFieldFailure,
 	MappedFieldPushError,
 	createIssueWithMappedFields,
 	getOverriddenCoreFields,
@@ -29,6 +32,12 @@ import {
 	stripAcceptanceCriteriaFromDescription,
 } from "../utils/normalizer.ts";
 import { mapBacklogPriorityToJira } from "../utils/priority-mapping.ts";
+import {
+	type SprintPushContext,
+	createSprintPushContext,
+	pushTaskSprint,
+	sprintNeedsPush,
+} from "../utils/sprint-push.ts";
 import { findTransitionForStatus } from "../utils/status-mapping.ts";
 import { classifySyncState } from "../utils/sync-state.ts";
 
@@ -67,8 +76,10 @@ export async function push(options: PushOptions = {}): Promise<PushResult> {
 
 	// Validate field mappings up front so config errors are reported clearly
 	let fieldMappings: FieldMapping[];
+	let sprintMapping: SprintMapping | null;
 	try {
 		fieldMappings = loadFieldMappings();
+		sprintMapping = loadSprintMapping();
 	} catch (error) {
 		logger.level = originalLevel;
 		throw error;
@@ -97,8 +108,12 @@ export async function push(options: PushOptions = {}): Promise<PushResult> {
 	};
 
 	try {
+		const sprints = await createSprintPushContext(sprintMapping, jira, {
+			dryRun: options.dryRun,
+		});
+
 		// Get list of tasks to push
-		const taskIds = await getTaskIds(options, backlog, jira, store);
+		const taskIds = await getTaskIds(options, backlog, jira, store, sprints);
 
 		logger.info({ count: taskIds.length }, "Tasks to process");
 
@@ -115,6 +130,7 @@ export async function push(options: PushOptions = {}): Promise<PushResult> {
 						projectKey,
 						issueType,
 						fieldMappings,
+						sprints,
 						force: options.force || false,
 						dryRun: options.dryRun || false,
 					});
@@ -169,6 +185,7 @@ async function getTaskIds(
 	backlog: BacklogClient,
 	jira: JiraClient,
 	store: FrontmatterStore,
+	sprints: SprintPushContext | null,
 ): Promise<string[]> {
 	if (options.taskIds && options.taskIds.length > 0) {
 		return options.taskIds;
@@ -203,7 +220,11 @@ async function getTaskIds(
 				{ backlog: backlogPayload, jira: jiraPayload },
 			);
 
-			if (state.state === "NeedsPush") {
+			if (
+				state.state === "NeedsPush" ||
+				// Milestones are not part of the synced payload
+				(state.state === "InSync" && sprints && sprintNeedsPush(taskId))
+			) {
 				needsPush.push(taskId);
 			}
 		} catch (error) {
@@ -226,6 +247,7 @@ async function pushTask(
 		projectKey: string;
 		issueType: string;
 		fieldMappings: FieldMapping[];
+		sprints: SprintPushContext | null;
 		force: boolean;
 		dryRun: boolean;
 	},
@@ -237,6 +259,7 @@ async function pushTask(
 		projectKey,
 		issueType,
 		fieldMappings,
+		sprints,
 		force,
 		dryRun,
 	} = context;
@@ -298,6 +321,7 @@ async function pushTask(
 				},
 				"DRY RUN: Would update Jira issue",
 			);
+			if (sprints) await pushSprint(sprints, taskId, issue);
 		} else {
 			// Update issue fields; mapped fields that Jira rejects are reported
 			// individually after the rest of the push completes
@@ -315,6 +339,12 @@ async function pushTask(
 				});
 			}
 
+			// The milestone moves the issue between sprints; sprint problems are
+			// reported like mapped field failures after the rest is pushed
+			const sprintFailures = sprints
+				? await pushSprint(sprints, taskId, issue)
+				: [];
+
 			// Update snapshots with re-fetched data
 			const updatedIssue = await jira.getIssue(mapping.jiraKey);
 			if (failures.length > 0) {
@@ -326,7 +356,10 @@ async function pushTask(
 					failures,
 					fieldMappings,
 				);
-				throw new MappedFieldPushError(mapping.jiraKey, failures);
+				throw new MappedFieldPushError(mapping.jiraKey, [
+					...failures,
+					...sprintFailures,
+				]);
 			}
 			recordSyncedSnapshots(
 				store,
@@ -366,6 +399,10 @@ async function pushTask(
 					{ taskId, error },
 					"Failed to update frontmatter, but push was successful",
 				);
+			}
+
+			if (sprintFailures.length > 0) {
+				throw new MappedFieldPushError(mapping.jiraKey, sprintFailures);
 			}
 		}
 	} else {
@@ -424,6 +461,10 @@ async function pushTask(
 			// Create mapping
 			store.addMapping(taskId, issue.key);
 
+			const sprintFailures = sprints
+				? await pushSprint(sprints, taskId, issue)
+				: [];
+
 			// Store initial snapshots
 			if (failures.length > 0) {
 				const createdIssue = await jira.getIssue(issue.key);
@@ -479,12 +520,42 @@ async function pushTask(
 				);
 			}
 
-			if (failures.length > 0) {
-				throw new MappedFieldPushError(issue.key, failures);
+			if (failures.length > 0 || sprintFailures.length > 0) {
+				throw new MappedFieldPushError(issue.key, [
+					...failures,
+					...sprintFailures,
+				]);
 			}
 
 			logger.info({ taskId, jiraKey: issue.key }, "Created new Jira issue");
 		}
+	}
+}
+
+/**
+ * Push a task's milestone as the issue's sprint; problems come back as
+ * failures of the sprint mapping so the rest of the task still pushes
+ */
+async function pushSprint(
+	sprints: SprintPushContext,
+	taskId: string,
+	issue: JiraIssue,
+): Promise<MappedFieldFailure[]> {
+	try {
+		const result = await pushTaskSprint(sprints, taskId, issue);
+		if (result.status === "skipped") {
+			logger.debug({ taskId, reason: result.reason }, "Sprint not pushed");
+		}
+		return result.status === "failed"
+			? [{ mapping: sprints.mapping, error: result.reason ?? "unknown error" }]
+			: [];
+	} catch (error) {
+		return [
+			{
+				mapping: sprints.mapping,
+				error: error instanceof Error ? error.message : String(error),
+			},
+		];
 	}
 }
 
