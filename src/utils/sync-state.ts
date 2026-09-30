@@ -73,6 +73,20 @@ export function classifySyncState(
 		};
 	}
 
+	// Snapshots from before parents were synced: see classifyWithoutParent
+	if (
+		currentPayloads &&
+		currentPayloads.backlog.parent !== undefined &&
+		(lacksParent(backlogSnapshot) || lacksParent(jiraSnapshot))
+	) {
+		return classifyWithoutParent(
+			currentPayloads,
+			backlogSnapshot,
+			jiraSnapshot,
+			options,
+		);
+	}
+
 	const baseBacklogHash = backlogSnapshot.hash;
 	const baseJiraHash = jiraSnapshot.hash;
 
@@ -154,6 +168,63 @@ export function classifySyncState(
 		jiraHash: currentJiraHash,
 		baseBacklogHash,
 		baseJiraHash,
+	};
+}
+
+/** Whether a snapshot was stored before payloads carried the parent */
+function lacksParent(snapshot: Snapshot): boolean {
+	const payload = parseSnapshotPayload(snapshot);
+	return payload !== null && !("parent" in payload);
+}
+
+/**
+ * Classification against snapshots stored before parents were synced.
+ * Everything but the parent is compared as usual; a parent that differs
+ * between the sides counts as a change on the side that has one (both
+ * when they have different parents), since the snapshot cannot tell.
+ */
+function classifyWithoutParent(
+	current: { backlog: NormalizedPayload; jira: NormalizedPayload },
+	backlogSnapshot: Snapshot,
+	jiraSnapshot: Snapshot,
+	options?: {
+		fieldMappings?: FieldMapping[];
+		sprintMapping?: SprintMapping | null;
+	},
+): SyncStateResult {
+	const { parent: backlogParent = "", ...backlog } = current.backlog;
+	const { parent: jiraParent = "", ...jira } = current.jira;
+	const inner = classifySyncState(
+		computeHash(backlog),
+		computeHash(jira),
+		backlogSnapshot,
+		jiraSnapshot,
+		{ backlog, jira },
+		options,
+	);
+
+	let backlogChanged =
+		inner.state === "NeedsPush" || inner.state === "Conflict";
+	let jiraChanged = inner.state === "NeedsPull" || inner.state === "Conflict";
+	if (backlogParent !== jiraParent) {
+		if (backlogParent) backlogChanged = true;
+		if (jiraParent) jiraChanged = true;
+	}
+
+	let state: SyncState = "InSync";
+	if (backlogChanged && jiraChanged) state = "Conflict";
+	else if (backlogChanged) state = "NeedsPush";
+	else if (jiraChanged) state = "NeedsPull";
+
+	logger.debug(
+		{ backlogParent, jiraParent, state },
+		"Classified against a snapshot without parents",
+	);
+	return {
+		...inner,
+		state,
+		backlogHash: computeHash(current.backlog),
+		jiraHash: computeHash(current.jira),
 	};
 }
 

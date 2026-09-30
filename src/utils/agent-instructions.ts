@@ -124,6 +124,17 @@ Backlog task IDs (\`TASK-12\`) and Jira keys (\`<PROJECT>-<n>\`, e.g. \`PROJ-77\
 - \`backlog\` commands take task IDs only: never pass a Jira key where a task ID is expected (\`backlog task edit <id>\`, \`--dep\`, \`-p\`). Resolve it to its task ID first.
 - When writing task text, refer to tasks by task ID and to Jira issues by Jira key.
 
+## Parent and Epic Links
+
+Task parents (\`parent_task_id\`, shown by Backlog.md as subtasks) are synced with Jira parents and epics, compared by linked Jira key:
+
+- **Pull**: a task's parent follows its issue's parent or epic (Epic Link on Jira Server/Data Center). \`pull --import\` imports parents before children and creates children as subtasks of their parent's task. An issue whose Jira parent is not linked to a task is reported, and a later pull sets the parent once it is linked.
+- **Push**: a change of the task's parent sets, changes or clears the issue's parent. Jira only allows epic > standard issue > subtask and the plugin never changes issue types, so a subtask of a subtask, a standard issue under a standard issue, or a parent task not linked to Jira is reported and left pending.
+- **Sync**: one-sided changes propagate; changes on both sides follow the conflict strategy (\`parent\` in the prompt).
+- **create-issue**: a task whose parent is linked becomes a subtask of the parent's issue, or a standard issue when that parent is an epic. \`--parent <JIRA-KEY|TASK-ID>\` picks the parent; a parent task not linked yet needs its own issue first (\`backlog-jira create-issue <parent-task>\`).
+
+Create subtasks with \`backlog task create "Title" -p <parent-task-id>\`. \`backlog task edit\` cannot change an existing task's parent, so change it in Jira and pull; do not edit \`parent_task_id\` in task files. \`backlog-jira view <task-id>\` shows a task's parent and subtasks as \`TASK ⇄ KEY\` pairs and \`backlog-jira doctor\` lists parent links that cannot be synced. Turn off with \`"sync": { "parentLinks": false }\`; set \`jira.epicLinkField\` when the Epic Link field is not found. See \`docs/parent-sync.md\`.
+
 ## Configuration
 
 The plugin stores configuration in \`.backlog-jira/config.json\`:

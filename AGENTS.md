@@ -94,6 +94,17 @@ To move a task to another sprint, change its milestone with `backlog task edit <
 
 Limitations: one board per config; Jira Software and the MCP Atlassian `jira_agile` toolset are required; archived milestones cannot be renamed or unarchived; created sprints get a start date just after creation (MCP Atlassian requires one). See `docs/sprint-sync.md`.
 
+## Parent and Epic Links
+
+Task parents (`parent_task_id`, shown by Backlog.md as subtasks) are synced with Jira parents and epics, compared by linked Jira key:
+
+- **Pull**: a task's parent follows its issue's parent or epic (Epic Link on Jira Server/Data Center). `pull --import` imports parents before children and creates children as subtasks of their parent's task. An issue whose Jira parent is not linked to a task is reported, and a later pull sets the parent once it is linked.
+- **Push**: a change of the task's parent sets, changes or clears the issue's parent. Jira only allows epic > standard issue > subtask and the plugin never changes issue types, so a subtask of a subtask, a standard issue under a standard issue, or a parent task not linked to Jira is reported and left pending.
+- **Sync**: one-sided changes propagate; changes on both sides follow the conflict strategy (`parent` in the prompt).
+- **create-issue**: a task whose parent is linked becomes a subtask of the parent's issue, or a standard issue when that parent is an epic. `--parent <JIRA-KEY|TASK-ID>` picks the parent; a parent task not linked yet needs its own issue first (`backlog-jira create-issue <parent-task>`).
+
+Create subtasks with `backlog task create "Title" -p <parent-task-id>`. `backlog task edit` cannot change an existing task's parent, so change it in Jira and pull; do not edit `parent_task_id` in task files. `backlog-jira view <task-id>` shows a task's parent and subtasks as `TASK ⇄ KEY` pairs and `backlog-jira doctor` lists parent links that cannot be synced. Turn off with `"sync": { "parentLinks": false }`; set `jira.epicLinkField` when the Epic Link field is not found. See `docs/parent-sync.md`.
+
 ## Authentication
 
 Set your Jira credentials via environment variables:
@@ -215,6 +226,7 @@ The plugin uses file-based storage for sync state:
 - **Operations log**: Append-only log in `.backlog-jira/ops-log.jsonl`
 - **Sprint registry**: `.backlog-jira/sprints.json` links Jira sprint ids to milestone ids with the last known sprint data and the discovered Sprint field id (version controlled). Link records also hold each issue's sprint history
 - **Milestone refusals**: `.backlog-jira/milestone-refusals.json` lists sprint milestones the plugin refused to update directly (reported by `doctor`)
+- **Parent problems**: link records also hold why a task's parent could not be synced at the last pull or push (shown by `view`, reported by `doctor`)
 
 This approach:
 - ✅ Git-friendly (all metadata is version controlled)

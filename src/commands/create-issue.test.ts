@@ -60,6 +60,25 @@ const mockJiraClient = {
 			};
 		},
 	),
+	getIssue: mock(async (issueKey: string): Promise<JiraIssue> => {
+		const issueType = {
+			"TEST-1": "Epic",
+			"TEST-100": "Story",
+			"TEST-5": "Sub-task",
+		}[issueKey];
+		if (!issueType) throw new Error(`Issue ${issueKey} does not exist`);
+		return {
+			key: issueKey,
+			id: issueKey,
+			summary: issueKey,
+			status: "To Do",
+			issueType,
+			created: "",
+			updated: "",
+			parent: null,
+		};
+	}),
+	getEpicLinkFieldId: mock(async (): Promise<string | null> => null),
 	close: mock(async () => {}),
 };
 
@@ -127,6 +146,7 @@ describe("createIssue", () => {
 		// Reset all mocks before each test
 		mockBacklogClient.getTask.mockClear();
 		mockJiraClient.createIssue.mockClear();
+		mockJiraClient.getIssue.mockClear();
 		mockJiraClient.close.mockClear();
 	});
 
@@ -392,6 +412,126 @@ describe("createIssue", () => {
 
 			expect(result.success).toBe(false);
 			expect(result.error).toContain("Invalid fieldMappings");
+			expect(mockJiraClient.createIssue).not.toHaveBeenCalled();
+		});
+	});
+
+	describe("parents (--parent and the task's parent)", () => {
+		it("creates a subtask under the Jira issue given by key", async () => {
+			const result = await createIssue({
+				taskId: "task-123",
+				parent: "TEST-100",
+				configDir,
+			});
+
+			expect(result).toMatchObject({
+				success: true,
+				issueType: "Subtask",
+				parentKey: "TEST-100",
+			});
+			const [, issueType, , options] = mockJiraClient.createIssue.mock.calls[0];
+			expect(issueType).toBe("Subtask");
+			expect(options?.fields).toEqual({ parent: "TEST-100" });
+			// The parent was looked up before anything was created
+			expect(mockJiraClient.getIssue).toHaveBeenCalledWith("TEST-100");
+		});
+
+		it("creates a standard issue of the configured type under an epic", async () => {
+			const result = await createIssue({
+				taskId: "task-123",
+				parent: "TEST-1",
+				configDir,
+			});
+
+			expect(result).toMatchObject({ success: true, issueType: "Task" });
+			const options = mockJiraClient.createIssue.mock.calls[0][3];
+			expect(options?.fields).toEqual({ parent: "TEST-1" });
+		});
+
+		it("makes the task a subtask of the task linked to the parent", async () => {
+			createTaskFile("task-200", "Parent Task", "TEST-100");
+			await createIssue({
+				taskId: "task-123",
+				parent: "task-200",
+				configDir,
+			});
+
+			const { readTaskParents } = require("../utils/task-parents.ts");
+			expect(readTaskParents().get("task-123")).toBe("task-200");
+			const options = mockJiraClient.createIssue.mock.calls[0][3];
+			expect(options?.fields).toEqual({ parent: "TEST-100" });
+		});
+
+		it("uses the issue linked to the task's own parent", async () => {
+			createTaskFile("task-200", "Parent Task", "TEST-100");
+			const { setTaskParent } = require("../utils/task-parents.ts");
+			setTaskParent("task-123", "task-200");
+			mockBacklogClient.getTask.mockImplementationOnce(async (id: string) => ({
+				id,
+				title: "Test Task",
+				status: "To Do",
+				parent: "task-200",
+			}));
+
+			const result = await createIssue({ taskId: "task-123", configDir });
+
+			expect(result).toMatchObject({
+				success: true,
+				issueType: "Subtask",
+				parentKey: "TEST-100",
+			});
+		});
+
+		it("refuses a parent that does not exist in Jira, creating nothing", async () => {
+			const result = await createIssue({
+				taskId: "task-123",
+				parent: "TEST-404",
+				configDir,
+			});
+
+			expect(result.success).toBe(false);
+			expect(result.error).toContain("TEST-404 could not be fetched");
+			expect(mockJiraClient.createIssue).not.toHaveBeenCalled();
+		});
+
+		it("refuses a subtask as parent", async () => {
+			const result = await createIssue({
+				taskId: "task-123",
+				parent: "TEST-5",
+				configDir,
+			});
+
+			expect(result.success).toBe(false);
+			expect(result.error).toContain("cannot nest issues under a subtask");
+			expect(mockJiraClient.createIssue).not.toHaveBeenCalled();
+		});
+
+		it("refuses a parent task that is not linked to Jira", async () => {
+			createTaskFile("task-7", "Unlinked Parent");
+			const result = await createIssue({
+				taskId: "task-123",
+				parent: "task-7",
+				configDir,
+			});
+
+			expect(result.success).toBe(false);
+			expect(result.error).toContain("backlog-jira create-issue TASK-7");
+			expect(mockJiraClient.createIssue).not.toHaveBeenCalled();
+		});
+
+		it("shows the parent in a dry run", async () => {
+			const result = await createIssue({
+				taskId: "task-123",
+				parent: "TEST-100",
+				dryRun: true,
+				configDir,
+			});
+
+			expect(result).toMatchObject({
+				success: true,
+				issueType: "Subtask",
+				parentKey: "TEST-100",
+			});
 			expect(mockJiraClient.createIssue).not.toHaveBeenCalled();
 		});
 	});

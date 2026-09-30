@@ -24,6 +24,10 @@ import {
 	normalizeBacklogTask,
 	normalizeJiraIssue,
 } from "./normalizer.ts";
+import {
+	PARENT_PAYLOAD_KEY,
+	type ParentLinkMapping,
+} from "./parent-payload.ts";
 
 /**
  * Push, conflict and display helpers for user-defined field mappings.
@@ -34,7 +38,7 @@ import {
 // ===== Writing mapped fields to Jira =====
 
 export interface MappedFieldFailure {
-	mapping: FieldMapping | SprintMapping;
+	mapping: FieldMapping | SprintMapping | ParentLinkMapping;
 	error: string;
 }
 
@@ -59,12 +63,17 @@ export function formatMappedFieldFailures(
 	issueKey: string,
 	failures: MappedFieldFailure[],
 ): string {
-	const lines = failures.map(
-		(f) =>
-			`  - ${f.mapping.jira} (mapped to ${f.mapping.backlog}): ${firstLine(f.error)}`,
+	const lines = failures.map((f) =>
+		f.mapping.type === "parent"
+			? `  - parent: ${firstLine(f.error)}`
+			: `  - ${f.mapping.jira} (mapped to ${f.mapping.backlog}): ${firstLine(f.error)}`,
 	);
 	const hints: string[] = [];
-	if (failures.some((f) => f.mapping.type !== "sprint")) {
+	if (
+		failures.some(
+			(f) => f.mapping.type !== "sprint" && f.mapping.type !== "parent",
+		)
+	) {
 		hints.push(
 			"Check the field is on the issue type's edit screen (backlog-jira doctor) or fix the mapping with backlog-jira map-fields.",
 		);
@@ -72,6 +81,11 @@ export function formatMappedFieldFailures(
 	if (failures.some((f) => f.mapping.type === "sprint")) {
 		hints.push(
 			"Check the milestone matches a future or active sprint on the configured board (backlog-jira doctor).",
+		);
+	}
+	if (failures.some((f) => f.mapping.type === "parent")) {
+		hints.push(
+			"The parent stays pending and is retried by the next push (backlog-jira doctor lists parent links that cannot be synced).",
 		);
 	}
 	return `Mapped field${failures.length === 1 ? "" : "s"} could not be updated on ${issueKey}:\n${lines.join("\n")}\n${hints.join("\n")}`;
@@ -164,14 +178,19 @@ export async function createIssueWithMappedFields(
 	projectKey: string,
 	issueType: string,
 	summary: string,
-	options: CoreIssueFields,
+	options: CoreIssueFields & {
+		/** Fields always sent on creation, e.g. the parent */
+		fields?: Record<string, unknown>;
+	},
 	mapped: MappedJiraFieldUpdates,
 ): Promise<{ issue: JiraIssue; failures: MappedFieldFailure[] }> {
 	const mappedIds = Object.keys(mapped.fields);
 	try {
 		const issue = await jira.createIssue(projectKey, issueType, summary, {
 			...options,
-			...(mappedIds.length > 0 ? { fields: mapped.fields } : {}),
+			...(mappedIds.length > 0
+				? { fields: { ...options.fields, ...mapped.fields } }
+				: {}),
 		});
 		return { issue, failures: [...mapped.errors] };
 	} catch (error) {
@@ -214,6 +233,8 @@ function payloadWithValuesFrom(
 			result.priority = source.priority;
 		} else if (key === "labels") {
 			result.labels = source.labels;
+		} else if (key === PARENT_PAYLOAD_KEY) {
+			if (result.parent !== undefined) result.parent = source.parent ?? "";
 		} else if (result.mappedFields) {
 			result.mappedFields[key] = source.mappedFields?.[key] ?? "";
 		}

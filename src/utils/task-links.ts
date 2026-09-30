@@ -29,6 +29,8 @@ export interface TaskLink {
 	sprints?: SprintHistoryEntry[];
 	/** Displayed sprint and its milestone as of the last sprint sync */
 	sprintSync?: { sprintId: string | null; milestoneId: string | null };
+	/** Why the task's parent could not be synced at the last pull or push */
+	parentProblem?: string;
 }
 
 export interface SprintHistoryEntry {
@@ -136,6 +138,9 @@ function cleanLink(link: TaskLink): TaskLink {
 	}
 	if (link.sprintSync) {
 		cleaned.sprintSync = link.sprintSync;
+	}
+	if (link.parentProblem) {
+		cleaned.parentProblem = link.parentProblem;
 	}
 	return cleaned;
 }

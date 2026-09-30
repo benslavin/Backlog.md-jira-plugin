@@ -11,6 +11,11 @@ import {
 	readTaskFrontmatter,
 } from "./field-mapping.ts";
 import {
+	backlogParentValue,
+	jiraParentValue,
+	parentLinksEnabled,
+} from "./parent-payload.ts";
+import {
 	SPRINT_PAYLOAD_KEY,
 	type SprintPayloadSource,
 	backlogSprintValue,
@@ -40,6 +45,10 @@ export interface NormalizedPayload {
 	// canonical Backlog representation. Omitted when no mappings apply so
 	// hashes for users without fieldMappings are unchanged.
 	mappedFields?: Record<string, string>;
+	// Parent as a Jira key (see parent-payload.ts): "" for none. Omitted when
+	// parent links are off; hashed only when set, so hashes of tasks without
+	// a parent are unchanged.
+	parent?: string;
 }
 
 export interface NormalizeOptions {
@@ -51,6 +60,8 @@ export interface NormalizeOptions {
 	statusMapping?: StatusMappingConfig;
 	/** Sprint sync source; loaded from config.json when omitted, null for none */
 	sprint?: SprintPayloadSource | null;
+	/** Whether to carry the parent; read from config.json when omitted */
+	parentLinks?: boolean;
 }
 
 function getSprintSource(
@@ -90,6 +101,9 @@ export function normalizeBacklogTask(
 			checked: ac.checked,
 		})),
 	};
+	if (options?.parentLinks ?? parentLinksEnabled()) {
+		payload.parent = backlogParentValue(task.parent);
+	}
 
 	const mappings = getMappedFieldMappings(options).filter(
 		(m) => !isCoreOverrideTarget(m.backlog),
@@ -122,7 +136,7 @@ export function normalizeJiraIssue(
 	issue: JiraIssue,
 	options?: Pick<
 		NormalizeOptions,
-		"fieldMappings" | "statusMapping" | "sprint"
+		"fieldMappings" | "statusMapping" | "sprint" | "parentLinks"
 	>,
 ): NormalizedPayload {
 	const payload: NormalizedPayload = {
@@ -141,6 +155,9 @@ export function normalizeJiraIssue(
 		// Jira doesn't have AC, so we extract from description if formatted
 		acceptanceCriteria: extractAcceptanceCriteria(issue.description || ""),
 	};
+	if (options?.parentLinks ?? parentLinksEnabled()) {
+		payload.parent = jiraParentValue(issue);
+	}
 
 	for (const mapping of getMappedFieldMappings(options)) {
 		const value = getMappedJiraValue(issue, mapping);
@@ -321,6 +338,9 @@ export function computeHash(payload: NormalizedPayload): string {
 		}
 		(stable as Record<string, unknown>).mappedFields = mappedFields;
 	}
+	if (payload.parent) {
+		(stable as Record<string, unknown>).parent = payload.parent;
+	}
 
 	const json = JSON.stringify(stable);
 	return crypto.createHash("sha256").update(json).digest("hex");
@@ -341,6 +361,7 @@ export function comparePayloads(
 	if (a.status !== b.status) changes.push("status");
 	if (a.priority !== b.priority) changes.push("priority");
 	if (a.assignee !== b.assignee) changes.push("assignee");
+	if ((a.parent ?? "") !== (b.parent ?? "")) changes.push("parent");
 
 	// Compare arrays
 	if (JSON.stringify(a.labels) !== JSON.stringify(b.labels)) {

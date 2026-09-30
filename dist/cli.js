@@ -24083,6 +24083,9 @@ function cleanLink(link) {
   if (link.sprintSync) {
     cleaned.sprintSync = link.sprintSync;
   }
+  if (link.parentProblem) {
+    cleaned.parentProblem = link.parentProblem;
+  }
   return cleaned;
 }
 function linkToFrontmatter(link) {
@@ -25272,8 +25275,7 @@ ${errors.map((e) => `  - ${e}`).join(`
   ACCOUNT_ID_PATTERN = /^([0-9a-f]{24}|[0-9]{5,}:[a-f0-9-]+)$/;
 });
 
-// src/integrations/milestones.ts
-import { spawn as spawn2 } from "node:child_process";
+// src/state/frontmatter-store.ts
 import {
   existsSync as existsSync4,
   mkdirSync as mkdirSync3,
@@ -25282,15 +25284,369 @@ import {
   writeFileSync as writeFileSync5
 } from "node:fs";
 import { join as join5 } from "node:path";
+
+class FrontmatterStore {
+  snapshotsDir;
+  opsLogPath;
+  constructor(configDir) {
+    const baseDir = configDir || join5(process.cwd(), ".backlog-jira");
+    if (!existsSync4(baseDir)) {
+      mkdirSync3(baseDir, { recursive: true });
+    }
+    this.snapshotsDir = join5(baseDir, "snapshots");
+    this.opsLogPath = join5(baseDir, "ops-log.jsonl");
+    if (!existsSync4(this.snapshotsDir)) {
+      mkdirSync3(this.snapshotsDir, { recursive: true });
+    }
+    logger.debug({ baseDir, snapshotsDir: this.snapshotsDir }, "FrontmatterStore initialized");
+  }
+  addMapping(backlogId, jiraKey) {
+    try {
+      const filePath = getTaskFilePath(backlogId);
+      updateJiraMetadata(filePath, { jiraKey });
+      logger.debug({ backlogId, jiraKey }, "Added mapping");
+    } catch (error) {
+      logger.error({ error, backlogId, jiraKey }, "Failed to add mapping");
+      throw error;
+    }
+  }
+  getMapping(backlogId) {
+    try {
+      const filePath = getTaskFilePath(backlogId);
+      const metadata = getJiraMetadata(filePath);
+      if (!metadata.jiraKey) {
+        return null;
+      }
+      const { frontmatter } = parseFrontmatter(readFileSync6(filePath, "utf-8"));
+      return {
+        backlogId,
+        jiraKey: metadata.jiraKey,
+        createdAt: frontmatter.created || new Date().toISOString(),
+        updatedAt: frontmatter.updated || new Date().toISOString()
+      };
+    } catch (error) {
+      return null;
+    }
+  }
+  getMappingByJiraKey(jiraKey) {
+    try {
+      const tasksDir = join5(process.cwd(), "backlog", "tasks");
+      const files = readdirSync(tasksDir).filter((f) => f.endsWith(".md"));
+      for (const file of files) {
+        const backlogId = taskIdFromFilePath(file);
+        if (!backlogId)
+          continue;
+        const frontmatter = readPluginFrontmatter(join5(tasksDir, file));
+        if (frontmatter.jira_key === jiraKey) {
+          return {
+            backlogId,
+            jiraKey,
+            createdAt: frontmatter.created || new Date().toISOString(),
+            updatedAt: frontmatter.updated || new Date().toISOString()
+          };
+        }
+      }
+      return null;
+    } catch (error) {
+      logger.error({ error, jiraKey }, "Failed to get mapping by Jira key");
+      return null;
+    }
+  }
+  getAllMappings() {
+    const mappings = new Map;
+    try {
+      const tasksDir = join5(process.cwd(), "backlog", "tasks");
+      const files = readdirSync(tasksDir).filter((f) => f.endsWith(".md"));
+      for (const file of files) {
+        const backlogId = taskIdFromFilePath(file);
+        if (!backlogId)
+          continue;
+        const frontmatter = readPluginFrontmatter(join5(tasksDir, file));
+        if (frontmatter.jira_key) {
+          mappings.set(backlogId, frontmatter.jira_key);
+        }
+      }
+    } catch (error) {
+      logger.error({ error }, "Failed to get all mappings");
+    }
+    return mappings;
+  }
+  deleteMapping(backlogId) {
+    try {
+      const filePath = getTaskFilePath(backlogId);
+      updateJiraMetadata(filePath, {
+        jiraKey: undefined,
+        jiraLastSync: undefined,
+        jiraSyncState: undefined,
+        jiraUrl: undefined
+      });
+      logger.debug({ backlogId }, "Deleted mapping");
+    } catch (error) {
+      logger.error({ error, backlogId }, "Failed to delete mapping");
+      throw error;
+    }
+  }
+  getSnapshotPath(backlogId, side) {
+    return join5(this.snapshotsDir, `${normalizeTaskId(backlogId)}-${side}.json`);
+  }
+  setSnapshot(backlogId, side, hash, payload) {
+    const snapshotPath = this.getSnapshotPath(backlogId, side);
+    const snapshot = {
+      backlogId,
+      side,
+      hash,
+      payload: JSON.stringify(payload),
+      updatedAt: new Date().toISOString()
+    };
+    try {
+      writeFileSync5(snapshotPath, JSON.stringify(snapshot, null, 2), "utf-8");
+      logger.debug({ backlogId, side, hash }, "Set snapshot");
+    } catch (error) {
+      logger.error({ error, backlogId, side }, "Failed to set snapshot");
+      throw error;
+    }
+  }
+  getSnapshot(backlogId, side) {
+    const snapshotPath = this.getSnapshotPath(backlogId, side);
+    if (!existsSync4(snapshotPath)) {
+      return null;
+    }
+    try {
+      const content = readFileSync6(snapshotPath, "utf-8");
+      return JSON.parse(content);
+    } catch (error) {
+      logger.error({ error, backlogId, side }, "Failed to get snapshot");
+      return null;
+    }
+  }
+  getSnapshots(backlogId) {
+    return {
+      backlog: this.getSnapshot(backlogId, "backlog"),
+      jira: this.getSnapshot(backlogId, "jira")
+    };
+  }
+  updateSyncState(backlogId, updates) {
+    try {
+      const filePath = getTaskFilePath(backlogId);
+      const metadata = getJiraMetadata(filePath);
+      updateJiraMetadata(filePath, {
+        jiraKey: metadata.jiraKey,
+        jiraLastSync: updates.lastSyncAt ?? metadata.jiraLastSync,
+        jiraSyncState: updates.conflictState ?? metadata.jiraSyncState,
+        jiraUrl: metadata.jiraUrl
+      });
+      logger.debug({ backlogId, updates }, "Updated sync state");
+    } catch (error) {
+      logger.error({ error, backlogId, updates }, "Failed to update sync state");
+      throw error;
+    }
+  }
+  getSyncState(backlogId) {
+    try {
+      const filePath = getTaskFilePath(backlogId);
+      const metadata = getJiraMetadata(filePath);
+      return {
+        backlogId,
+        lastSyncAt: metadata.jiraLastSync || null,
+        conflictState: metadata.jiraSyncState || null,
+        strategy: null
+      };
+    } catch (error) {
+      return null;
+    }
+  }
+  logOperation(op, backlogId, jiraKey, outcome, details) {
+    const logEntry = {
+      id: Date.now(),
+      ts: new Date().toISOString(),
+      op,
+      backlogId,
+      jiraKey,
+      outcome,
+      details: details || null
+    };
+    try {
+      const line = `${JSON.stringify(logEntry)}
+`;
+      writeFileSync5(this.opsLogPath, line, { flag: "a", encoding: "utf-8" });
+      logger.debug({ op, backlogId, jiraKey, outcome }, "Logged operation");
+    } catch (error) {
+      logger.error({ error, op }, "Failed to log operation");
+    }
+  }
+  getRecentOps(limit = 100) {
+    if (!existsSync4(this.opsLogPath)) {
+      return [];
+    }
+    try {
+      const content = readFileSync6(this.opsLogPath, "utf-8");
+      const lines = content.trim().split(`
+`).filter((l) => l.trim());
+      const ops = lines.map((line) => {
+        try {
+          return JSON.parse(line);
+        } catch {
+          return null;
+        }
+      }).filter((op) => op !== null).reverse().slice(0, limit);
+      return ops;
+    } catch (error) {
+      logger.error({ error }, "Failed to get recent ops");
+      return [];
+    }
+  }
+  testWriteAccess() {
+    const testFile = join5(this.snapshotsDir, ".write-test");
+    try {
+      writeFileSync5(testFile, "test", "utf-8");
+      readFileSync6(testFile, "utf-8");
+      const { unlinkSync } = __require("node:fs");
+      unlinkSync(testFile);
+    } catch (error) {
+      logger.error({ error }, "Write access test failed");
+      throw new Error("Cannot write to .backlog-jira directory");
+    }
+  }
+  close() {
+    logger.debug("FrontmatterStore closed (no-op)");
+  }
+}
+var init_frontmatter_store = __esm(() => {
+  init_frontmatter();
+  init_logger();
+  init_task_links();
+});
+
+// src/state/store.ts
+var init_store = __esm(() => {
+  init_frontmatter_store();
+});
+
+// src/utils/config-file.ts
+import { existsSync as existsSync5, mkdirSync as mkdirSync4, readFileSync as readFileSync7, writeFileSync as writeFileSync6 } from "node:fs";
+import { join as join6 } from "node:path";
+function getConfigDir(cwd = process.cwd()) {
+  return join6(cwd, ".backlog-jira");
+}
+function getConfigPath(cwd = process.cwd()) {
+  return join6(getConfigDir(cwd), "config.json");
+}
+function createDefaultConfig() {
+  return {
+    jira: {
+      baseUrl: "",
+      projectKey: "",
+      issueType: "Task",
+      jqlFilter: ""
+    },
+    backlog: {
+      statusMapping: {
+        "To Do": ["To Do", "Open", "Backlog"],
+        "In Progress": ["In Progress"],
+        Done: ["Done", "Closed", "Resolved"]
+      }
+    },
+    sync: {
+      conflictStrategy: "prompt",
+      enableAnnotations: false,
+      watchInterval: 60
+    }
+  };
+}
+function bootstrapConfigDir(cwd = process.cwd()) {
+  const configDir = getConfigDir(cwd);
+  const created = !existsSync5(configDir);
+  mkdirSync4(join6(configDir, "logs"), { recursive: true });
+  const configPath = getConfigPath(cwd);
+  if (!existsSync5(configPath)) {
+    writeConfigFile(createDefaultConfig(), cwd);
+  }
+  const store = new FrontmatterStore(configDir);
+  store.close();
+  const gitignorePath = join6(configDir, ".gitignore");
+  if (!existsSync5(gitignorePath)) {
+    writeFileSync6(gitignorePath, CONFIG_DIR_GITIGNORE);
+  }
+  return created;
+}
+function readConfigFile(cwd = process.cwd()) {
+  const configPath = getConfigPath(cwd);
+  if (!existsSync5(configPath))
+    return null;
+  let parsed;
+  try {
+    parsed = JSON.parse(readFileSync7(configPath, "utf-8"));
+  } catch (error) {
+    throw new Error(`${configPath} contains invalid JSON: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error(`${configPath} must contain a JSON object`);
+  }
+  return parsed;
+}
+function writeConfigFile(config, cwd = process.cwd()) {
+  writeFileSync6(getConfigPath(cwd), `${JSON.stringify(config, null, 2)}
+`);
+}
+function getSection(config, name) {
+  const section = config[name];
+  return section && typeof section === "object" && !Array.isArray(section) ? section : {};
+}
+function setSectionValues(config, name, values) {
+  config[name] = { ...getSection(config, name), ...values };
+  return config;
+}
+var CONFLICT_STRATEGIES;
+var init_config_file = __esm(() => {
+  init_store();
+  init_task_links();
+  CONFLICT_STRATEGIES = [
+    "prompt",
+    "prefer-backlog",
+    "prefer-jira"
+  ];
+});
+
+// src/utils/hierarchy-config.ts
+function loadHierarchyConfig(cwd = process.cwd()) {
+  try {
+    const config = readConfigFile(cwd);
+    const sync = config?.sync;
+    const jira = config?.jira;
+    const epicLinkField = typeof jira?.epicLinkField === "string" && jira.epicLinkField.trim() ? jira.epicLinkField.trim() : undefined;
+    return {
+      parentLinks: sync?.parentLinks !== false,
+      ...epicLinkField ? { epicLinkField } : {}
+    };
+  } catch (error) {
+    logger.debug({ error }, "Using default parent link settings");
+    return { parentLinks: true };
+  }
+}
+var init_hierarchy_config = __esm(() => {
+  init_config_file();
+  init_logger();
+});
+
+// src/integrations/milestones.ts
+import { spawn as spawn2 } from "node:child_process";
+import {
+  existsSync as existsSync6,
+  mkdirSync as mkdirSync5,
+  readFileSync as readFileSync8,
+  readdirSync as readdirSync2,
+  writeFileSync as writeFileSync7
+} from "node:fs";
+import { join as join7 } from "node:path";
 function getMilestoneRefusalsPath(cwd = process.cwd()) {
-  return join5(cwd, ".backlog-jira", "milestone-refusals.json");
+  return join7(cwd, ".backlog-jira", "milestone-refusals.json");
 }
 function readMilestoneRefusals(cwd = process.cwd()) {
   const path = getMilestoneRefusalsPath(cwd);
-  if (!existsSync4(path))
+  if (!existsSync6(path))
     return [];
   try {
-    const parsed = JSON.parse(readFileSync6(path, "utf-8"));
+    const parsed = JSON.parse(readFileSync8(path, "utf-8"));
     return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? Object.values(parsed) : [];
   } catch (error) {
     logger.debug({ error, path }, "Failed to read milestone refusals");
@@ -25313,10 +25669,10 @@ class MilestoneAdapter {
     this.registry = () => registry ?? SprintRegistry.load(this.cwd);
   }
   list() {
-    const backlogDir = join5(this.cwd, "backlog");
+    const backlogDir = join7(this.cwd, "backlog");
     return [
-      ...readMilestoneDir(join5(backlogDir, "milestones"), false),
-      ...readMilestoneDir(join5(backlogDir, "archive", "milestones"), true)
+      ...readMilestoneDir(join7(backlogDir, "milestones"), false),
+      ...readMilestoneDir(join7(backlogDir, "archive", "milestones"), true)
     ];
   }
   get(id) {
@@ -25477,13 +25833,13 @@ class MilestoneAdapter {
     if (!registered) {
       return `milestone ${milestone.id} is not a sprint milestone in .backlog-jira/sprints.json`;
     }
-    const original = readFileSync6(milestone.filePath, "utf-8");
+    const original = readFileSync8(milestone.filePath, "utf-8");
     const result = rewriteMilestoneFile(original, milestone.id, update);
     if ("error" in result) {
       return `${milestone.filePath} does not match the expected milestone format: ${result.error}`;
     }
     if (result.content !== original) {
-      writeFileSync5(milestone.filePath, result.content, "utf-8");
+      writeFileSync7(milestone.filePath, result.content, "utf-8");
     }
     return null;
   }
@@ -25507,9 +25863,9 @@ class MilestoneAdapter {
   writeRefusals(change) {
     const path = getMilestoneRefusalsPath(this.cwd);
     let refusals = {};
-    if (existsSync4(path)) {
+    if (existsSync6(path)) {
       try {
-        refusals = JSON.parse(readFileSync6(path, "utf-8"));
+        refusals = JSON.parse(readFileSync8(path, "utf-8"));
       } catch {
         refusals = {};
       }
@@ -25518,8 +25874,8 @@ class MilestoneAdapter {
     change(refusals);
     if (JSON.stringify(refusals) === before)
       return;
-    mkdirSync3(join5(this.cwd, ".backlog-jira"), { recursive: true });
-    writeFileSync5(path, `${JSON.stringify(refusals, null, 2)}
+    mkdirSync5(join7(this.cwd, ".backlog-jira"), { recursive: true });
+    writeFileSync7(path, `${JSON.stringify(refusals, null, 2)}
 `, "utf-8");
   }
 }
@@ -25603,15 +25959,15 @@ function parseMilestoneFile(content, filePath, archived) {
   return milestone;
 }
 function readMilestoneDir(dir, archived) {
-  if (!existsSync4(dir))
+  if (!existsSync6(dir))
     return [];
   const milestones = [];
-  for (const file of readdirSync(dir).sort()) {
+  for (const file of readdirSync2(dir).sort()) {
     if (!file.endsWith(".md"))
       continue;
-    const filePath = join5(dir, file);
+    const filePath = join7(dir, file);
     try {
-      const milestone = parseMilestoneFile(readFileSync6(filePath, "utf-8"), filePath, archived);
+      const milestone = parseMilestoneFile(readFileSync8(filePath, "utf-8"), filePath, archived);
       if (milestone)
         milestones.push(milestone);
     } catch (error) {
@@ -25962,6 +26318,100 @@ var init_sprint_payload = __esm(() => {
   init_field_mapping();
   init_logger();
   init_sprint_pull();
+});
+
+// src/integrations/jira-hierarchy.ts
+function kindOfIssueType(type) {
+  if (type.subtask === true || type.hierarchyLevel === -1)
+    return "subtask";
+  if (typeof type.hierarchyLevel === "number" && type.hierarchyLevel >= 1) {
+    return "epic";
+  }
+  const name = typeof type.name === "string" ? type.name.trim() : "";
+  if (EPIC_TYPE.test(name))
+    return "epic";
+  if (SUBTASK_TYPE.test(name))
+    return "subtask";
+  if (type.subtask === false || type.hierarchyLevel === 0)
+    return "standard";
+  return name ? "standard" : undefined;
+}
+function asRecord(value) {
+  return value && typeof value === "object" && !Array.isArray(value) ? value : null;
+}
+function keyOf(value) {
+  if (typeof value === "string")
+    return value.trim() || null;
+  const obj = asRecord(value);
+  if (!obj)
+    return null;
+  if (typeof obj.key === "string" && obj.key.trim())
+    return obj.key.trim();
+  if ("value" in obj)
+    return keyOf(obj.value);
+  return null;
+}
+function readField(fields, fieldId) {
+  if (fields[fieldId] !== undefined)
+    return fields[fieldId];
+  const nested = asRecord(fields.fields);
+  return nested?.[fieldId];
+}
+function parseIssueParent(fields, epicLinkFieldId) {
+  if (!fields)
+    return null;
+  const parent = readField(fields, "parent");
+  const parentKey = keyOf(parent);
+  if (parentKey) {
+    const parentFields = asRecord(asRecord(parent)?.fields);
+    const type = asRecord(parentFields?.issuetype ?? parentFields?.issue_type);
+    const kind = type ? kindOfIssueType(type) : undefined;
+    return {
+      key: parentKey,
+      ...typeof type?.name === "string" ? { issueType: type.name } : {},
+      ...kind ? { kind } : {},
+      via: "parent"
+    };
+  }
+  if (epicLinkFieldId) {
+    const epicKey = keyOf(readField(fields, epicLinkFieldId));
+    if (epicKey)
+      return { key: epicKey, kind: "epic", via: "epicLink" };
+  }
+  return null;
+}
+function kindOfIssue(issue) {
+  const raw = issue.fields ? asRecord(readField(issue.fields, "issuetype")) ?? asRecord(readField(issue.fields, "issue_type")) : null;
+  const kind = kindOfIssueType({ ...raw ?? {}, name: issue.issueType });
+  if (kind && kind !== "standard")
+    return kind;
+  const parent = issue.parent;
+  if (parent && parent.via === "parent" && parent.kind === "standard") {
+    return "subtask";
+  }
+  return "standard";
+}
+function isJiraCloudUrl(url) {
+  if (!url)
+    return false;
+  try {
+    const host = new URL(url).hostname.toLowerCase();
+    return [".atlassian.net", ".jira.com", ".jira-dev.com"].some((suffix) => host.endsWith(suffix));
+  } catch {
+    return false;
+  }
+}
+function findEpicLinkFieldId(fields) {
+  const bySchema = fields.find((f) => f.schema?.custom === EPIC_LINK_SCHEMA);
+  if (bySchema)
+    return bySchema.id;
+  const byName = fields.find((f) => f.id.startsWith("customfield_") && /^epic link$/i.test(f.name ?? ""));
+  return byName?.id ?? null;
+}
+var EPIC_LINK_SCHEMA = "com.pyxis.greenhopper.jira:gh-epic-link", EPIC_TYPE, SUBTASK_TYPE;
+var init_jira_hierarchy = __esm(() => {
+  EPIC_TYPE = /^epic$/i;
+  SUBTASK_TYPE = /^sub-?task$/i;
 });
 
 // src/integrations/jira.ts
@@ -26398,7 +26848,7 @@ Current tool: ${toolName}`;
       throw error;
     }
   }
-  getMappedIssueFields() {
+  async getMappedIssueFields() {
     let fields;
     try {
       fields = getIssueFieldsParam(loadFieldMappings());
@@ -26406,7 +26856,8 @@ Current tool: ${toolName}`;
       logger.debug({ error }, "Ignoring invalid fieldMappings for getIssue");
     }
     const sprintFieldId = loadSprintPayloadSource()?.sprintFieldId;
-    const extra = sprintFieldId ? [...this.extraIssueFields, sprintFieldId] : this.extraIssueFields;
+    const extra = sprintFieldId ? [...this.extraIssueFields, sprintFieldId] : [...this.extraIssueFields];
+    extra.push(...await this.getHierarchyFieldIds());
     if (extra.length === 0)
       return fields;
     const list = (fields ?? DEFAULT_ISSUE_FIELDS.join(",")).split(",");
@@ -26415,6 +26866,43 @@ Current tool: ${toolName}`;
         list.push(id);
     }
     return list.join(",");
+  }
+  async getHierarchyFieldIds() {
+    if (!loadHierarchyConfig().parentLinks)
+      return [];
+    const epicLinkFieldId = await this.getEpicLinkFieldId();
+    return epicLinkFieldId ? ["parent", epicLinkFieldId] : ["parent"];
+  }
+  async getEpicLinkFieldId() {
+    const configured = loadHierarchyConfig().epicLinkField;
+    if (configured)
+      return configured === "parent" ? null : configured;
+    const url = process.env.JIRA_URL ?? "";
+    if (isJiraCloudUrl(url))
+      return null;
+    let discovered = epicLinkFieldIds.get(url);
+    if (!discovered) {
+      discovered = this.searchFields("epic link", 50).then((fields) => findEpicLinkFieldId(fields)).catch((error) => {
+        logger.debug({ error }, "Could not discover the Epic Link field");
+        epicLinkFieldIds.delete(url);
+        return null;
+      });
+      epicLinkFieldIds.set(url, discovered);
+    }
+    const id = await discovered;
+    logger.debug({ epicLinkFieldId: id }, "Epic Link field");
+    return id;
+  }
+  async setIssueParent(issueKey, parentKey, via) {
+    if (via === "parent") {
+      await this.updateIssue(issueKey, { fields: { parent: parentKey } });
+      return;
+    }
+    const fieldId = await this.getEpicLinkFieldId();
+    if (!fieldId) {
+      throw new Error("This Jira site has no Epic Link field; set jira.epicLinkField in .backlog-jira/config.json");
+    }
+    await this.updateIssue(issueKey, { fields: { [fieldId]: parentKey } });
   }
   includeIssueFields(fieldIds) {
     for (const id of fieldIds) {
@@ -26588,9 +27076,20 @@ Original error: ${message}`);
       if (options?.pageToken) {
         input.page_token = options.pageToken;
       }
-      if (options?.fields) {
-        input.fields = options.fields;
+      let fieldsParam = options?.fields;
+      const hierarchyFields = options?.parents ? await this.getHierarchyFieldIds() : [];
+      if (hierarchyFields.length > 0) {
+        const list = (fieldsParam ?? DEFAULT_ISSUE_FIELDS.join(",")).split(",");
+        for (const id of hierarchyFields) {
+          if (!list.includes(id))
+            list.push(id);
+        }
+        fieldsParam = list.join(",");
       }
+      if (fieldsParam) {
+        input.fields = fieldsParam;
+      }
+      const epicLinkFieldId = hierarchyFields.find((id) => id !== "parent");
       const result = await this.callMcpTool("jira_search", input);
       if (!result || !Array.isArray(result.issues)) {
         logger.error({ result }, "Invalid response from jira_search");
@@ -26622,7 +27121,8 @@ Original error: ${message}`);
           labels: fields.labels || [],
           created: fields.created,
           updated: fields.updated,
-          fields
+          fields,
+          ...hierarchyFields.length > 0 ? { parent: parseIssueParent(fields, epicLinkFieldId) } : {}
         };
       });
       logger.info({ jql, count: issues.length, total: result.total }, "Searched Jira issues");
@@ -26651,7 +27151,8 @@ Original error: ${message}`);
         startAt,
         maxResults: pageSize,
         fields: options.fields,
-        pageToken
+        pageToken,
+        parents: options.parents
       });
       let added = 0;
       for (const issue of page.issues) {
@@ -26689,7 +27190,7 @@ Original error: ${message}`);
         issue_key: issueKey
       };
       logger.info({ input }, "Built input object");
-      const fields = options?.fields ?? this.getMappedIssueFields();
+      const fields = options?.fields ?? await this.getMappedIssueFields();
       if (fields) {
         input.fields = fields;
       }
@@ -26721,6 +27222,9 @@ Original error: ${message}`);
         updated: typedResult.updated || "",
         fields: typedResult
       };
+      if (loadHierarchyConfig().parentLinks && (!options?.fields || /\bparent\b/.test(options.fields))) {
+        issue.parent = parseIssueParent(typedResult, await this.getEpicLinkFieldId());
+      }
       logger.info({ issueKey }, "Retrieved Jira issue");
       return issue;
     } catch (error) {
@@ -26997,346 +27501,17 @@ function getJsonErrorText(json) {
   }
   return messages.length > 0 ? messages.join("; ") : null;
 }
-var DEFAULT_SEARCH_ALL_LIMIT = 1000, MAX_AGILE_RESULTS = 5000;
+var DEFAULT_SEARCH_ALL_LIMIT = 1000, epicLinkFieldIds, MAX_AGILE_RESULTS = 5000;
 var init_jira = __esm(() => {
   init_client2();
   init_stdio2();
   init_field_mapping();
+  init_hierarchy_config();
   init_logger();
   init_sprint_payload();
+  init_jira_hierarchy();
   init_jira_sprints();
-});
-
-// src/state/frontmatter-store.ts
-import {
-  existsSync as existsSync5,
-  mkdirSync as mkdirSync4,
-  readFileSync as readFileSync7,
-  readdirSync as readdirSync2,
-  writeFileSync as writeFileSync6
-} from "node:fs";
-import { join as join6 } from "node:path";
-
-class FrontmatterStore {
-  snapshotsDir;
-  opsLogPath;
-  constructor(configDir) {
-    const baseDir = configDir || join6(process.cwd(), ".backlog-jira");
-    if (!existsSync5(baseDir)) {
-      mkdirSync4(baseDir, { recursive: true });
-    }
-    this.snapshotsDir = join6(baseDir, "snapshots");
-    this.opsLogPath = join6(baseDir, "ops-log.jsonl");
-    if (!existsSync5(this.snapshotsDir)) {
-      mkdirSync4(this.snapshotsDir, { recursive: true });
-    }
-    logger.debug({ baseDir, snapshotsDir: this.snapshotsDir }, "FrontmatterStore initialized");
-  }
-  addMapping(backlogId, jiraKey) {
-    try {
-      const filePath = getTaskFilePath(backlogId);
-      updateJiraMetadata(filePath, { jiraKey });
-      logger.debug({ backlogId, jiraKey }, "Added mapping");
-    } catch (error) {
-      logger.error({ error, backlogId, jiraKey }, "Failed to add mapping");
-      throw error;
-    }
-  }
-  getMapping(backlogId) {
-    try {
-      const filePath = getTaskFilePath(backlogId);
-      const metadata = getJiraMetadata(filePath);
-      if (!metadata.jiraKey) {
-        return null;
-      }
-      const { frontmatter } = parseFrontmatter(readFileSync7(filePath, "utf-8"));
-      return {
-        backlogId,
-        jiraKey: metadata.jiraKey,
-        createdAt: frontmatter.created || new Date().toISOString(),
-        updatedAt: frontmatter.updated || new Date().toISOString()
-      };
-    } catch (error) {
-      return null;
-    }
-  }
-  getMappingByJiraKey(jiraKey) {
-    try {
-      const tasksDir = join6(process.cwd(), "backlog", "tasks");
-      const files = readdirSync2(tasksDir).filter((f) => f.endsWith(".md"));
-      for (const file of files) {
-        const backlogId = taskIdFromFilePath(file);
-        if (!backlogId)
-          continue;
-        const frontmatter = readPluginFrontmatter(join6(tasksDir, file));
-        if (frontmatter.jira_key === jiraKey) {
-          return {
-            backlogId,
-            jiraKey,
-            createdAt: frontmatter.created || new Date().toISOString(),
-            updatedAt: frontmatter.updated || new Date().toISOString()
-          };
-        }
-      }
-      return null;
-    } catch (error) {
-      logger.error({ error, jiraKey }, "Failed to get mapping by Jira key");
-      return null;
-    }
-  }
-  getAllMappings() {
-    const mappings = new Map;
-    try {
-      const tasksDir = join6(process.cwd(), "backlog", "tasks");
-      const files = readdirSync2(tasksDir).filter((f) => f.endsWith(".md"));
-      for (const file of files) {
-        const backlogId = taskIdFromFilePath(file);
-        if (!backlogId)
-          continue;
-        const frontmatter = readPluginFrontmatter(join6(tasksDir, file));
-        if (frontmatter.jira_key) {
-          mappings.set(backlogId, frontmatter.jira_key);
-        }
-      }
-    } catch (error) {
-      logger.error({ error }, "Failed to get all mappings");
-    }
-    return mappings;
-  }
-  deleteMapping(backlogId) {
-    try {
-      const filePath = getTaskFilePath(backlogId);
-      updateJiraMetadata(filePath, {
-        jiraKey: undefined,
-        jiraLastSync: undefined,
-        jiraSyncState: undefined,
-        jiraUrl: undefined
-      });
-      logger.debug({ backlogId }, "Deleted mapping");
-    } catch (error) {
-      logger.error({ error, backlogId }, "Failed to delete mapping");
-      throw error;
-    }
-  }
-  getSnapshotPath(backlogId, side) {
-    return join6(this.snapshotsDir, `${normalizeTaskId(backlogId)}-${side}.json`);
-  }
-  setSnapshot(backlogId, side, hash, payload) {
-    const snapshotPath = this.getSnapshotPath(backlogId, side);
-    const snapshot = {
-      backlogId,
-      side,
-      hash,
-      payload: JSON.stringify(payload),
-      updatedAt: new Date().toISOString()
-    };
-    try {
-      writeFileSync6(snapshotPath, JSON.stringify(snapshot, null, 2), "utf-8");
-      logger.debug({ backlogId, side, hash }, "Set snapshot");
-    } catch (error) {
-      logger.error({ error, backlogId, side }, "Failed to set snapshot");
-      throw error;
-    }
-  }
-  getSnapshot(backlogId, side) {
-    const snapshotPath = this.getSnapshotPath(backlogId, side);
-    if (!existsSync5(snapshotPath)) {
-      return null;
-    }
-    try {
-      const content = readFileSync7(snapshotPath, "utf-8");
-      return JSON.parse(content);
-    } catch (error) {
-      logger.error({ error, backlogId, side }, "Failed to get snapshot");
-      return null;
-    }
-  }
-  getSnapshots(backlogId) {
-    return {
-      backlog: this.getSnapshot(backlogId, "backlog"),
-      jira: this.getSnapshot(backlogId, "jira")
-    };
-  }
-  updateSyncState(backlogId, updates) {
-    try {
-      const filePath = getTaskFilePath(backlogId);
-      const metadata = getJiraMetadata(filePath);
-      updateJiraMetadata(filePath, {
-        jiraKey: metadata.jiraKey,
-        jiraLastSync: updates.lastSyncAt ?? metadata.jiraLastSync,
-        jiraSyncState: updates.conflictState ?? metadata.jiraSyncState,
-        jiraUrl: metadata.jiraUrl
-      });
-      logger.debug({ backlogId, updates }, "Updated sync state");
-    } catch (error) {
-      logger.error({ error, backlogId, updates }, "Failed to update sync state");
-      throw error;
-    }
-  }
-  getSyncState(backlogId) {
-    try {
-      const filePath = getTaskFilePath(backlogId);
-      const metadata = getJiraMetadata(filePath);
-      return {
-        backlogId,
-        lastSyncAt: metadata.jiraLastSync || null,
-        conflictState: metadata.jiraSyncState || null,
-        strategy: null
-      };
-    } catch (error) {
-      return null;
-    }
-  }
-  logOperation(op, backlogId, jiraKey, outcome, details) {
-    const logEntry = {
-      id: Date.now(),
-      ts: new Date().toISOString(),
-      op,
-      backlogId,
-      jiraKey,
-      outcome,
-      details: details || null
-    };
-    try {
-      const line = `${JSON.stringify(logEntry)}
-`;
-      writeFileSync6(this.opsLogPath, line, { flag: "a", encoding: "utf-8" });
-      logger.debug({ op, backlogId, jiraKey, outcome }, "Logged operation");
-    } catch (error) {
-      logger.error({ error, op }, "Failed to log operation");
-    }
-  }
-  getRecentOps(limit = 100) {
-    if (!existsSync5(this.opsLogPath)) {
-      return [];
-    }
-    try {
-      const content = readFileSync7(this.opsLogPath, "utf-8");
-      const lines = content.trim().split(`
-`).filter((l) => l.trim());
-      const ops = lines.map((line) => {
-        try {
-          return JSON.parse(line);
-        } catch {
-          return null;
-        }
-      }).filter((op) => op !== null).reverse().slice(0, limit);
-      return ops;
-    } catch (error) {
-      logger.error({ error }, "Failed to get recent ops");
-      return [];
-    }
-  }
-  testWriteAccess() {
-    const testFile = join6(this.snapshotsDir, ".write-test");
-    try {
-      writeFileSync6(testFile, "test", "utf-8");
-      readFileSync7(testFile, "utf-8");
-      const { unlinkSync } = __require("node:fs");
-      unlinkSync(testFile);
-    } catch (error) {
-      logger.error({ error }, "Write access test failed");
-      throw new Error("Cannot write to .backlog-jira directory");
-    }
-  }
-  close() {
-    logger.debug("FrontmatterStore closed (no-op)");
-  }
-}
-var init_frontmatter_store = __esm(() => {
-  init_frontmatter();
-  init_logger();
-  init_task_links();
-});
-
-// src/state/store.ts
-var init_store = __esm(() => {
-  init_frontmatter_store();
-});
-
-// src/utils/config-file.ts
-import { existsSync as existsSync6, mkdirSync as mkdirSync5, readFileSync as readFileSync8, writeFileSync as writeFileSync7 } from "node:fs";
-import { join as join7 } from "node:path";
-function getConfigDir(cwd = process.cwd()) {
-  return join7(cwd, ".backlog-jira");
-}
-function getConfigPath(cwd = process.cwd()) {
-  return join7(getConfigDir(cwd), "config.json");
-}
-function createDefaultConfig() {
-  return {
-    jira: {
-      baseUrl: "",
-      projectKey: "",
-      issueType: "Task",
-      jqlFilter: ""
-    },
-    backlog: {
-      statusMapping: {
-        "To Do": ["To Do", "Open", "Backlog"],
-        "In Progress": ["In Progress"],
-        Done: ["Done", "Closed", "Resolved"]
-      }
-    },
-    sync: {
-      conflictStrategy: "prompt",
-      enableAnnotations: false,
-      watchInterval: 60
-    }
-  };
-}
-function bootstrapConfigDir(cwd = process.cwd()) {
-  const configDir = getConfigDir(cwd);
-  const created = !existsSync6(configDir);
-  mkdirSync5(join7(configDir, "logs"), { recursive: true });
-  const configPath = getConfigPath(cwd);
-  if (!existsSync6(configPath)) {
-    writeConfigFile(createDefaultConfig(), cwd);
-  }
-  const store = new FrontmatterStore(configDir);
-  store.close();
-  const gitignorePath = join7(configDir, ".gitignore");
-  if (!existsSync6(gitignorePath)) {
-    writeFileSync7(gitignorePath, CONFIG_DIR_GITIGNORE);
-  }
-  return created;
-}
-function readConfigFile(cwd = process.cwd()) {
-  const configPath = getConfigPath(cwd);
-  if (!existsSync6(configPath))
-    return null;
-  let parsed;
-  try {
-    parsed = JSON.parse(readFileSync8(configPath, "utf-8"));
-  } catch (error) {
-    throw new Error(`${configPath} contains invalid JSON: ${error instanceof Error ? error.message : String(error)}`);
-  }
-  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-    throw new Error(`${configPath} must contain a JSON object`);
-  }
-  return parsed;
-}
-function writeConfigFile(config, cwd = process.cwd()) {
-  writeFileSync7(getConfigPath(cwd), `${JSON.stringify(config, null, 2)}
-`);
-}
-function getSection(config, name) {
-  const section = config[name];
-  return section && typeof section === "object" && !Array.isArray(section) ? section : {};
-}
-function setSectionValues(config, name, values) {
-  config[name] = { ...getSection(config, name), ...values };
-  return config;
-}
-var CONFLICT_STRATEGIES;
-var init_config_file = __esm(() => {
-  init_store();
-  init_task_links();
-  CONFLICT_STRATEGIES = [
-    "prompt",
-    "prefer-backlog",
-    "prefer-jira"
-  ];
+  epicLinkFieldIds = new Map;
 });
 
 // src/utils/jira-config.ts
@@ -28060,17 +28235,303 @@ var init_setup = __esm(() => {
   REQUIRED_TOOLSETS = ["jira_projects", "jira_agile"];
 });
 
-// src/utils/status-mapping.ts
-import { existsSync as existsSync9, readFileSync as readFileSync11 } from "node:fs";
+// src/utils/id-resolver.ts
+import { existsSync as existsSync9, readFileSync as readFileSync11, readdirSync as readdirSync3 } from "node:fs";
 import { join as join10 } from "node:path";
+function createIdIndex(store, cwd = process.cwd()) {
+  const taskIds = listTaskIds(cwd);
+  const jiraKeyByTask = new Map;
+  const taskByJiraKey = new Map;
+  for (const [taskId, jiraKey] of store.getAllMappings()) {
+    const id = normalizeTaskId(taskId);
+    jiraKeyByTask.set(id, jiraKey);
+    taskByJiraKey.set(jiraKey.toUpperCase(), id);
+  }
+  const projectKey = readConfigFile(cwd)?.jira;
+  return {
+    taskIds,
+    jiraKeyByTask,
+    taskByJiraKey,
+    taskPrefix: readTaskPrefix(cwd),
+    projectKey: typeof projectKey?.projectKey === "string" && projectKey.projectKey ? projectKey.projectKey : undefined
+  };
+}
+function listTaskIds(cwd) {
+  const taskIds = new Set;
+  const tasksDir = join10(cwd, "backlog", "tasks");
+  if (existsSync9(tasksDir)) {
+    for (const file of readdirSync3(tasksDir)) {
+      const id = file.endsWith(".md") ? taskIdFromFilePath(file) : null;
+      if (id)
+        taskIds.add(id);
+    }
+  }
+  return taskIds;
+}
+function readTaskPrefix(cwd) {
+  try {
+    const content = readFileSync11(join10(cwd, "backlog", "config.yml"), "utf-8");
+    const match = content.match(/^task_prefix:\s*["']?([^"'\s#]+)["']?/m);
+    if (match)
+      return match[1];
+  } catch {}
+  return "task";
+}
+function resolveId(input, index) {
+  const trimmed = input.trim();
+  const normalized = normalizeTaskId(trimmed);
+  if (index.taskIds.has(normalized)) {
+    return {
+      input: trimmed,
+      kind: "task",
+      taskId: trimmed,
+      jiraKey: index.jiraKeyByTask.get(normalized)
+    };
+  }
+  const upper = trimmed.toUpperCase();
+  const linkedTask = index.taskByJiraKey.get(upper);
+  if (linkedTask) {
+    const jiraKey = index.jiraKeyByTask.get(linkedTask) ?? upper;
+    return { input: trimmed, kind: "jira", taskId: linkedTask, jiraKey };
+  }
+  const prefix = trimmed.match(KEY_PATTERN)?.[1];
+  if (prefix) {
+    const isProjectKey = index.projectKey !== undefined && prefix.toUpperCase() === index.projectKey.toUpperCase();
+    if (!isProjectKey && prefix.toLowerCase() === index.taskPrefix.toLowerCase()) {
+      return { input: trimmed, kind: "task", taskId: trimmed, missing: true };
+    }
+    if (!trimmed.includes(".")) {
+      return { input: trimmed, kind: "jira", jiraKey: upper };
+    }
+  }
+  return { input: trimmed, kind: "unknown" };
+}
+function resolveIds(inputs, index) {
+  return inputs.map((input) => resolveId(input, index));
+}
+function displayTaskId(taskId) {
+  return taskId.toUpperCase();
+}
+function formatIdPair(taskId, jiraKey) {
+  const task = displayTaskId(taskId);
+  return jiraKey ? `${task} ⇄ ${jiraKey}` : task;
+}
+function taskResolutionError(resolved) {
+  if (resolved.taskId && !resolved.missing)
+    return null;
+  if (resolved.kind === "task") {
+    return `Task ${resolved.input} not found`;
+  }
+  if (resolved.kind === "jira") {
+    return `${resolved.jiraKey} is a Jira key not linked to any Backlog task (link it with 'backlog-jira map link <taskId> ${resolved.jiraKey}' or import it with 'backlog-jira pull --import')`;
+  }
+  return `${resolved.input} is neither a Backlog task ID nor a linked Jira key`;
+}
+function resolveTaskArgs(inputs, store) {
+  const files = listTaskIds(process.cwd());
+  const index = inputs.every((input) => files.has(normalizeTaskId(input))) ? {
+    taskIds: files,
+    jiraKeyByTask: new Map,
+    taskByJiraKey: new Map,
+    taskPrefix: ""
+  } : createIdIndex(store);
+  const taskIds = [];
+  const errors = [];
+  const seen = new Set;
+  for (const input of inputs) {
+    const resolved = resolveId(input, index);
+    const error = taskResolutionError(resolved);
+    if (error || !resolved.taskId) {
+      errors.push({ input: resolved.input, error: error ?? "Unresolved" });
+      continue;
+    }
+    const key = normalizeTaskId(resolved.taskId);
+    if (seen.has(key))
+      continue;
+    seen.add(key);
+    taskIds.push(resolved.taskId);
+  }
+  return { taskIds, errors };
+}
+function resolveTaskArg(input, store) {
+  const { taskIds, errors } = resolveTaskArgs([input], store);
+  if (taskIds.length > 0)
+    return taskIds[0];
+  if (resolveId(input, createIdIndex(store)).kind === "jira") {
+    throw new Error(errors[0].error);
+  }
+  return input.trim();
+}
+function describeResolution(resolved, plain = false) {
+  const task = resolved.taskId ? displayTaskId(resolved.taskId) : "-";
+  const jira = resolved.jiraKey ?? "-";
+  const state = resolutionState(resolved);
+  if (plain) {
+    return `${resolved.input}	${state === "unknown" ? "-" : task}	${jira}	${state}`;
+  }
+  switch (state) {
+    case "linked":
+      return formatIdPair(resolved.taskId, resolved.jiraKey);
+    case "unlinked-task":
+      return `${task} (Backlog task, not linked to Jira)`;
+    case "unlinked-jira":
+      return `${jira} (Jira key, not linked to a Backlog task)`;
+    default:
+      return `${resolved.input} (unknown: no Backlog task or linked Jira issue)`;
+  }
+}
+function resolutionState(resolved) {
+  if (resolved.missing || resolved.kind === "unknown")
+    return "unknown";
+  if (resolved.taskId && resolved.jiraKey)
+    return "linked";
+  return resolved.kind === "task" ? "unlinked-task" : "unlinked-jira";
+}
+var KEY_PATTERN;
+var init_id_resolver = __esm(() => {
+  init_config_file();
+  init_task_links();
+  KEY_PATTERN = /^([A-Za-z][A-Za-z0-9_]*)-\d+(?:\.\d+)*$/;
+});
+
+// src/utils/task-parents.ts
+import { existsSync as existsSync10, readFileSync as readFileSync12, readdirSync as readdirSync4, writeFileSync as writeFileSync9 } from "node:fs";
+import { join as join11 } from "node:path";
+function taskFileId(taskId) {
+  try {
+    const { frontmatter } = parseFrontmatter(readFileSync12(getTaskFilePath(taskId), "utf-8"));
+    if (typeof frontmatter.id === "string" && frontmatter.id.trim()) {
+      return frontmatter.id.trim();
+    }
+  } catch (error) {
+    logger.debug({ error, taskId }, "Could not read task ID from its file");
+  }
+  return taskId.toUpperCase();
+}
+function setTaskParent(taskId, parentTaskId) {
+  const filePath = getTaskFilePath(taskId);
+  const content = readFileSync12(filePath, "utf-8");
+  const match = content.match(FRONTMATTER);
+  if (!match) {
+    throw new Error(`Task file of ${taskId} has no frontmatter`);
+  }
+  const yaml = match[1];
+  const line = parentTaskId ? `${PARENT_FRONTMATTER_KEY}: ${taskFileId(parentTaskId)}
+` : "";
+  let updated;
+  if (PARENT_LINE.test(yaml)) {
+    updated = yaml.replace(PARENT_LINE, line);
+  } else if (!line) {
+    return false;
+  } else {
+    const ordinal = yaml.match(/^ordinal:/m);
+    updated = ordinal?.index !== undefined ? `${yaml.slice(0, ordinal.index)}${line}${yaml.slice(ordinal.index)}` : `${yaml}${line}`;
+  }
+  if (updated === yaml)
+    return false;
+  writeFileSync9(filePath, `---
+${updated}---
+${content.slice(match[0].length)}`, "utf-8");
+  logger.debug({ taskId, parentTaskId }, "Set task parent");
+  return true;
+}
+function readTaskParents(cwd = process.cwd()) {
+  const parents = new Map;
+  const tasksDir = join11(cwd, "backlog", "tasks");
+  if (!existsSync10(tasksDir))
+    return parents;
+  for (const file of readdirSync4(tasksDir)) {
+    const taskId = taskIdFromFilePath(file);
+    if (!taskId || !file.endsWith(".md"))
+      continue;
+    try {
+      const { frontmatter } = parseFrontmatter(readFileSync12(join11(tasksDir, file), "utf-8"));
+      const parent = frontmatter[PARENT_FRONTMATTER_KEY];
+      parents.set(taskId, typeof parent === "string" && parent.trim() ? normalizeTaskId(parent) : null);
+    } catch (error) {
+      logger.debug({ error, file }, "Could not read task parent");
+    }
+  }
+  return parents;
+}
+function linkedJiraKey(taskId) {
+  try {
+    return getJiraMetadata(getTaskFilePath(taskId)).jiraKey ?? null;
+  } catch {
+    return readTaskLink(taskId)?.jiraKey ?? null;
+  }
+}
+function recordParentProblem(taskId, problem) {
+  const link = readTaskLink(taskId);
+  if (!link && !problem)
+    return;
+  if ((link?.parentProblem ?? null) === problem)
+    return;
+  try {
+    writeTaskLink(taskId, {
+      ...link ?? {},
+      parentProblem: problem ?? undefined
+    });
+  } catch (error) {
+    logger.warn({ error, taskId }, "Could not record parent link problem");
+  }
+}
+var PARENT_FRONTMATTER_KEY = "parent_task_id", PARENT_LINE, FRONTMATTER;
+var init_task_parents = __esm(() => {
+  init_frontmatter();
+  init_logger();
+  init_task_links();
+  PARENT_LINE = /^parent_task_id:[^\n]*\n/m;
+  FRONTMATTER = /^---\n([\s\S]*?\n)---\n/;
+});
+
+// src/utils/parent-payload.ts
+function getIssueParent(issue) {
+  if (issue.parent !== undefined)
+    return issue.parent;
+  return parseIssueParent(issue.fields);
+}
+function jiraParentValue(issue) {
+  return getIssueParent(issue)?.key.toUpperCase() ?? "";
+}
+function backlogParentValue(parentTaskId) {
+  if (!parentTaskId?.trim())
+    return "";
+  const parent = normalizeTaskId(parentTaskId);
+  const key = linkedJiraKey(parent);
+  return key ? key.toUpperCase() : `${UNLINKED_TASK_PREFIX}${parent}`;
+}
+function unlinkedParentTask(value) {
+  return value.startsWith(UNLINKED_TASK_PREFIX) ? value.slice(UNLINKED_TASK_PREFIX.length) : null;
+}
+function parentLinksEnabled() {
+  return loadHierarchyConfig().parentLinks;
+}
+var PARENT_PAYLOAD_KEY = "parent", UNLINKED_TASK_PREFIX = "task:", PARENT_LINK_MAPPING;
+var init_parent_payload = __esm(() => {
+  init_jira_hierarchy();
+  init_hierarchy_config();
+  init_task_links();
+  init_task_parents();
+  PARENT_LINK_MAPPING = Object.freeze({
+    backlog: PARENT_PAYLOAD_KEY,
+    jira: PARENT_PAYLOAD_KEY,
+    type: "parent",
+    direction: "both"
+  });
+});
+
+// src/utils/status-mapping.ts
+import { existsSync as existsSync11, readFileSync as readFileSync13 } from "node:fs";
+import { join as join12 } from "node:path";
 function loadStatusMapping(cwd = process.cwd()) {
-  const configPath = join10(cwd, ".backlog-jira", "config.json");
-  if (!existsSync9(configPath)) {
+  const configPath = join12(cwd, ".backlog-jira", "config.json");
+  if (!existsSync11(configPath)) {
     logger.debug("No config.json found, using default status mapping");
     return buildStatusMapping(getDefaultBacklogToJiraMapping());
   }
   try {
-    const config = JSON.parse(readFileSync11(configPath, "utf-8"));
+    const config = JSON.parse(readFileSync13(configPath, "utf-8"));
     return buildStatusMapping(config.backlog?.statusMapping || getDefaultBacklogToJiraMapping(), config.backlog?.projectOverrides);
   } catch (error) {
     logger.warn({ error }, "Failed to load status mapping config, using defaults");
@@ -28235,6 +28696,9 @@ function normalizeBacklogTask(task, options) {
       checked: ac.checked
     }))
   };
+  if (options?.parentLinks ?? parentLinksEnabled()) {
+    payload.parent = backlogParentValue(task.parent);
+  }
   const mappings = getMappedFieldMappings(options).filter((m) => !isCoreOverrideTarget(m.backlog));
   const sprint = getSprintSource(options);
   if (mappings.length > 0 || sprint) {
@@ -28259,6 +28723,9 @@ function normalizeJiraIssue(issue, options) {
     assignee: issue.assignee?.trim().toLowerCase(),
     acceptanceCriteria: extractAcceptanceCriteria(issue.description || "")
   };
+  if (options?.parentLinks ?? parentLinksEnabled()) {
+    payload.parent = jiraParentValue(issue);
+  }
   for (const mapping of getMappedFieldMappings(options)) {
     const value = getMappedJiraValue(issue, mapping);
     if (mapping.backlog === "priority") {
@@ -28359,6 +28826,9 @@ function computeHash(payload) {
     }
     stable.mappedFields = mappedFields;
   }
+  if (payload.parent) {
+    stable.parent = payload.parent;
+  }
   const json = JSON.stringify(stable);
   return crypto.createHash("sha256").update(json).digest("hex");
 }
@@ -28374,6 +28844,8 @@ function comparePayloads(a, b) {
     changes.push("priority");
   if (a.assignee !== b.assignee)
     changes.push("assignee");
+  if ((a.parent ?? "") !== (b.parent ?? ""))
+    changes.push("parent");
   if (JSON.stringify(a.labels) !== JSON.stringify(b.labels)) {
     changes.push("labels");
   }
@@ -28394,6 +28866,7 @@ function comparePayloads(a, b) {
 var CANONICAL_STATUS_TOKENS;
 var init_normalizer = __esm(() => {
   init_field_mapping();
+  init_parent_payload();
   init_sprint_payload();
   init_status_mapping();
   CANONICAL_STATUS_TOKENS = {
@@ -28404,13 +28877,16 @@ var init_normalizer = __esm(() => {
 
 // src/utils/mapped-field-sync.ts
 function formatMappedFieldFailures(issueKey, failures) {
-  const lines = failures.map((f) => `  - ${f.mapping.jira} (mapped to ${f.mapping.backlog}): ${firstLine(f.error)}`);
+  const lines = failures.map((f) => f.mapping.type === "parent" ? `  - parent: ${firstLine(f.error)}` : `  - ${f.mapping.jira} (mapped to ${f.mapping.backlog}): ${firstLine(f.error)}`);
   const hints = [];
-  if (failures.some((f) => f.mapping.type !== "sprint")) {
+  if (failures.some((f) => f.mapping.type !== "sprint" && f.mapping.type !== "parent")) {
     hints.push("Check the field is on the issue type's edit screen (backlog-jira doctor) or fix the mapping with backlog-jira map-fields.");
   }
   if (failures.some((f) => f.mapping.type === "sprint")) {
     hints.push("Check the milestone matches a future or active sprint on the configured board (backlog-jira doctor).");
+  }
+  if (failures.some((f) => f.mapping.type === "parent")) {
+    hints.push("The parent stays pending and is retried by the next push (backlog-jira doctor lists parent links that cannot be synced).");
   }
   return `Mapped field${failures.length === 1 ? "" : "s"} could not be updated on ${issueKey}:
 ${lines.join(`
@@ -28467,7 +28943,7 @@ async function createIssueWithMappedFields(jira, projectKey, issueType, summary,
   try {
     const issue = await jira.createIssue(projectKey, issueType, summary, {
       ...options,
-      ...mappedIds.length > 0 ? { fields: mapped.fields } : {}
+      ...mappedIds.length > 0 ? { fields: { ...options.fields, ...mapped.fields } } : {}
     });
     return { issue, failures: [...mapped.errors] };
   } catch (error) {
@@ -28491,6 +28967,9 @@ function payloadWithValuesFrom(payload, source, targets) {
       result.priority = source.priority;
     } else if (key === "labels") {
       result.labels = source.labels;
+    } else if (key === PARENT_PAYLOAD_KEY) {
+      if (result.parent !== undefined)
+        result.parent = source.parent ?? "";
     } else if (result.mappedFields) {
       result.mappedFields[key] = source.mappedFields?.[key] ?? "";
     }
@@ -28669,6 +29148,7 @@ var init_mapped_field_sync = __esm(() => {
   init_frontmatter();
   init_logger();
   init_normalizer();
+  init_parent_payload();
   MappedFieldPushError = class MappedFieldPushError extends Error {
     issueKey;
     failures;
@@ -28681,11 +29161,411 @@ var init_mapped_field_sync = __esm(() => {
   };
 });
 
+// src/utils/parent-sync.ts
+function createParentSyncContext(jira, store, options = {}) {
+  if (!(options.enabled ?? parentLinksEnabled()))
+    return null;
+  return {
+    jira,
+    taskForJiraKey: (jiraKey) => store.getMappingByJiraKey(jiraKey)?.backlogId ?? store.getMappingByJiraKey(jiraKey.toUpperCase())?.backlogId ?? null,
+    issues: new Map,
+    warnings: [],
+    dryRun: options.dryRun ?? false
+  };
+}
+function errorMessage2(error) {
+  return error instanceof Error ? error.message.split(`
+`)[0] : String(error);
+}
+function fetchIssue(ctx, key) {
+  let issue = ctx.issues.get(key);
+  if (!issue) {
+    issue = ctx.jira.getIssue(key);
+    ctx.issues.set(key, issue);
+    issue.catch(() => ctx.issues.delete(key));
+  }
+  return issue;
+}
+function describeParentValue(value, taskForJiraKey) {
+  if (!value)
+    return "(no parent)";
+  const unlinked = unlinkedParentTask(value);
+  if (unlinked)
+    return `${displayTaskId(unlinked)} (not linked to Jira)`;
+  const task = taskForJiraKey(value);
+  return task ? formatIdPair(task, value) : `${value} (not linked to a task)`;
+}
+function wouldCycle(taskId, parentId) {
+  const parents = readTaskParents();
+  let current = normalizeTaskId(parentId);
+  const seen = new Set;
+  while (current && !seen.has(current)) {
+    if (current === normalizeTaskId(taskId))
+      return true;
+    seen.add(current);
+    current = parents.get(current);
+  }
+  return false;
+}
+function pullTaskParent(ctx, taskId, task, issue) {
+  const jiraKey = jiraParentValue(issue);
+  const current = task.parent ? normalizeTaskId(task.parent) : null;
+  const pair = formatIdPair(taskId, issue.key);
+  let result;
+  if (!jiraKey) {
+    result = { changed: current !== null, applied: true };
+    if (current && !ctx.dryRun)
+      setTaskParent(taskId, null);
+  } else {
+    const linked = ctx.taskForJiraKey(jiraKey);
+    const target = linked ? normalizeTaskId(linked) : null;
+    if (!target) {
+      result = {
+        changed: false,
+        applied: false,
+        problem: `Jira parent ${jiraKey} is not linked to a Backlog task; import it (backlog-jira pull --import) or link it (backlog-jira map link <task> ${jiraKey}), then pull again`
+      };
+    } else if (target === current) {
+      result = { changed: false, applied: true };
+    } else if (wouldCycle(taskId, target)) {
+      result = {
+        changed: false,
+        applied: false,
+        problem: `Jira parent ${formatIdPair(target, jiraKey)} is a subtask of ${displayTaskId(taskId)} in Backlog, so it cannot become its parent`
+      };
+    } else {
+      result = { changed: true, applied: true };
+      if (!ctx.dryRun)
+        setTaskParent(taskId, target);
+    }
+  }
+  if (result.problem) {
+    ctx.warnings.push(`${pair}: parent not pulled: ${result.problem}`);
+  }
+  if (!ctx.dryRun)
+    recordParentProblem(taskId, result.problem ?? null);
+  logger.debug({ taskId, jiraKey, current, result }, "Pulled task parent");
+  return result;
+}
+function parentNeedsPull(ctx, task, issue, backlogSnapshot) {
+  const jiraKey = jiraParentValue(issue);
+  if (!jiraKey)
+    return false;
+  const linked = ctx.taskForJiraKey(jiraKey);
+  if (!linked)
+    return false;
+  const current = task.parent ? normalizeTaskId(task.parent) : null;
+  if (normalizeTaskId(linked) === current)
+    return false;
+  let base = "";
+  try {
+    base = JSON.parse(backlogSnapshot?.payload ?? "{}").parent ?? "";
+  } catch {
+    return false;
+  }
+  return base === backlogParentValue(task.parent);
+}
+async function epicLinkVia(ctx) {
+  const fieldId = ctx.jira.getEpicLinkFieldId ? await ctx.jira.getEpicLinkFieldId() : null;
+  return fieldId ? "epicLink" : "parent";
+}
+async function parentIssueKind(ctx, parentKey) {
+  try {
+    return { kind: kindOfIssue(await fetchIssue(ctx, parentKey)) };
+  } catch (error) {
+    return {
+      reason: `Jira parent ${parentKey} could not be fetched: ${errorMessage2(error)}`
+    };
+  }
+}
+async function planParentChange(ctx, issue, desired) {
+  const unlinked = unlinkedParentTask(desired);
+  if (unlinked) {
+    return {
+      ok: false,
+      reason: `parent ${displayTaskId(unlinked)} is not linked to Jira; create its issue (backlog-jira create-issue ${displayTaskId(unlinked)}), then push again`
+    };
+  }
+  const childKind = kindOfIssue({ ...issue, parent: getIssueParent(issue) });
+  if (!desired) {
+    if (childKind === "subtask") {
+      return {
+        ok: false,
+        reason: `${issue.key} is a Jira subtask and cannot lose its parent; convert it to a standard issue in Jira, or give the task a parent again`
+      };
+    }
+    return {
+      ok: true,
+      parentKey: null,
+      via: getIssueParent(issue)?.via ?? "parent"
+    };
+  }
+  if (desired === issue.key.toUpperCase()) {
+    return { ok: false, reason: `${issue.key} cannot be its own parent` };
+  }
+  if (childKind === "epic") {
+    return {
+      ok: false,
+      reason: `${issue.key} is an epic, and Jira epics cannot have a parent`
+    };
+  }
+  const parent = await parentIssueKind(ctx, desired);
+  if ("reason" in parent)
+    return { ok: false, reason: parent.reason };
+  switch (parent.kind) {
+    case "subtask":
+      return {
+        ok: false,
+        reason: `${desired} is a Jira subtask, and Jira cannot nest issues under a subtask`
+      };
+    case "epic":
+      if (childKind === "subtask") {
+        return {
+          ok: false,
+          reason: `${issue.key} is a Jira subtask; convert it to a standard issue in Jira before putting it under epic ${desired}`
+        };
+      }
+      return { ok: true, parentKey: desired, via: await epicLinkVia(ctx) };
+    default:
+      if (childKind !== "subtask") {
+        return {
+          ok: false,
+          reason: `${issue.key} is a standard issue; change its type to a subtask type in Jira before putting it under ${desired}`
+        };
+      }
+      return { ok: true, parentKey: desired, via: "parent" };
+  }
+}
+async function pushTaskParent(ctx, taskId, task, issue) {
+  const desired = backlogParentValue(task.parent);
+  if (desired === jiraParentValue(issue)) {
+    if (!ctx.dryRun)
+      recordParentProblem(taskId, null);
+    return { status: "unchanged" };
+  }
+  const plan = await planParentChange(ctx, issue, desired);
+  if (!plan.ok) {
+    if (!ctx.dryRun)
+      recordParentProblem(taskId, plan.reason);
+    return { status: "failed", reason: plan.reason };
+  }
+  if (ctx.dryRun)
+    return { status: "dry-run" };
+  try {
+    await ctx.jira.setIssueParent(issue.key, plan.parentKey, plan.via);
+  } catch (error) {
+    const reason = `Jira did not accept the parent change: ${errorMessage2(error)}`;
+    recordParentProblem(taskId, reason);
+    return { status: "failed", reason };
+  }
+  recordParentProblem(taskId, null);
+  logger.info({ taskId, issueKey: issue.key, parent: plan.parentKey, via: plan.via }, "Pushed task parent");
+  return { status: "updated" };
+}
+async function pushParentFailures(ctx, taskId, task, issue) {
+  if (!ctx)
+    return [];
+  const result = await pushTaskParent(ctx, taskId, task, issue);
+  return result.status === "failed" ? [{ mapping: PARENT_LINK_MAPPING, error: result.reason ?? "unknown" }] : [];
+}
+async function planIssueCreation(ctx, parentKey, issueType) {
+  const type = issueType.requested ?? issueType.default;
+  if (!parentKey) {
+    return { ok: true, issueType: type, parentKey: null, fields: {} };
+  }
+  if (/^epic$/i.test(type)) {
+    return {
+      ok: false,
+      reason: `an epic cannot have a parent in Jira (parent ${parentKey})`
+    };
+  }
+  const parent = await parentIssueKind(ctx, parentKey);
+  if ("reason" in parent)
+    return { ok: false, reason: parent.reason };
+  switch (parent.kind) {
+    case "subtask":
+      return {
+        ok: false,
+        reason: `${parentKey} is a Jira subtask, and Jira cannot nest issues under a subtask`
+      };
+    case "epic": {
+      if (/^sub-?task$/i.test(type)) {
+        return {
+          ok: false,
+          reason: `${parentKey} is an epic; issues under an epic are standard issues, not subtasks`
+        };
+      }
+      const fieldId = ctx.jira.getEpicLinkFieldId ? await ctx.jira.getEpicLinkFieldId() : null;
+      return {
+        ok: true,
+        issueType: type,
+        parentKey,
+        parentKind: "epic",
+        fields: fieldId ? { [fieldId]: parentKey } : { parent: parentKey }
+      };
+    }
+    default:
+      return {
+        ok: true,
+        issueType: issueType.requested ?? SUBTASK_ISSUE_TYPE,
+        parentKey,
+        parentKind: "standard",
+        fields: { parent: parentKey }
+      };
+  }
+}
+function parentKeyOfTask(task) {
+  const value = backlogParentValue(task.parent);
+  const unlinked = unlinkedParentTask(value);
+  if (unlinked) {
+    return {
+      reason: `parent task ${displayTaskId(unlinked)} is not linked to a Jira issue; create its issue first (backlog-jira create-issue ${displayTaskId(unlinked)})`
+    };
+  }
+  return { key: value || null };
+}
+function parentValue(payload) {
+  return payload?.parent ?? "";
+}
+function sideChanges2(state) {
+  const backlogNow = parentValue(state.current.backlog);
+  const jiraNow = parentValue(state.current.jira);
+  return {
+    backlogChanged: backlogNow !== parentValue(state.base.backlog),
+    jiraChanged: jiraNow !== parentValue(state.base.jira),
+    differ: backlogNow !== jiraNow
+  };
+}
+function detectParentConflict(state, ctx) {
+  if (!ctx || state.current.backlog.parent === undefined)
+    return null;
+  if (!state.base.backlog || !state.base.jira)
+    return null;
+  const { backlogChanged, jiraChanged, differ } = sideChanges2(state);
+  if (!backlogChanged || !jiraChanged || !differ)
+    return null;
+  const describe = (value) => describeParentValue(value, ctx.taskForJiraKey);
+  return {
+    field: PARENT_PAYLOAD_KEY,
+    backlogValue: describe(parentValue(state.current.backlog)),
+    jiraValue: describe(parentValue(state.current.jira)),
+    baseValue: describe(parentValue(state.base.backlog))
+  };
+}
+function planParentMerge(state, resolution) {
+  if (state.current.backlog.parent === undefined)
+    return null;
+  const { backlogChanged, jiraChanged, differ } = sideChanges2(state);
+  if (!differ)
+    return null;
+  if (resolution)
+    return resolution;
+  if (backlogChanged && !jiraChanged)
+    return "backlog";
+  if (jiraChanged && !backlogChanged)
+    return "jira";
+  return null;
+}
+async function applyParentMerge(side, ctx, taskId, task, issue) {
+  if (side === "jira") {
+    pullTaskParent(ctx, taskId, task, issue);
+    return [];
+  }
+  return pushParentFailures(ctx, taskId, task, issue);
+}
+function orderByParent(keys, parentOf) {
+  const inSet = new Set(keys.map((k) => k.toUpperCase()));
+  const depths = new Map;
+  const depth = (key, seen) => {
+    const known = depths.get(key);
+    if (known !== undefined)
+      return known;
+    const parent = parentOf.get(key)?.toUpperCase();
+    const value = parent && inSet.has(parent) && !seen.has(parent) ? depth(parent, new Set([...seen, key])) + 1 : 0;
+    depths.set(key, value);
+    return value;
+  };
+  const groups = [];
+  for (const key of keys) {
+    const d = depth(key.toUpperCase(), new Set([key.toUpperCase()]));
+    if (!groups[d])
+      groups[d] = [];
+    groups[d].push(key);
+  }
+  return groups.filter((group) => group && group.length > 0);
+}
+function findParentLinkProblems(parents, jiraKeyOf, recordedProblem) {
+  const problems = [];
+  for (const [taskId, parent] of parents) {
+    const jiraKey = jiraKeyOf(taskId) ?? undefined;
+    if (!jiraKey)
+      continue;
+    const recorded = recordedProblem(taskId);
+    if (recorded) {
+      problems.push({ taskId, jiraKey, problem: recorded });
+      continue;
+    }
+    if (!parent)
+      continue;
+    if (!jiraKeyOf(parent)) {
+      problems.push({
+        taskId,
+        jiraKey,
+        problem: `parent ${displayTaskId(parent)} is not linked to Jira (backlog-jira create-issue ${displayTaskId(parent)})`
+      });
+      continue;
+    }
+    let depth = 1;
+    let current = parents.get(parent);
+    const seen = new Set([taskId, parent]);
+    while (current && !seen.has(current)) {
+      depth++;
+      seen.add(current);
+      current = parents.get(current);
+    }
+    if (depth >= 3) {
+      problems.push({
+        taskId,
+        jiraKey,
+        problem: `nested ${depth + 1} levels deep in Backlog; Jira allows at most epic > issue > subtask`
+      });
+    }
+  }
+  return problems.sort((a, b) => a.taskId.localeCompare(b.taskId, undefined, { numeric: true }));
+}
+function formatParentSection(taskId, parents, jiraKeyOf, problem) {
+  const id = normalizeTaskId(taskId);
+  const parent = parents.get(id) ?? null;
+  const children = [...parents].filter(([, p]) => p === id).map(([child]) => child).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+  if (!parent && children.length === 0 && !problem)
+    return [];
+  const label = (task) => formatIdPair(task, jiraKeyOf(task));
+  const lines = ["", "Parent Links:", "-".repeat(50)];
+  lines.push(`Parent: ${parent ? label(parent) : "(none)"}`);
+  if (children.length > 0) {
+    lines.push(`Subtasks (${children.length}):`);
+    for (const child of children)
+      lines.push(`  - ${label(child)}`);
+  }
+  if (problem)
+    lines.push(`⚠ Not synced: ${problem}`);
+  return lines;
+}
+var SUBTASK_ISSUE_TYPE = "Subtask";
+var init_parent_sync = __esm(() => {
+  init_jira_hierarchy();
+  init_id_resolver();
+  init_logger();
+  init_parent_payload();
+  init_task_links();
+  init_task_parents();
+});
+
 // src/commands/doctor.ts
 import { spawn as spawn3 } from "node:child_process";
-import { existsSync as existsSync10 } from "node:fs";
+import { existsSync as existsSync12 } from "node:fs";
 import { readFile } from "node:fs/promises";
-import { join as join11 } from "node:path";
+import { join as join13 } from "node:path";
 async function exec(command, args = []) {
   return new Promise((resolve, reject) => {
     const proc = spawn3(command, args, {
@@ -28731,8 +29611,8 @@ async function checkMCPServer() {
   }
 }
 async function checkDatabasePerms() {
-  const configDir = join11(process.cwd(), ".backlog-jira");
-  if (!existsSync10(configDir)) {
+  const configDir = join13(process.cwd(), ".backlog-jira");
+  if (!existsSync12(configDir)) {
     throw new Error(".backlog-jira/ not found. Run 'backlog-jira init' first.");
   }
   const store = new FrontmatterStore;
@@ -28773,8 +29653,8 @@ async function checkMCPConnectivity() {
   }
 }
 async function checkNodeModules() {
-  const nodeModulesPath = join11(process.cwd(), "node_modules");
-  if (!existsSync10(nodeModulesPath)) {
+  const nodeModulesPath = join13(process.cwd(), "node_modules");
+  if (!existsSync12(nodeModulesPath)) {
     throw new Error("node_modules not found. Install dependencies first (npm, pnpm or bun install).");
   }
   logger.info("  ✓ Dependencies installed");
@@ -28794,8 +29674,8 @@ async function checkDiskSpace() {
   }
 }
 async function checkConfigFile(cwd = process.cwd()) {
-  const configPath = join11(cwd, ".backlog-jira", "config.json");
-  if (!existsSync10(configPath)) {
+  const configPath = join13(cwd, ".backlog-jira", "config.json");
+  if (!existsSync12(configPath)) {
     throw new Error("Config file not found. Run 'backlog-jira init' first.");
   }
   let config;
@@ -28819,7 +29699,7 @@ async function checkFieldMappings(jira, cwd = process.cwd()) {
     logger.info(loadSprintMapping(cwd) ? "  ✓ No field mappings besides the sprint mapping" : "  ✓ No field mappings configured");
     return [];
   }
-  const config = JSON.parse(await readFile(join11(cwd, ".backlog-jira", "config.json"), "utf8"));
+  const config = JSON.parse(await readFile(join13(cwd, ".backlog-jira", "config.json"), "utf8"));
   const projectKey = config.jira?.projectKey || process.env.JIRA_PROJECT || "";
   const issueType = config.jira?.issueType || "Task";
   let knownFields;
@@ -28953,6 +29833,49 @@ function findUnmatchedMilestones(taskIds, sprints, cwd) {
   }
   return unmatched;
 }
+async function checkParentLinks(jira, cwd = process.cwd()) {
+  const config = loadHierarchyConfig(cwd);
+  if (!config.parentLinks) {
+    logger.info("  ✓ Parent links are not synced (sync.parentLinks: false)");
+    return 0;
+  }
+  let warnings = 0;
+  if (config.epicLinkField) {
+    logger.info(config.epicLinkField === "parent" ? "  ✓ Epics are linked through the parent field (jira.epicLinkField)" : `  ✓ Epics are linked through ${config.epicLinkField} (jira.epicLinkField)`);
+  } else if (jira && !isJiraCloudUrl(process.env.JIRA_URL)) {
+    try {
+      const fieldId = findEpicLinkFieldId(await jira.searchFields("epic link", 50));
+      if (fieldId) {
+        logger.info(`  ✓ Epics are linked through the Epic Link field ${fieldId}`);
+      } else {
+        logger.warn('  ⚠ No Epic Link field found; epics are linked through the parent field. Set jira.epicLinkField to the Epic Link field id (or "parent") in .backlog-jira/config.json');
+        warnings++;
+      }
+    } catch (error) {
+      logger.warn(`  ⚠ Could not look up the Epic Link field: ${error instanceof Error ? error.message.split(`
+`)[0] : String(error)}`);
+      warnings++;
+    }
+  }
+  const problems = findParentLinkProblems(readTaskParents(cwd), linkedJiraKey, (taskId) => readTaskLink(taskId)?.parentProblem);
+  if (problems.length === 0) {
+    logger.info("  ✓ Parent links of linked tasks can be synced");
+    return warnings;
+  }
+  logger.warn(`  ⚠ ${problems.length} linked task${problems.length === 1 ? "" : "s"} ha${problems.length === 1 ? "s a parent link" : "ve parent links"} that cannot be synced:`);
+  for (const { taskId, jiraKey, problem } of problems) {
+    logger.warn(`    - ${formatIdPair(taskId, jiraKey)}: ${problem}`);
+  }
+  return warnings + problems.length;
+}
+async function checkParentLinksWithJira() {
+  const jira = new JiraClient({ ...getJiraClientOptions(), silentMode: true });
+  try {
+    return await checkParentLinks(jira);
+  } finally {
+    await jira.close().catch(() => {});
+  }
+}
 async function checkSprintSyncWithJira() {
   const jira = new JiraClient({ ...getJiraClientOptions(), silentMode: true });
   try {
@@ -28981,6 +29904,7 @@ async function runDoctor() {
     { name: "MCP Connectivity", fn: checkMCPConnectivity, critical: true },
     { name: "Field mappings", fn: checkFieldMappingsWithJira, critical: true },
     { name: "Sprint sync", fn: checkSprintSyncWithJira, critical: true },
+    { name: "Parent links", fn: checkParentLinksWithJira, critical: false },
     { name: "Backlog.md project", fn: checkMCPServer, critical: false },
     { name: "Git status", fn: checkGitStatus, critical: false },
     { name: "Disk space", fn: checkDiskSpace, critical: false }
@@ -29019,19 +29943,25 @@ async function doctorCommand() {
     process.exit(1);
 }
 var init_doctor = __esm(() => {
+  init_jira_hierarchy();
   init_jira();
   init_milestones();
   init_sprint_registry();
   init_store();
   init_field_mapping();
+  init_hierarchy_config();
+  init_id_resolver();
   init_jira_config();
   init_logger();
   init_mapped_field_sync();
+  init_parent_sync();
+  init_task_links();
+  init_task_parents();
 });
 
 // src/commands/configure.ts
-import { existsSync as existsSync11, readFileSync as readFileSync12, writeFileSync as writeFileSync9 } from "node:fs";
-import { join as join12 } from "node:path";
+import { existsSync as existsSync13, readFileSync as readFileSync14, writeFileSync as writeFileSync10 } from "node:fs";
+import { join as join14 } from "node:path";
 async function ask(question) {
   const name = String(question.name);
   let escaped = false;
@@ -29222,15 +30152,15 @@ async function offerEnvFile(ctx, values) {
     console.log(source_default.gray("  They are set for this session only. Export them before running backlog-jira again."));
     return;
   }
-  const envPath = join12(ctx.cwd, ".env");
-  const existing = existsSync11(envPath) ? readFileSync12(envPath, "utf-8") : "";
-  writeFileSync9(envPath, mergeEnvFile(existing, values), { mode: 384 });
+  const envPath = join14(ctx.cwd, ".env");
+  const existing = existsSync13(envPath) ? readFileSync14(envPath, "utf-8") : "";
+  writeFileSync10(envPath, mergeEnvFile(existing, values), { mode: 384 });
   console.log(source_default.green(`  ✓ Wrote ${envPath}`));
-  const gitignorePath = join12(ctx.cwd, ".gitignore");
-  const gitignore = existsSync11(gitignorePath) ? readFileSync12(gitignorePath, "utf-8") : "";
+  const gitignorePath = join14(ctx.cwd, ".gitignore");
+  const gitignore = existsSync13(gitignorePath) ? readFileSync14(gitignorePath, "utf-8") : "";
   if (!gitignore.split(`
 `).some((line) => line.trim() === ".env")) {
-    writeFileSync9(gitignorePath, `${gitignore}${gitignore && !gitignore.endsWith(`
+    writeFileSync10(gitignorePath, `${gitignore}${gitignore && !gitignore.endsWith(`
 `) ? `
 ` : ""}.env
 `);
@@ -30296,7 +31226,7 @@ ${step ? "" : `Step ${index + 1}/${steps.length}: `}${info.title}`));
       }
       const result = summary();
       console.log(source_default.gray(`
-  Saved ${join12(getConfigDir(cwd), "config.json")}`));
+  Saved ${join14(getConfigDir(cwd), "config.json")}`));
       if (!step) {
         await closeJira(ctx);
         console.log(source_default.bold.cyan(`
@@ -30350,7 +31280,7 @@ function configureNonInteractive(options) {
   if (Object.keys(sync).length > 0)
     setSectionValues(config, "sync", sync);
   writeConfigFile(config, cwd);
-  console.log(`Saved ${join12(getConfigDir(cwd), "config.json")}`);
+  console.log(`Saved ${join14(getConfigDir(cwd), "config.json")}`);
   if (!credentials.auth) {
     console.log(source_default.yellow(`Warning: not exported to this process: ${credentials.missing.join(", ")} (or JIRA_URL and JIRA_PERSONAL_TOKEN)`));
   }
@@ -30741,6 +31671,9 @@ class BacklogClient {
   }
   async createTask(options) {
     const args = ["task", "create", options.title];
+    if (options.parent) {
+      args.push("-p", options.parent);
+    }
     if (options.description) {
       args.push("-d", this.escapeMultiline(options.description));
     }
@@ -30848,7 +31781,9 @@ class BacklogClient {
       } else if (line.startsWith("Updated:")) {
         task.updatedAt = line.replace("Updated:", "").trim();
       } else if (line.startsWith("Parent:")) {
-        task.parent = line.replace("Parent:", "").trim();
+        const parent = line.replace("Parent:", "").trim().match(new RegExp(`^(${TASK_ID})`));
+        if (parent)
+          task.parent = normalizeTaskId(parent[1]);
       } else if (line.match(/^[-=]{2,}$/)) {} else if (line.endsWith(":") && !line.startsWith(" ")) {
         if (currentSection && sectionContent.length > 0) {
           this.assignSection(task, currentSection, sectionContent.join(`
@@ -30946,174 +31881,18 @@ async function connectCommand() {
 }
 
 // src/commands/create-issue.ts
-import { readFileSync as readFileSync14 } from "node:fs";
-import { join as join14 } from "node:path";
+import { readFileSync as readFileSync15 } from "node:fs";
+import { join as join15 } from "node:path";
 init_jira();
 init_store();
 init_field_mapping();
 init_frontmatter();
-
-// src/utils/id-resolver.ts
-init_config_file();
-init_task_links();
-import { existsSync as existsSync12, readFileSync as readFileSync13, readdirSync as readdirSync3 } from "node:fs";
-import { join as join13 } from "node:path";
-var KEY_PATTERN = /^([A-Za-z][A-Za-z0-9_]*)-\d+(?:\.\d+)*$/;
-function createIdIndex(store, cwd = process.cwd()) {
-  const taskIds = listTaskIds(cwd);
-  const jiraKeyByTask = new Map;
-  const taskByJiraKey = new Map;
-  for (const [taskId, jiraKey] of store.getAllMappings()) {
-    const id = normalizeTaskId(taskId);
-    jiraKeyByTask.set(id, jiraKey);
-    taskByJiraKey.set(jiraKey.toUpperCase(), id);
-  }
-  const projectKey = readConfigFile(cwd)?.jira;
-  return {
-    taskIds,
-    jiraKeyByTask,
-    taskByJiraKey,
-    taskPrefix: readTaskPrefix(cwd),
-    projectKey: typeof projectKey?.projectKey === "string" && projectKey.projectKey ? projectKey.projectKey : undefined
-  };
-}
-function listTaskIds(cwd) {
-  const taskIds = new Set;
-  const tasksDir = join13(cwd, "backlog", "tasks");
-  if (existsSync12(tasksDir)) {
-    for (const file of readdirSync3(tasksDir)) {
-      const id = file.endsWith(".md") ? taskIdFromFilePath(file) : null;
-      if (id)
-        taskIds.add(id);
-    }
-  }
-  return taskIds;
-}
-function readTaskPrefix(cwd) {
-  try {
-    const content = readFileSync13(join13(cwd, "backlog", "config.yml"), "utf-8");
-    const match = content.match(/^task_prefix:\s*["']?([^"'\s#]+)["']?/m);
-    if (match)
-      return match[1];
-  } catch {}
-  return "task";
-}
-function resolveId(input, index) {
-  const trimmed = input.trim();
-  const normalized = normalizeTaskId(trimmed);
-  if (index.taskIds.has(normalized)) {
-    return {
-      input: trimmed,
-      kind: "task",
-      taskId: trimmed,
-      jiraKey: index.jiraKeyByTask.get(normalized)
-    };
-  }
-  const upper = trimmed.toUpperCase();
-  const linkedTask = index.taskByJiraKey.get(upper);
-  if (linkedTask) {
-    const jiraKey = index.jiraKeyByTask.get(linkedTask) ?? upper;
-    return { input: trimmed, kind: "jira", taskId: linkedTask, jiraKey };
-  }
-  const prefix = trimmed.match(KEY_PATTERN)?.[1];
-  if (prefix) {
-    const isProjectKey = index.projectKey !== undefined && prefix.toUpperCase() === index.projectKey.toUpperCase();
-    if (!isProjectKey && prefix.toLowerCase() === index.taskPrefix.toLowerCase()) {
-      return { input: trimmed, kind: "task", taskId: trimmed, missing: true };
-    }
-    if (!trimmed.includes(".")) {
-      return { input: trimmed, kind: "jira", jiraKey: upper };
-    }
-  }
-  return { input: trimmed, kind: "unknown" };
-}
-function resolveIds(inputs, index) {
-  return inputs.map((input) => resolveId(input, index));
-}
-function displayTaskId(taskId) {
-  return taskId.toUpperCase();
-}
-function formatIdPair(taskId, jiraKey) {
-  const task = displayTaskId(taskId);
-  return jiraKey ? `${task} ⇄ ${jiraKey}` : task;
-}
-function taskResolutionError(resolved) {
-  if (resolved.taskId && !resolved.missing)
-    return null;
-  if (resolved.kind === "task") {
-    return `Task ${resolved.input} not found`;
-  }
-  if (resolved.kind === "jira") {
-    return `${resolved.jiraKey} is a Jira key not linked to any Backlog task (link it with 'backlog-jira map link <taskId> ${resolved.jiraKey}' or import it with 'backlog-jira pull --import')`;
-  }
-  return `${resolved.input} is neither a Backlog task ID nor a linked Jira key`;
-}
-function resolveTaskArgs(inputs, store) {
-  const files = listTaskIds(process.cwd());
-  const index = inputs.every((input) => files.has(normalizeTaskId(input))) ? {
-    taskIds: files,
-    jiraKeyByTask: new Map,
-    taskByJiraKey: new Map,
-    taskPrefix: ""
-  } : createIdIndex(store);
-  const taskIds = [];
-  const errors = [];
-  const seen = new Set;
-  for (const input of inputs) {
-    const resolved = resolveId(input, index);
-    const error = taskResolutionError(resolved);
-    if (error || !resolved.taskId) {
-      errors.push({ input: resolved.input, error: error ?? "Unresolved" });
-      continue;
-    }
-    const key = normalizeTaskId(resolved.taskId);
-    if (seen.has(key))
-      continue;
-    seen.add(key);
-    taskIds.push(resolved.taskId);
-  }
-  return { taskIds, errors };
-}
-function resolveTaskArg(input, store) {
-  const { taskIds, errors } = resolveTaskArgs([input], store);
-  if (taskIds.length > 0)
-    return taskIds[0];
-  if (resolveId(input, createIdIndex(store)).kind === "jira") {
-    throw new Error(errors[0].error);
-  }
-  return input.trim();
-}
-function describeResolution(resolved, plain = false) {
-  const task = resolved.taskId ? displayTaskId(resolved.taskId) : "-";
-  const jira = resolved.jiraKey ?? "-";
-  const state = resolutionState(resolved);
-  if (plain) {
-    return `${resolved.input}	${state === "unknown" ? "-" : task}	${jira}	${state}`;
-  }
-  switch (state) {
-    case "linked":
-      return formatIdPair(resolved.taskId, resolved.jiraKey);
-    case "unlinked-task":
-      return `${task} (Backlog task, not linked to Jira)`;
-    case "unlinked-jira":
-      return `${jira} (Jira key, not linked to a Backlog task)`;
-    default:
-      return `${resolved.input} (unknown: no Backlog task or linked Jira issue)`;
-  }
-}
-function resolutionState(resolved) {
-  if (resolved.missing || resolved.kind === "unknown")
-    return "unknown";
-  if (resolved.taskId && resolved.jiraKey)
-    return "linked";
-  return resolved.kind === "task" ? "unlinked-task" : "unlinked-jira";
-}
-
-// src/commands/create-issue.ts
+init_id_resolver();
 init_jira_config();
 init_logger();
 init_mapped_field_sync();
 init_normalizer();
+init_parent_sync();
 
 // src/utils/priority-mapping.ts
 init_field_mapping();
@@ -31150,6 +31929,8 @@ function hasJiraValueFor(backlogPriority, mapping) {
 }
 
 // src/commands/create-issue.ts
+init_task_links();
+init_task_parents();
 async function createIssue(options) {
   logger.info({ options }, "Starting create-issue operation");
   const { issueType, dryRun, configDir } = options;
@@ -31194,10 +31975,38 @@ async function createIssue(options) {
     const config = loadConfig(options.configDir);
     const projectKey = config.jira?.projectKey;
     const defaultIssueType = config.jira?.issueType || "Task";
-    const finalIssueType = issueType || defaultIssueType;
     if (!projectKey) {
       throw new Error("Jira project key not configured in .backlog-jira/config.json");
     }
+    const parents = createParentSyncContext(jira, store, {
+      dryRun,
+      enabled: options.parent ? true : undefined
+    });
+    const parent = parents ? resolveParent(options.parent, task, store) : { key: null };
+    if ("error" in parent) {
+      return { success: false, taskId, error: parent.error };
+    }
+    let plan = {
+      ok: true,
+      issueType: issueType || defaultIssueType,
+      parentKey: null,
+      fields: {}
+    };
+    if (parents && parent.key) {
+      plan = await planIssueCreation(parents, parent.key, {
+        requested: issueType,
+        default: defaultIssueType
+      });
+      if (!plan.ok) {
+        return {
+          success: false,
+          taskId,
+          error: `Cannot create the issue under ${parent.key}: ${plan.reason}`
+        };
+      }
+    }
+    const finalIssueType = plan.issueType;
+    const parentKey = plan.parentKey;
     const { mappings: allFieldMappings, errors: mappingErrors } = validateFieldMappings(config.fieldMappings);
     if (mappingErrors.length > 0) {
       throw new FieldMappingConfigError(mappingErrors);
@@ -31222,6 +32031,9 @@ async function createIssue(options) {
 \uD83D\uDD0D DRY RUN - Would create Jira issue:`);
       console.log(`  Project: ${projectKey}`);
       console.log(`  Issue Type: ${finalIssueType}`);
+      if (parentKey) {
+        console.log(`  Parent: ${parentKey}${plan.parentKind === "epic" ? " (epic)" : ""}`);
+      }
       console.log(`  Summary: ${issueData.summary}`);
       console.log(`  Description: ${issueData.description?.substring(0, 100)}...`);
       console.log(`  Status: ${issueData.status || "Default"}`);
@@ -31237,7 +32049,9 @@ async function createIssue(options) {
       }
       return {
         success: true,
-        taskId
+        taskId,
+        issueType: finalIssueType,
+        ...parentKey ? { parentKey } : {}
       };
     }
     logger.info({ taskId, projectKey, issueType: finalIssueType }, "Creating Jira issue");
@@ -31245,17 +32059,38 @@ async function createIssue(options) {
       description: issueData.description,
       assignee: issueData.assignee,
       priority: issueData.priority,
-      labels: issueData.labels
+      labels: issueData.labels,
+      ...Object.keys(plan.fields).length > 0 ? { fields: plan.fields } : {}
     }, mappedUpdates);
     logger.info({ taskId, jiraKey: createdIssue.key }, "Successfully created Jira issue");
     store.addMapping(taskId, createdIssue.key);
     logger.debug({ taskId, jiraKey: createdIssue.key }, "Created task-Jira mapping");
+    if (parent.taskId && parent.taskId !== task.parent) {
+      if (wouldCycle(taskId, parent.taskId)) {
+        logger.warn({ taskId, parent: parent.taskId }, "Parent is a subtask of the task in Backlog; Backlog parent left unchanged");
+      } else {
+        setTaskParent(taskId, parent.taskId);
+        task = { ...task, parent: parent.taskId };
+      }
+    }
     if (failures.length > 0) {
       recordPartialPush(store, taskId, task, await jira.getIssue(createdIssue.key), failures);
     } else {
-      const backlogHash = computeHash(normalizeBacklogTask(task));
-      store.setSnapshot(taskId, "backlog", backlogHash, normalizeBacklogTask(task));
-      store.setSnapshot(taskId, "jira", backlogHash, normalizeJiraIssue(createdIssue));
+      const backlogPayload = normalizeBacklogTask(task);
+      const backlogHash = computeHash(backlogPayload);
+      const jiraPayload = normalizeJiraIssue(createdIssue);
+      let jiraHash = backlogHash;
+      if (jiraPayload.parent !== undefined) {
+        jiraPayload.parent = parentKey ?? "";
+        if (backlogPayload.parent !== jiraPayload.parent) {
+          jiraHash = computeHash({
+            ...backlogPayload,
+            parent: jiraPayload.parent
+          });
+        }
+      }
+      store.setSnapshot(taskId, "backlog", backlogHash, backlogPayload);
+      store.setSnapshot(taskId, "jira", jiraHash, jiraPayload);
       store.updateSyncState(taskId, {
         lastSyncAt: new Date().toISOString()
       });
@@ -31279,6 +32114,8 @@ async function createIssue(options) {
       success: true,
       taskId,
       jiraKey: createdIssue.key,
+      issueType: finalIssueType,
+      ...parentKey ? { parentKey } : {},
       ...failures.length > 0 ? {
         warnings: [formatMappedFieldFailures(createdIssue.key, failures)]
       } : {}
@@ -31296,6 +32133,39 @@ async function createIssue(options) {
     store.close();
     await jira.close();
   }
+}
+function resolveParent(explicit, task, store) {
+  if (!explicit) {
+    const own = parentKeyOfTask(task);
+    if ("reason" in own) {
+      return {
+        error: `Cannot create a Jira issue for ${displayTaskId(task.id)}: its ${own.reason}, or pass --parent <JIRA-KEY>`
+      };
+    }
+    return own.key && task.parent ? { key: own.key, taskId: normalizeTaskId(task.parent) } : { key: own.key };
+  }
+  const resolved = resolveId(explicit, createIdIndex(store));
+  if (resolved.kind === "task" && !resolved.missing && resolved.taskId) {
+    const parentTask = normalizeTaskId(resolved.taskId);
+    if (parentTask === normalizeTaskId(task.id)) {
+      return { error: "A task cannot be its own parent" };
+    }
+    if (!resolved.jiraKey) {
+      return {
+        error: `Parent task ${displayTaskId(parentTask)} is not linked to a Jira issue; create its issue first (backlog-jira create-issue ${displayTaskId(parentTask)})`
+      };
+    }
+    return { key: resolved.jiraKey, taskId: parentTask };
+  }
+  if (resolved.kind === "jira" && resolved.jiraKey) {
+    return resolved.taskId ? {
+      key: resolved.jiraKey,
+      taskId: normalizeTaskId(resolved.taskId)
+    } : { key: resolved.jiraKey };
+  }
+  return {
+    error: `--parent ${explicit} is neither a Jira key nor a Backlog task (${resolved.missing ? "task not found" : "unrecognised ID"})`
+  };
 }
 function buildJiraIssueFromBacklogTask(task, priorityMapping) {
   const summary = task.title;
@@ -31315,9 +32185,9 @@ function buildJiraIssueFromBacklogTask(task, priorityMapping) {
 }
 function loadConfig(configDir) {
   try {
-    const baseDir = configDir || join14(process.cwd(), ".backlog-jira");
-    const configPath = join14(baseDir, "config.json");
-    const content = readFileSync14(configPath, "utf-8");
+    const baseDir = configDir || join15(process.cwd(), ".backlog-jira");
+    const configPath = join15(baseDir, "config.json");
+    const content = readFileSync15(configPath, "utf-8");
     return JSON.parse(content);
   } catch (error) {
     logger.warn({ error }, "Failed to load config, using defaults");
@@ -31331,11 +32201,11 @@ init_doctor();
 // src/commands/init.ts
 init_source();
 var import_prompts2 = __toESM(require_prompts3(), 1);
-import { existsSync as existsSync14 } from "node:fs";
-import { join as join15 } from "node:path";
+import { existsSync as existsSync15 } from "node:fs";
+import { join as join16 } from "node:path";
 
 // src/utils/agent-instructions.ts
-import { existsSync as existsSync13, readFileSync as readFileSync15, writeFileSync as writeFileSync10 } from "node:fs";
+import { existsSync as existsSync14, readFileSync as readFileSync16, writeFileSync as writeFileSync11 } from "node:fs";
 function getMarkers(filePath) {
   const fileName = filePath.toLowerCase();
   if (fileName.endsWith(".md")) {
@@ -31418,6 +32288,17 @@ Backlog task IDs (\`TASK-12\`) and Jira keys (\`<PROJECT>-<n>\`, e.g. \`PROJ-77\
 - \`backlog-jira\` commands that take a task (\`view\`, \`push\`, \`pull\`, \`sync\`, \`map link\`, \`create-issue\`) also accept the Jira key of its linked issue.
 - \`backlog\` commands take task IDs only: never pass a Jira key where a task ID is expected (\`backlog task edit <id>\`, \`--dep\`, \`-p\`). Resolve it to its task ID first.
 - When writing task text, refer to tasks by task ID and to Jira issues by Jira key.
+
+## Parent and Epic Links
+
+Task parents (\`parent_task_id\`, shown by Backlog.md as subtasks) are synced with Jira parents and epics, compared by linked Jira key:
+
+- **Pull**: a task's parent follows its issue's parent or epic (Epic Link on Jira Server/Data Center). \`pull --import\` imports parents before children and creates children as subtasks of their parent's task. An issue whose Jira parent is not linked to a task is reported, and a later pull sets the parent once it is linked.
+- **Push**: a change of the task's parent sets, changes or clears the issue's parent. Jira only allows epic > standard issue > subtask and the plugin never changes issue types, so a subtask of a subtask, a standard issue under a standard issue, or a parent task not linked to Jira is reported and left pending.
+- **Sync**: one-sided changes propagate; changes on both sides follow the conflict strategy (\`parent\` in the prompt).
+- **create-issue**: a task whose parent is linked becomes a subtask of the parent's issue, or a standard issue when that parent is an epic. \`--parent <JIRA-KEY|TASK-ID>\` picks the parent; a parent task not linked yet needs its own issue first (\`backlog-jira create-issue <parent-task>\`).
+
+Create subtasks with \`backlog task create "Title" -p <parent-task-id>\`. \`backlog task edit\` cannot change an existing task's parent, so change it in Jira and pull; do not edit \`parent_task_id\` in task files. \`backlog-jira view <task-id>\` shows a task's parent and subtasks as \`TASK ⇄ KEY\` pairs and \`backlog-jira doctor\` lists parent links that cannot be synced. Turn off with \`"sync": { "parentLinks": false }\`; set \`jira.epicLinkField\` when the Epic Link field is not found. See \`docs/parent-sync.md\`.
 
 ## Configuration
 
@@ -31606,13 +32487,13 @@ export JIRA_API_TOKEN="your-api-token"
 }
 function addAgentInstructions(filePath, mode = "cli") {
   try {
-    if (!existsSync13(filePath)) {
+    if (!existsSync14(filePath)) {
       return {
         success: false,
         message: `File not found: ${filePath}`
       };
     }
-    const currentContent = readFileSync15(filePath, "utf-8");
+    const currentContent = readFileSync16(filePath, "utf-8");
     const guidelinesContent = mode === "cli" ? getCliModeContent() : getMcpModeContent();
     let newContent = currentContent;
     if (hasBacklogJiraGuidelines(currentContent)) {
@@ -31622,7 +32503,7 @@ function addAgentInstructions(filePath, mode = "cli") {
     newContent = `${wrappedContent}
 
 ${newContent.trimStart()}`;
-    writeFileSync10(filePath, newContent, "utf-8");
+    writeFileSync11(filePath, newContent, "utf-8");
     return {
       success: true,
       message: `Successfully added ${mode.toUpperCase()} mode guidelines to ${filePath}`
@@ -31641,7 +32522,7 @@ init_logger();
 async function initCommand(options = {}) {
   const baseDir = options.baseDir || process.cwd();
   const configDir = getConfigDir(baseDir);
-  if (existsSync14(configDir)) {
+  if (existsSync15(configDir)) {
     console.log(source_default.yellow(".backlog-jira/ already exists. Use 'backlog-jira configure' to modify settings."));
     return;
   }
@@ -31651,8 +32532,8 @@ async function initCommand(options = {}) {
   console.log("");
   console.log(source_default.green("✓ Initialized .backlog-jira/ configuration"));
   console.log(`  - Config: ${configPath}`);
-  console.log(`  - Snapshots: ${join15(configDir, "snapshots/")}`);
-  console.log(`  - Operations log: ${join15(configDir, "ops-log.jsonl")}`);
+  console.log(`  - Snapshots: ${join16(configDir, "snapshots/")}`);
+  console.log(`  - Operations log: ${join16(configDir, "ops-log.jsonl")}`);
   await offerGuidedSetup(baseDir, options.runWizard);
 }
 async function offerGuidedSetup(baseDir, runWizard) {
@@ -31711,7 +32592,7 @@ async function setupAgentInstructions(projectRoot) {
     ".cursorrules",
     ".github/AGENTS.md"
   ];
-  const existingFiles = commonAgentFiles.map((file) => join15(projectRoot, file)).filter((filePath) => existsSync14(filePath));
+  const existingFiles = commonAgentFiles.map((file) => join16(projectRoot, file)).filter((filePath) => existsSync15(filePath));
   if (existingFiles.length === 0) {
     console.log(source_default.yellow("No agent instruction files found in project root (AGENTS.md, CLAUDE.md, etc.)"));
     console.log(source_default.gray("Create an agent instruction file first, then re-run initialization."));
@@ -31792,7 +32673,7 @@ async function offerGitCommit(files, mode) {
   const { exec } = await import("node:child_process");
   const { promisify } = await import("node:util");
   const execAsync = promisify(exec);
-  const projectRoot = files[0] ? join15(files[0], "..") : process.cwd();
+  const projectRoot = files[0] ? join16(files[0], "..") : process.cwd();
   try {
     await execAsync("git rev-parse --git-dir", { cwd: projectRoot });
   } catch {
@@ -31848,8 +32729,8 @@ init_jira();
 init_assignee_mapping();
 init_jira_config();
 init_logger();
-import { existsSync as existsSync15, readFileSync as readFileSync16, writeFileSync as writeFileSync11 } from "node:fs";
-import { join as join16 } from "node:path";
+import { existsSync as existsSync16, readFileSync as readFileSync17, writeFileSync as writeFileSync12 } from "node:fs";
+import { join as join17 } from "node:path";
 import { stdin as input, stdout as output } from "node:process";
 import * as readline from "node:readline/promises";
 async function showMappings() {
@@ -31860,13 +32741,13 @@ async function showMappings() {
   console.log();
 }
 async function addMapping(backlogUser, jiraUser, options = {}) {
-  const configPath = join16(process.cwd(), ".backlog-jira", "config.json");
-  if (!existsSync15(configPath)) {
+  const configPath = join17(process.cwd(), ".backlog-jira", "config.json");
+  if (!existsSync16(configPath)) {
     console.error(source_default.red("❌ Configuration not found"));
     console.log(source_default.gray("   Run 'backlog-jira init' first"));
     process.exit(1);
   }
-  const content = readFileSync16(configPath, "utf-8");
+  const content = readFileSync17(configPath, "utf-8");
   const config = JSON.parse(content);
   if (!config.backlog) {
     config.backlog = {};
@@ -31882,18 +32763,18 @@ async function addMapping(backlogUser, jiraUser, options = {}) {
     process.exit(1);
   }
   config.backlog.assigneeMapping[cleanBacklogUser] = jiraUser;
-  writeFileSync11(configPath, JSON.stringify(config, null, 2));
+  writeFileSync12(configPath, JSON.stringify(config, null, 2));
   console.log(source_default.green(`✓ Added mapping: @${cleanBacklogUser} → ${jiraUser}`));
   logger.info({ backlogUser: cleanBacklogUser, jiraUser }, "Added assignee mapping");
 }
 async function removeMapping2(backlogUser) {
-  const configPath = join16(process.cwd(), ".backlog-jira", "config.json");
-  if (!existsSync15(configPath)) {
+  const configPath = join17(process.cwd(), ".backlog-jira", "config.json");
+  if (!existsSync16(configPath)) {
     console.error(source_default.red("❌ Configuration not found"));
     console.log(source_default.gray("   Run 'backlog-jira init' first"));
     process.exit(1);
   }
-  const content = readFileSync16(configPath, "utf-8");
+  const content = readFileSync17(configPath, "utf-8");
   const config = JSON.parse(content);
   const cleanBacklogUser = backlogUser.startsWith("@") ? backlogUser.substring(1) : backlogUser;
   const explicitMapping = config.backlog?.assigneeMapping?.[cleanBacklogUser];
@@ -31912,17 +32793,17 @@ async function removeMapping2(backlogUser) {
     delete config.backlog.autoMappedAssignees[cleanBacklogUser];
     console.log(source_default.green(`✓ Removed auto-discovered mapping: @${cleanBacklogUser} → ${jiraUser}`));
   }
-  writeFileSync11(configPath, JSON.stringify(config, null, 2));
+  writeFileSync12(configPath, JSON.stringify(config, null, 2));
   logger.info({ backlogUser: cleanBacklogUser, jiraUser }, "Removed assignee mapping");
 }
 async function promoteMapping(backlogUser) {
-  const configPath = join16(process.cwd(), ".backlog-jira", "config.json");
-  if (!existsSync15(configPath)) {
+  const configPath = join17(process.cwd(), ".backlog-jira", "config.json");
+  if (!existsSync16(configPath)) {
     console.error(source_default.red("❌ Configuration not found"));
     console.log(source_default.gray("   Run 'backlog-jira init' first"));
     process.exit(1);
   }
-  const content = readFileSync16(configPath, "utf-8");
+  const content = readFileSync17(configPath, "utf-8");
   const config = JSON.parse(content);
   const cleanBacklogUser = backlogUser.startsWith("@") ? backlogUser.substring(1) : backlogUser;
   const autoMapping = config.backlog?.autoMappedAssignees?.[cleanBacklogUser];
@@ -31938,7 +32819,7 @@ async function promoteMapping(backlogUser) {
   }
   config.backlog.assigneeMapping[cleanBacklogUser] = autoMapping;
   delete config.backlog.autoMappedAssignees[cleanBacklogUser];
-  writeFileSync11(configPath, JSON.stringify(config, null, 2));
+  writeFileSync12(configPath, JSON.stringify(config, null, 2));
   console.log(source_default.green(`✓ Promoted auto-discovered mapping to explicit: @${cleanBacklogUser} → ${autoMapping}`));
   logger.info({ backlogUser: cleanBacklogUser, jiraUser: autoMapping }, "Promoted auto-discovered mapping to explicit");
 }
@@ -32057,6 +32938,7 @@ import * as readline2 from "node:readline/promises";
 init_jira();
 init_store();
 init_frontmatter();
+init_id_resolver();
 init_jira_config();
 init_logger();
 init_normalizer();
@@ -32348,8 +33230,8 @@ function registerMapCommand(program) {
 // src/commands/mcp.ts
 init_source();
 import { spawn as spawn5 } from "node:child_process";
-import { existsSync as existsSync16, readFileSync as readFileSync17 } from "node:fs";
-import { join as join17 } from "node:path";
+import { existsSync as existsSync17, readFileSync as readFileSync18 } from "node:fs";
+import { join as join18 } from "node:path";
 function registerMcpCommand(program) {
   const mcpCommand = program.command("mcp").description("MCP Atlassian server management");
   mcpCommand.command("start").description("Start MCP Atlassian server using plugin configuration").option("--debug", "Print startup info and debug output").option("-v, --verbose", "Display docker commands being executed").option("--dns-servers <servers...>", "DNS server IPs for the MCP server process (e.g., 8.8.8.8 1.1.1.1)").option("--dns-search-domains <domains...>", "DNS search domains for the MCP server process (e.g., company.com internal.local)").action(async (options) => {
@@ -32434,8 +33316,8 @@ function validateAndPrepareCredentials(debug) {
   return envVars;
 }
 function loadMcpConfiguration(debug) {
-  const configDir = join17(process.cwd(), ".backlog-jira");
-  const configPath = join17(configDir, "config.json");
+  const configDir = join18(process.cwd(), ".backlog-jira");
+  const configPath = join18(configDir, "config.json");
   const defaultConfig = {
     serverCommand: "mcp-atlassian",
     serverArgs: [],
@@ -32444,14 +33326,14 @@ function loadMcpConfiguration(debug) {
     dnsServers: [],
     dnsSearchDomains: []
   };
-  if (!existsSync16(configPath)) {
+  if (!existsSync17(configPath)) {
     if (debug) {
       console.log(source_default.yellow("⚠ No config.json found, using defaults"));
     }
     return defaultConfig;
   }
   try {
-    const configContent = readFileSync17(configPath, "utf-8");
+    const configContent = readFileSync18(configPath, "utf-8");
     const config = JSON.parse(configContent);
     const mcpConfig = {
       ...defaultConfig,
@@ -32616,17 +33498,20 @@ function logDockerCommand(command, args) {
 }
 
 // src/commands/pull.ts
-import { existsSync as existsSync17, readFileSync as readFileSync18 } from "node:fs";
-import { join as join18 } from "node:path";
+import { existsSync as existsSync18, readFileSync as readFileSync19 } from "node:fs";
+import { join as join19 } from "node:path";
 init_jira();
 init_store();
 init_assignee_mapping();
 init_field_mapping();
 init_frontmatter();
+init_id_resolver();
 init_jira_config();
 init_logger();
 init_mapped_field_sync();
 init_normalizer();
+init_parent_payload();
+init_parent_sync();
 init_sprint_pull();
 init_status_mapping();
 
@@ -32648,6 +33533,9 @@ function classifySyncState(currentBacklogHash, currentJiraHash, backlogSnapshot,
       backlogHash: currentBacklogHash,
       jiraHash: currentJiraHash
     };
+  }
+  if (currentPayloads && currentPayloads.backlog.parent !== undefined && (lacksParent(backlogSnapshot) || lacksParent(jiraSnapshot))) {
+    return classifyWithoutParent(currentPayloads, backlogSnapshot, jiraSnapshot, options);
   }
   const baseBacklogHash = backlogSnapshot.hash;
   const baseJiraHash = jiraSnapshot.hash;
@@ -32696,6 +33584,37 @@ function classifySyncState(currentBacklogHash, currentJiraHash, backlogSnapshot,
     jiraHash: currentJiraHash,
     baseBacklogHash,
     baseJiraHash
+  };
+}
+function lacksParent(snapshot) {
+  const payload = parseSnapshotPayload(snapshot);
+  return payload !== null && !("parent" in payload);
+}
+function classifyWithoutParent(current, backlogSnapshot, jiraSnapshot, options) {
+  const { parent: backlogParent = "", ...backlog } = current.backlog;
+  const { parent: jiraParent = "", ...jira } = current.jira;
+  const inner = classifySyncState(computeHash(backlog), computeHash(jira), backlogSnapshot, jiraSnapshot, { backlog, jira }, options);
+  let backlogChanged = inner.state === "NeedsPush" || inner.state === "Conflict";
+  let jiraChanged = inner.state === "NeedsPull" || inner.state === "Conflict";
+  if (backlogParent !== jiraParent) {
+    if (backlogParent)
+      backlogChanged = true;
+    if (jiraParent)
+      jiraChanged = true;
+  }
+  let state = "InSync";
+  if (backlogChanged && jiraChanged)
+    state = "Conflict";
+  else if (backlogChanged)
+    state = "NeedsPush";
+  else if (jiraChanged)
+    state = "NeedsPull";
+  logger.debug({ backlogParent, jiraParent, state }, "Classified against a snapshot without parents");
+  return {
+    ...inner,
+    state,
+    backlogHash: computeHash(current.backlog),
+    jiraHash: computeHash(current.jira)
   };
 }
 function mappedFieldKeys(payload) {
@@ -32801,6 +33720,9 @@ function applyMappingDirections(current, backlogSnapshot, jiraSnapshot, directio
   return result;
 }
 
+// src/commands/pull.ts
+init_task_parents();
+
 // src/utils/title-sanitizer.ts
 init_logger();
 function sanitizeTitle(title) {
@@ -32846,6 +33768,7 @@ async function pull(options = {}) {
   };
   let sprints = null;
   let warningsFrom = 0;
+  const parents = options.parentContext !== undefined ? options.parentContext : createParentSyncContext(jira, store, { dryRun: options.dryRun });
   try {
     sprints = options.sprintContext !== undefined ? options.sprintContext : await createSprintPullContext(sprintMapping, { jira, backlog }, { dryRun: options.dryRun });
     if (sprints && options.sprintContext) {
@@ -32864,14 +33787,21 @@ async function pull(options = {}) {
       result.failed.push({ taskId: input, error });
       result.success = false;
     }
-    const { mapped, unmapped, warnings } = requested ? { mapped: requested.taskIds, unmapped: [], warnings: [] } : await getTaskIds(options, backlog, jira, store, sprints);
+    const { mapped, unmapped, warnings, parentOf } = requested ? { mapped: requested.taskIds, unmapped: [], warnings: [] } : await getTaskIds(options, backlog, jira, store, sprints, parents);
     result.warnings.push(...warnings ?? []);
     logger.info({ mappedCount: mapped.length, unmappedCount: unmapped.length }, "Tasks to process");
     if (options.import && unmapped.length > 0) {
       logger.info({ count: unmapped.length }, "Importing unmapped issues");
+      const groups = parents ? orderByParent(unmapped, parentOf ?? new Map) : [unmapped];
       const batchSize = 10;
-      for (let i = 0;i < unmapped.length; i += batchSize) {
-        const batch = unmapped.slice(i, i + batchSize);
+      const batches = groups.flatMap((group) => {
+        const slices = [];
+        for (let i = 0;i < group.length; i += batchSize) {
+          slices.push(group.slice(i, i + batchSize));
+        }
+        return slices;
+      });
+      for (const batch of batches) {
         const promises = batch.map(async (jiraKey) => {
           try {
             const taskId = await importJiraIssue(jiraKey, {
@@ -32880,6 +33810,7 @@ async function pull(options = {}) {
               jira,
               fieldMappings,
               sprints,
+              parents,
               dryRun: options.dryRun || false
             });
             result.imported.push(taskId);
@@ -32908,6 +33839,7 @@ async function pull(options = {}) {
               jira,
               fieldMappings,
               sprints,
+              parents,
               force: options.force || false,
               dryRun: options.dryRun || false
             });
@@ -32927,6 +33859,9 @@ async function pull(options = {}) {
   } finally {
     if (sprints)
       result.warnings.push(...sprints.warnings.slice(warningsFrom));
+    if (parents && options.parentContext === undefined) {
+      result.warnings.push(...parents.warnings);
+    }
     store.close();
     await jira.close();
     logger.level = originalLevel;
@@ -32937,13 +33872,13 @@ async function pull(options = {}) {
 function formatImportedLines(result) {
   return [...result.importedLinks].sort((a, b) => a.jiraKey.localeCompare(b.jiraKey, undefined, { numeric: true })).map(({ taskId, jiraKey }) => taskId.startsWith(DRY_RUN_TASK_PREFIX) ? `${jiraKey} (dry run: would import)` : formatIdPair(taskId, jiraKey));
 }
-async function getTaskIds(options, backlog, jira, store, sprints) {
+async function getTaskIds(options, backlog, jira, store, sprints, parents) {
   if (options.all) {
     const mappings = store.getAllMappings();
     return { mapped: Array.from(mappings.keys()), unmapped: [] };
   }
   if (options.import) {
-    return await getIssuesForImport(options, jira, store, sprints?.mapping ?? null);
+    return await getIssuesForImport(options, jira, store, sprints?.mapping ?? null, parents !== null);
   }
   const mappings = store.getAllMappings();
   const needsPull = [];
@@ -32957,7 +33892,7 @@ async function getTaskIds(options, backlog, jira, store, sprints) {
       const jiraHash = computeHash(jiraPayload);
       const snapshots = store.getSnapshots(taskId);
       const state = classifySyncState(backlogHash, jiraHash, snapshots.backlog, snapshots.jira, { backlog: backlogPayload, jira: jiraPayload });
-      if (state.state === "NeedsPull" || state.state === "InSync" && sprints && sprintNeedsPull(sprints, taskId, issue)) {
+      if (state.state === "NeedsPull" || state.state === "InSync" && sprints && sprintNeedsPull(sprints, taskId, issue) || state.state === "InSync" && parents && parentNeedsPull(parents, task, issue, snapshots.backlog)) {
         needsPull.push(taskId);
       }
     } catch (error) {
@@ -32966,14 +33901,14 @@ async function getTaskIds(options, backlog, jira, store, sprints) {
   }
   return { mapped: needsPull, unmapped: [] };
 }
-async function getIssuesForImport(options, jira, store, sprintMapping) {
+async function getIssuesForImport(options, jira, store, sprintMapping, withParents) {
   let jql = options.jql;
   let configProjectKey;
   if (!jql) {
     try {
-      const configPath = join18(process.cwd(), ".backlog-jira", "config.json");
-      if (existsSync17(configPath)) {
-        const config = JSON.parse(readFileSync18(configPath, "utf-8"));
+      const configPath = join19(process.cwd(), ".backlog-jira", "config.json");
+      if (existsSync18(configPath)) {
+        const config = JSON.parse(readFileSync19(configPath, "utf-8"));
         jql = config.jira?.jqlFilter;
         configProjectKey = config.jira?.projectKey;
       }
@@ -32992,7 +33927,8 @@ async function getIssuesForImport(options, jira, store, sprintMapping) {
   jql = applySprintPullScope(jql, sprintMapping);
   logger.info({ jql }, "Fetching Jira issues for import");
   const result = await jira.searchAllIssues(jql, {
-    limit: DEFAULT_SEARCH_ALL_LIMIT
+    limit: DEFAULT_SEARCH_ALL_LIMIT,
+    parents: withParents
   });
   logger.info({ count: result.issues.length, truncated: result.truncated }, "Found Jira issues");
   const warnings = result.truncated ? [
@@ -33000,16 +33936,18 @@ async function getIssuesForImport(options, jira, store, sprintMapping) {
   ] : [];
   const mapped = [];
   const unmapped = [];
+  const parentOf = new Map;
   for (const issue of result.issues) {
     const mapping = store.getMappingByJiraKey(issue.key);
     if (mapping) {
       mapped.push(mapping.backlogId);
     } else {
       unmapped.push(issue.key);
+      parentOf.set(issue.key.toUpperCase(), getIssueParent(issue)?.key ?? null);
     }
   }
   logger.info({ mappedCount: mapped.length, unmappedCount: unmapped.length }, "Categorized issues for import");
-  return { mapped, unmapped, warnings };
+  return { mapped, unmapped, warnings, parentOf };
 }
 async function getAvailableBacklogAssignees(backlog) {
   try {
@@ -33028,7 +33966,16 @@ async function getAvailableBacklogAssignees(backlog) {
   }
 }
 async function pullTask(taskId, context) {
-  const { store, backlog, jira, fieldMappings, sprints, force, dryRun } = context;
+  const {
+    store,
+    backlog,
+    jira,
+    fieldMappings,
+    sprints,
+    parents,
+    force,
+    dryRun
+  } = context;
   const mapping = store.getMapping(taskId);
   logger.info({ taskId, mapping }, "Retrieved mapping from store");
   if (!mapping) {
@@ -33050,6 +33997,14 @@ async function pullTask(taskId, context) {
     if (state.state === "InSync") {
       if (sprints)
         await pullSprint(sprints, taskId, issue, force);
+      if (parents && parentNeedsPull(parents, task, issue, snapshots.backlog) && pullTaskParent(parents, taskId, task, issue).changed && !dryRun) {
+        const updatedTask = await backlog.getTask(taskId);
+        const updatedPayload = normalizeBacklogTask(updatedTask);
+        store.setSnapshot(taskId, "backlog", computeHash(updatedPayload), updatedPayload);
+        store.setSnapshot(taskId, "jira", jiraHash, jiraPayload);
+        logger.info({ taskId }, "Pulled task parent");
+        return;
+      }
       logger.info({ taskId }, "Task already in sync, skipping");
       return;
     }
@@ -33074,6 +34029,8 @@ async function pullTask(taskId, context) {
     logger.info({ taskId, updates, frontmatter: mappedUpdates.frontmatter }, "DRY RUN: Would update Backlog task");
     if (sprints)
       await pullSprint(sprints, taskId, issue);
+    if (parents)
+      pullTaskParent(parents, taskId, task, issue);
   } else {
     if (Object.keys(updates).length > 0) {
       await backlog.updateTask(taskId, updates);
@@ -33081,11 +34038,16 @@ async function pullTask(taskId, context) {
     applyMappedFrontmatter(taskId, issue, fieldMappings);
     if (sprints)
       await pullSprint(sprints, taskId, issue, force);
+    const parent = parents ? pullTaskParent(parents, taskId, task, issue) : null;
     const updatedTask = await backlog.getTask(taskId);
+    const updatedPayload = normalizeBacklogTask(updatedTask);
     recordSyncedSnapshots(store, taskId, {
-      backlog: normalizeBacklogTask(updatedTask),
+      backlog: updatedPayload,
       jira: normalizeJiraIssue(issue)
     }, "jira", fieldMappings);
+    if (parent && !parent.applied) {
+      store.setSnapshot(taskId, "backlog", computeHash(updatedPayload), updatedPayload);
+    }
     store.updateSyncState(taskId, {
       lastSyncAt: new Date().toISOString()
     });
@@ -33225,7 +34187,7 @@ function syncAcceptanceCriteria(issue, currentTask) {
   return { addAc, removeAc, checkAc, uncheckAc };
 }
 async function importJiraIssue(jiraKey, context) {
-  const { store, backlog, jira, fieldMappings, sprints, dryRun } = context;
+  const { store, backlog, jira, fieldMappings, sprints, parents, dryRun } = context;
   const issue = await jira.getIssue(jiraKey);
   logger.info({ jiraKey, summary: issue.summary }, "Importing Jira issue");
   const normalized = normalizeJiraIssue(issue);
@@ -33263,6 +34225,8 @@ async function importJiraIssue(jiraKey, context) {
     }
   }
   const overridden = new Set(fieldMappings.map((m) => m.backlog).filter(isCoreOverrideTarget));
+  const jiraParent = parents ? getIssueParent(issue)?.key : undefined;
+  const parentTaskId = jiraParent ? parents?.taskForJiraKey(jiraParent) : null;
   const taskId = await backlog.createTask({
     title: sanitizeTitle(issue.summary),
     description: cleanDescription,
@@ -33270,7 +34234,8 @@ async function importJiraIssue(jiraKey, context) {
     assignee: mappedAssignee || issue.assignee,
     labels: overridden.has("labels") ? undefined : issue.labels,
     priority: overridden.has("priority") ? undefined : mapJiraPriorityToBacklog(issue.priority),
-    ac: acceptanceCriteria.map((ac) => ac.text)
+    ac: acceptanceCriteria.map((ac) => ac.text),
+    ...parentTaskId ? { parent: taskFileId(parentTaskId) } : {}
   });
   logger.info({ taskId, jiraKey }, "Created Backlog task from Jira issue");
   const checkedIndices = acceptanceCriteria.map((ac, idx) => ac.checked ? idx + 1 : -1).filter((idx) => idx > 0);
@@ -33292,9 +34257,16 @@ async function importJiraIssue(jiraKey, context) {
     await pullSprint(sprints, taskId, issue);
   store.addMapping(taskId, jiraKey);
   logger.info({ taskId, jiraKey }, "Created mapping");
+  const parentPending = Boolean(jiraParent && !parentTaskId);
+  if (parents && jiraParent && !parentTaskId) {
+    const problem = `Jira parent ${jiraParent} is not linked to a Backlog task; import it (backlog-jira pull --import) or link it (backlog-jira map link <task> ${jiraParent}), then pull again`;
+    parents.warnings.push(`${formatIdPair(taskId, jiraKey)}: imported without its parent: ${problem}`);
+    recordParentProblem(taskId, problem);
+  }
   const task = await backlog.getTask(taskId);
+  const backlogPayload = normalizeBacklogTask(task);
   const syncedHash = computeHash(normalizeJiraIssue(issue));
-  store.setSnapshot(taskId, "backlog", syncedHash, normalizeBacklogTask(task));
+  store.setSnapshot(taskId, "backlog", parentPending ? computeHash(backlogPayload) : syncedHash, backlogPayload);
   store.setSnapshot(taskId, "jira", syncedHash, normalizeJiraIssue(issue));
   store.updateSyncState(taskId, {
     lastSyncAt: new Date().toISOString()
@@ -33317,17 +34289,20 @@ async function importJiraIssue(jiraKey, context) {
 }
 
 // src/commands/push.ts
-import { readFileSync as readFileSync19 } from "node:fs";
-import { join as join19 } from "node:path";
+import { readFileSync as readFileSync20 } from "node:fs";
+import { join as join20 } from "node:path";
 init_jira();
 init_store();
 init_assignee_mapping();
 init_field_mapping();
 init_frontmatter();
+init_id_resolver();
 init_jira_config();
 init_logger();
 init_mapped_field_sync();
 init_normalizer();
+init_parent_payload();
+init_parent_sync();
 
 // src/utils/sprint-push.ts
 init_milestones();
@@ -33523,6 +34498,7 @@ async function pushTaskSprint(ctx, taskId, issue, options = {}) {
 
 // src/commands/push.ts
 init_status_mapping();
+init_task_parents();
 async function push(options = {}) {
   const originalLevel = logger.level;
   if (!options.verbose) {
@@ -33560,6 +34536,7 @@ async function push(options = {}) {
     if (sprints && options.sprintContext) {
       jira.includeIssueFields([sprints.sprintFieldId]);
     }
+    const parents = options.parentContext !== undefined ? options.parentContext : createParentSyncContext(jira, store, { dryRun: options.dryRun });
     const requested = options.taskIds?.length ? resolveTaskArgs(options.taskIds, store) : null;
     for (const { input, error } of requested?.errors ?? []) {
       result.failed.push({ taskId: input, error });
@@ -33580,6 +34557,7 @@ async function push(options = {}) {
             issueType,
             fieldMappings,
             sprints,
+            parents,
             force: options.force || false,
             dryRun: options.dryRun || false
           });
@@ -33644,6 +34622,7 @@ async function pushTask(taskId, context) {
     issueType,
     fieldMappings,
     sprints,
+    parents,
     force,
     dryRun
   } = context;
@@ -33674,6 +34653,12 @@ async function pushTask(taskId, context) {
       }, "DRY RUN: Would update Jira issue");
       if (sprints)
         await pushSprint(sprints, taskId, issue);
+      if (parents) {
+        const parent = await pushTaskParent(parents, taskId, task, issue);
+        if (parent.status === "failed") {
+          logger.info({ taskId, reason: parent.reason }, "DRY RUN: Parent would not be pushed");
+        }
+      }
     } else {
       const failures = await updateIssueWithMappedFields(jira, mapping.jiraKey, updates.fields, mappedUpdates);
       if (updates.transition) {
@@ -33681,6 +34666,7 @@ async function pushTask(taskId, context) {
           comment: updates.transition.comment
         });
       }
+      failures.push(...await pushParentFailures(parents, taskId, task, issue));
       const sprintFailures = sprints ? await pushSprint(sprints, taskId, issue, force) : [];
       const updatedIssue = await jira.getIssue(mapping.jiraKey);
       if (failures.length > 0) {
@@ -33716,28 +34702,60 @@ async function pushTask(taskId, context) {
     }
   } else {
     const mappedUpdates = buildMappedJiraFields(readTaskFrontmatter(taskId), null, fieldMappings);
+    let plan = {
+      ok: true,
+      issueType,
+      parentKey: null,
+      fields: {}
+    };
+    let parentFailure = null;
+    if (parents) {
+      const own = parentKeyOfTask(task);
+      const planned = "reason" in own ? { ok: false, reason: own.reason } : await planIssueCreation(parents, own.key, { default: issueType });
+      if (planned.ok)
+        plan = planned;
+      else
+        parentFailure = planned.reason;
+    }
     if (dryRun) {
-      logger.info({ taskId, projectKey, issueType, mappedFields: mappedUpdates.fields }, "DRY RUN: Would create new Jira issue");
+      logger.info({
+        taskId,
+        projectKey,
+        issueType: plan.issueType,
+        parent: plan.parentKey,
+        parentFailure,
+        mappedFields: mappedUpdates.fields
+      }, "DRY RUN: Would create new Jira issue");
     } else {
       const descriptionWithAc = task.acceptanceCriteria ? mergeDescriptionWithAc(task.description || "", task.acceptanceCriteria, task.implementationPlan, task.implementationNotes) : task.description;
       const mappedAssignee = task.assignee ? mapBacklogAssigneeToJira(task.assignee) : undefined;
       if (task.assignee && !mappedAssignee) {
         logger.warn({ taskId, assignee: task.assignee }, "No Jira user mapping found for Backlog assignee. Configure mapping with: backlog-jira map-assignees add");
       }
-      const { issue, failures } = await createIssueWithMappedFields(jira, projectKey, issueType, task.title, {
+      const { issue, failures } = await createIssueWithMappedFields(jira, projectKey, plan.issueType, task.title, {
         description: descriptionWithAc,
         assignee: mappedAssignee || undefined,
         priority: task.priority && !overridden.has("priority") ? mapBacklogPriorityToJira(task.priority) : undefined,
-        labels: overridden.has("labels") ? undefined : task.labels
+        labels: overridden.has("labels") ? undefined : task.labels,
+        ...Object.keys(plan.fields).length > 0 ? { fields: plan.fields } : {}
       }, mappedUpdates);
+      if (parentFailure) {
+        failures.push({ mapping: PARENT_LINK_MAPPING, error: parentFailure });
+      }
       store.addMapping(taskId, issue.key);
+      if (parentFailure)
+        recordParentProblem(taskId, parentFailure);
       const sprintFailures = sprints ? await pushSprint(sprints, taskId, issue) : [];
       if (failures.length > 0) {
         const createdIssue = await jira.getIssue(issue.key);
         recordPartialPush(store, taskId, task, createdIssue, failures, fieldMappings);
       } else {
+        const jiraPayload = normalizeJiraIssue(issue);
+        if (jiraPayload.parent !== undefined) {
+          jiraPayload.parent = plan.parentKey ?? "";
+        }
         store.setSnapshot(taskId, "backlog", backlogHash, normalizeBacklogTask(task));
-        store.setSnapshot(taskId, "jira", backlogHash, normalizeJiraIssue(issue));
+        store.setSnapshot(taskId, "jira", backlogHash, jiraPayload);
       }
       store.updateSyncState(taskId, {
         lastSyncAt: new Date().toISOString()
@@ -33848,8 +34866,8 @@ async function buildJiraUpdates(task, currentIssue, jiraClient, projectKey, over
 }
 function loadConfig2() {
   try {
-    const configPath = join19(process.cwd(), ".backlog-jira", "config.json");
-    const content = readFileSync19(configPath, "utf-8");
+    const configPath = join20(process.cwd(), ".backlog-jira", "config.json");
+    const content = readFileSync20(configPath, "utf-8");
     return JSON.parse(content);
   } catch (error) {
     logger.warn({ error }, "Failed to load config, using defaults");
@@ -33859,6 +34877,7 @@ function loadConfig2() {
 
 // src/commands/resolve.ts
 init_store();
+init_id_resolver();
 init_logger();
 var PLAIN_HEADER = "input\ttask\tjira\tstate";
 var STATE_ICONS = {
@@ -33894,6 +34913,7 @@ function registerResolveCommand(program) {
 // src/commands/status.ts
 init_jira();
 init_store();
+init_id_resolver();
 init_jira_config();
 init_logger();
 init_normalizer();
@@ -34095,15 +35115,17 @@ function registerStatusCommand(program) {
 }
 
 // src/commands/sync.ts
-import { readFileSync as readFileSync20, writeFileSync as writeFileSync12 } from "node:fs";
-import { join as join20 } from "node:path";
+import { readFileSync as readFileSync21, writeFileSync as writeFileSync13 } from "node:fs";
+import { join as join21 } from "node:path";
 init_jira();
 init_store();
 
 // src/ui/conflict-resolver.ts
 init_source();
-var import_prompts3 = __toESM(require_prompts3(), 1);
+init_id_resolver();
+init_parent_payload();
 init_sprint_payload();
+var import_prompts3 = __toESM(require_prompts3(), 1);
 async function promptForConflictResolution(conflict) {
   console.log(source_default.bold.yellow(`
 ⚠️  Conflict Detected
@@ -34132,7 +35154,7 @@ async function promptForConflictResolution(conflict) {
           value: "jira",
           description: formatValue(fieldConflict.jiraValue)
         },
-        ...fieldConflict.field === "acceptanceCriteria" || fieldConflict.field === SPRINT_CONFLICT_FIELD ? [] : [
+        ...fieldConflict.field === "acceptanceCriteria" || fieldConflict.field === SPRINT_CONFLICT_FIELD || fieldConflict.field === PARENT_PAYLOAD_KEY ? [] : [
           {
             title: `${source_default.yellow("✎")} Enter manually`,
             value: "manual",
@@ -34241,10 +35263,13 @@ function truncate(text, maxWidth) {
 // src/commands/sync.ts
 init_field_mapping();
 init_frontmatter();
+init_id_resolver();
 init_jira_config();
 init_logger();
 init_mapped_field_sync();
 init_normalizer();
+init_parent_payload();
+init_parent_sync();
 init_sprint_payload();
 
 // src/utils/sprint-sync.ts
@@ -34273,7 +35298,7 @@ function sprintValue(state, side, which) {
   const payload = state[which][side];
   return payload?.mappedFields?.[SPRINT_PAYLOAD_KEY] ?? "";
 }
-function sideChanges2(state) {
+function sideChanges3(state) {
   const backlogNow = sprintValue(state, "backlog", "current");
   const jiraNow = sprintValue(state, "jira", "current");
   return {
@@ -34298,7 +35323,7 @@ function detectSprintConflict(state, ctx) {
     return null;
   if (!state.base.backlog || !state.base.jira)
     return null;
-  const { backlogChanged, jiraChanged, differ } = sideChanges2(state);
+  const { backlogChanged, jiraChanged, differ } = sideChanges3(state);
   if (!backlogChanged || !jiraChanged || !differ)
     return null;
   const milestone = state.frontmatter.milestone;
@@ -34314,7 +35339,7 @@ function detectSprintConflict(state, ctx) {
 function planSprintMerge(state, mapping, resolution) {
   if (resolution && mapping.direction === "both")
     return resolution;
-  const { backlogChanged, jiraChanged, differ } = sideChanges2(state);
+  const { backlogChanged, jiraChanged, differ } = sideChanges3(state);
   if (!differ)
     return null;
   if (mapping.direction === "pull")
@@ -34385,7 +35410,7 @@ function comparable(payload, field) {
       return payload[field] ?? "";
   }
 }
-function sideChanges3(state, field) {
+function sideChanges4(state, field) {
   const backlogNow = comparable(state.current.backlog, field);
   const jiraNow = comparable(state.current.jira, field);
   return {
@@ -34431,7 +35456,7 @@ function detectBuiltinFieldConflicts(state, task, fieldMappings = []) {
     return [];
   const conflicts = [];
   for (const field of mergeableFields(fieldMappings)) {
-    const { backlogChanged, jiraChanged, differ } = sideChanges3(state, field);
+    const { backlogChanged, jiraChanged, differ } = sideChanges4(state, field);
     if (!backlogChanged || !jiraChanged || !differ)
       continue;
     conflicts.push({
@@ -34454,7 +35479,7 @@ function planBuiltinFieldMerge(state, fieldMappings, resolutions) {
       });
       continue;
     }
-    const { backlogChanged, jiraChanged, differ } = sideChanges3(state, field);
+    const { backlogChanged, jiraChanged, differ } = sideChanges4(state, field);
     if (!differ)
       continue;
     if (backlogChanged && !jiraChanged) {
@@ -34606,6 +35631,9 @@ async function sync(options = {}) {
     warnings: []
   };
   let sprints = null;
+  const parents = createParentSyncContext(jira, store, {
+    dryRun: options.dryRun
+  });
   try {
     sprints = await createSprintSyncContext(sprintMapping, { jira, backlog });
     const requested = options.taskIds?.length ? resolveTaskArgs(options.taskIds, store) : null;
@@ -34627,6 +35655,7 @@ async function sync(options = {}) {
             strategy,
             fieldMappings,
             sprints,
+            parents,
             dryRun: options.dryRun || false
           });
           if (outcome.type === "synced") {
@@ -34670,6 +35699,8 @@ ${error.message}` : minimal
   } finally {
     if (sprints?.pull)
       result.warnings?.push(...sprints.pull.warnings);
+    if (parents)
+      result.warnings?.push(...parents.warnings);
     store.close();
     if (restoreIo)
       restoreIo();
@@ -34689,7 +35720,16 @@ function getTaskIds3(options, store) {
   return Array.from(mappings.keys());
 }
 async function syncTask(taskId, context) {
-  const { store, backlog, jira, strategy, fieldMappings, sprints, dryRun } = context;
+  const {
+    store,
+    backlog,
+    jira,
+    strategy,
+    fieldMappings,
+    sprints,
+    parents = null,
+    dryRun
+  } = context;
   const mapping = store.getMapping(taskId);
   if (!mapping) {
     return { type: "skipped", reason: "No Jira mapping" };
@@ -34709,13 +35749,24 @@ async function syncTask(taskId, context) {
   logger.debug({ taskId, state: state.state }, "Sync state classified");
   switch (state.state) {
     case "InSync":
+      if (parents && parentNeedsPull(parents, task, issue, snapshots.backlog)) {
+        if (!dryRun) {
+          assertSucceeded(await pull({
+            taskIds: [taskId],
+            sprintContext: sprints?.pull ?? null,
+            parentContext: parents
+          }));
+        }
+        return { type: "synced", direction: "pull" };
+      }
       logger.info({ taskId }, "Already in sync");
       return { type: "skipped", reason: "Already in sync" };
     case "NeedsPush":
       if (!dryRun) {
         assertSucceeded(await push({
           taskIds: [taskId],
-          sprintContext: sprints?.push ?? null
+          sprintContext: sprints?.push ?? null,
+          parentContext: parents
         }));
       }
       return { type: "synced", direction: "push" };
@@ -34723,7 +35774,8 @@ async function syncTask(taskId, context) {
       if (!dryRun) {
         assertSucceeded(await pull({
           taskIds: [taskId],
-          sprintContext: sprints?.pull ?? null
+          sprintContext: sprints?.pull ?? null,
+          parentContext: parents
         }));
       }
       return { type: "synced", direction: "pull" };
@@ -34743,14 +35795,17 @@ async function syncTask(taskId, context) {
         fields: [
           ...detectBuiltinFieldConflicts(mappedState, task, fieldMappings),
           ...detectMappedFieldConflicts(mappedState, fieldMappings),
-          ...[detectSprintConflict(mappedState, sprints)].filter((c) => c !== null)
+          ...[
+            detectSprintConflict(mappedState, sprints),
+            detectParentConflict(mappedState, parents)
+          ].filter((c) => c !== null)
         ],
         backlogTask: task,
         jiraIssue: issue,
         baseBacklog: snapshots.backlog ? JSON.parse(snapshots.backlog.payload) : null,
         baseJira: snapshots.jira ? JSON.parse(snapshots.jira.payload) : null,
         mappedState
-      }, strategy, { store, backlog, jira, fieldMappings, sprints, dryRun });
+      }, strategy, { store, backlog, jira, fieldMappings, sprints, parents, dryRun });
     }
     case "Unknown":
       logger.info({ taskId }, "No baseline snapshot, creating initial sync");
@@ -34793,7 +35848,7 @@ function parsePayload(payload) {
   }
 }
 async function resolveConflict(conflict, strategy, context) {
-  const { store, backlog, jira, fieldMappings, sprints, dryRun } = context;
+  const { store, backlog, jira, fieldMappings, sprints, parents, dryRun } = context;
   logger.info({ taskId: conflict.taskId, strategy, fieldCount: conflict.fields.length }, "Resolving conflict");
   switch (strategy) {
     case "prefer-backlog":
@@ -34801,7 +35856,8 @@ async function resolveConflict(conflict, strategy, context) {
         assertSucceeded(await push({
           taskIds: [conflict.taskId],
           force: true,
-          sprintContext: sprints?.push ?? null
+          sprintContext: sprints?.push ?? null,
+          parentContext: parents
         }));
       }
       return { type: "conflict", resolution: "preferred-backlog" };
@@ -34810,7 +35866,8 @@ async function resolveConflict(conflict, strategy, context) {
         assertSucceeded(await pull({
           taskIds: [conflict.taskId],
           force: true,
-          sprintContext: sprints?.pull ?? null
+          sprintContext: sprints?.pull ?? null,
+          parentContext: parents
         }));
       }
       return { type: "conflict", resolution: "preferred-jira" };
@@ -34823,6 +35880,7 @@ async function resolveConflict(conflict, strategy, context) {
             store,
             fieldMappings,
             sprints,
+            parents,
             backlogTask: conflict.backlogTask,
             mappedState: conflict.mappedState
           });
@@ -34838,6 +35896,7 @@ async function resolveConflict(conflict, strategy, context) {
             store,
             fieldMappings,
             sprints,
+            parents,
             backlogTask: conflict.backlogTask,
             mappedState: conflict.mappedState
           });
@@ -34870,8 +35929,8 @@ async function resolveConflict(conflict, strategy, context) {
 }
 function loadConfig3() {
   try {
-    const configPath = join20(process.cwd(), ".backlog-jira", "config.json");
-    const content = readFileSync20(configPath, "utf-8");
+    const configPath = join21(process.cwd(), ".backlog-jira", "config.json");
+    const content = readFileSync21(configPath, "utf-8");
     return JSON.parse(content);
   } catch (error) {
     logger.warn({ error }, "Failed to load config, using defaults");
@@ -34885,17 +35944,22 @@ async function applyFieldResolutions(taskId, jiraKey, resolutions, context) {
     store,
     fieldMappings = [],
     sprints = null,
+    parents = null,
     mappedState
   } = context;
   const mappingsByTarget = new Map(fieldMappings.map((m) => [m.backlog, m]));
   const mappedResolutions = new Map;
   const builtinResolutions = [];
   let sprintResolution;
+  let parentResolution;
   for (const resolution of resolutions) {
     const fieldMapping = mappingsByTarget.get(resolution.field);
     if (resolution.field === SPRINT_CONFLICT_FIELD) {
       if (resolution.source !== "manual")
         sprintResolution = resolution.source;
+    } else if (resolution.field === PARENT_PAYLOAD_KEY) {
+      if (resolution.source !== "manual")
+        parentResolution = resolution.source;
     } else if (fieldMapping && fieldMapping.direction === "both") {
       mappedResolutions.set(resolution.field, resolution.source === "manual" ? parseManualMappedValue(resolution.value, fieldMapping) : resolution.value);
     } else if (BUILTIN_CONFLICT_FIELDS.has(resolution.field)) {
@@ -34934,6 +35998,15 @@ async function applyFieldResolutions(taskId, jiraKey, resolutions, context) {
     const side = planSprintMerge(mappedState, sprints.mapping, sprintResolution);
     if (side) {
       const failures = await applySprintMerge(side, sprints, taskId, await jira.getIssue(jiraKey));
+      if (failures.length > 0) {
+        throw new MappedFieldPushError(jiraKey, failures);
+      }
+    }
+  }
+  if (mappedState && parents) {
+    const side = planParentMerge(mappedState, parentResolution);
+    if (side) {
+      const failures = await applyParentMerge(side, parents, taskId, await backlog.getTask(taskId), await jira.getIssue(jiraKey));
       if (failures.length > 0) {
         throw new MappedFieldPushError(jiraKey, failures);
       }
@@ -34985,11 +36058,11 @@ function determinePreferredSource(resolutions) {
 }
 function saveConflictPreference(preference) {
   try {
-    const configPath = join20(process.cwd(), ".backlog-jira", "config.json");
+    const configPath = join21(process.cwd(), ".backlog-jira", "config.json");
     const config = loadConfig3();
     config.sync = config.sync || {};
     config.sync.conflictStrategy = preference;
-    writeFileSync12(configPath, JSON.stringify(config, null, 2));
+    writeFileSync13(configPath, JSON.stringify(config, null, 2));
     logger.info({ preference }, "Saved conflict resolution preference");
   } catch (error) {
     logger.warn({ error }, "Failed to save conflict preference");
@@ -35053,10 +36126,13 @@ ${jiraMetadata.join(`
 
 // src/commands/view.ts
 init_field_mapping();
+init_id_resolver();
 init_jira_config();
 init_logger();
 init_mapped_field_sync();
+init_parent_sync();
 init_task_links();
+init_task_parents();
 async function viewTask(taskArg, options) {
   const store = new FrontmatterStore;
   const backlog = new BacklogClient;
@@ -35101,6 +36177,11 @@ ${c}`;
     const sprintLines = getSprintHistoryLines(taskId, !!mapping);
     if (sprintLines.length > 0) {
       console.log(sprintLines.join(`
+`));
+    }
+    const parentLines = formatParentSection(taskId, readTaskParents(), linkedJiraKey, readTaskLink(taskId)?.parentProblem);
+    if (parentLines.length > 0) {
+      console.log(parentLines.join(`
 `));
     }
   } catch (error) {
@@ -35342,17 +36423,23 @@ registerMcpCommand(program2);
 registerResolveCommand(program2);
 registerStatusCommand(program2);
 registerViewCommand(program2);
-program2.command("create-issue <taskId>").description("Create a Jira issue from an unmapped Backlog task").option("--issue-type <type>", "Override default issue type (e.g., Task, Bug, Story)").option("--dry-run", "Show what would be created without creating the issue").action(async (taskId, options) => {
+program2.command("create-issue <taskId>").description("Create a Jira issue from an unmapped Backlog task; a task whose parent is linked to Jira becomes a subtask (or, under an epic, a standard issue in the epic)").option("--issue-type <type>", "Override default issue type (e.g., Task, Bug, Story)").option("--parent <id>", "Create the issue under this Jira issue or epic (a Jira key, or a task ID whose linked issue is meant); defaults to the issue linked to the task's parent").option("--dry-run", "Show what would be created without creating the issue").addHelpText("after", `
+Examples:
+  backlog-jira create-issue TASK-12                  # under the issue linked to TASK-12's parent, if any
+  backlog-jira create-issue TASK-12 --parent PROJ-40 # subtask of PROJ-40, or a standard issue if PROJ-40 is an epic
+  backlog-jira create-issue TASK-12 --parent TASK-3  # under the issue linked to TASK-3`).action(async (taskId, options) => {
   try {
     const result = await createIssue({
       taskId,
       issueType: options.issueType,
+      parent: options.parent,
       dryRun: options.dryRun
     });
     if (result.success) {
       if (result.jiraKey) {
+        const under = result.parentKey ? ` (${result.issueType} under ${result.parentKey})` : "";
         console.log(`
-✅ Successfully created Jira issue ${result.jiraKey} for task ${result.taskId}`);
+✅ Successfully created Jira issue ${result.jiraKey}${under} for task ${result.taskId}`);
       }
       for (const warning of result.warnings ?? []) {
         console.warn(`

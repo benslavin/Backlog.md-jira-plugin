@@ -124,24 +124,42 @@ registerViewCommand(program);
 
 program
 	.command("create-issue <taskId>")
-	.description("Create a Jira issue from an unmapped Backlog task")
+	.description(
+		"Create a Jira issue from an unmapped Backlog task; a task whose parent is linked to Jira becomes a subtask (or, under an epic, a standard issue in the epic)",
+	)
 	.option(
 		"--issue-type <type>",
 		"Override default issue type (e.g., Task, Bug, Story)",
 	)
+	.option(
+		"--parent <id>",
+		"Create the issue under this Jira issue or epic (a Jira key, or a task ID whose linked issue is meant); defaults to the issue linked to the task's parent",
+	)
 	.option("--dry-run", "Show what would be created without creating the issue")
+	.addHelpText(
+		"after",
+		`
+Examples:
+  backlog-jira create-issue TASK-12                  # under the issue linked to TASK-12's parent, if any
+  backlog-jira create-issue TASK-12 --parent PROJ-40 # subtask of PROJ-40, or a standard issue if PROJ-40 is an epic
+  backlog-jira create-issue TASK-12 --parent TASK-3  # under the issue linked to TASK-3`,
+	)
 	.action(async (taskId, options) => {
 		try {
 			const result = await createIssue({
 				taskId,
 				issueType: options.issueType,
+				parent: options.parent,
 				dryRun: options.dryRun,
 			});
 
 			if (result.success) {
 				if (result.jiraKey) {
+					const under = result.parentKey
+						? ` (${result.issueType} under ${result.parentKey})`
+						: "";
 					console.log(
-						`\n✅ Successfully created Jira issue ${result.jiraKey} for task ${result.taskId}`,
+						`\n✅ Successfully created Jira issue ${result.jiraKey}${under} for task ${result.taskId}`,
 					);
 				}
 				for (const warning of result.warnings ?? []) {

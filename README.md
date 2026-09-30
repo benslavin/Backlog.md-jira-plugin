@@ -112,6 +112,7 @@ The plugin uses file-based storage in `.backlog-jira/`:
 - ✅ **Acceptance Criteria Sync**: Full support for AC with checked/unchecked state
 - ✅ **Status Mapping**: Flexible status mapping with project overrides
 - ✅ **Field-Level Conflicts**: Detect conflicts at field level (title, description, status, etc.)
+- ✅ **Parent and Epic Links**: Task parents follow Jira parents and epics both ways; `create-issue` creates subtasks and issues in epics
 - ✅ **Multiple Conflict Strategies**: prefer-backlog, prefer-jira, prompt, manual
 - ✅ **Dry Run Mode**: Preview changes without applying them
 - ✅ **Batch Operations**: Sync multiple tasks at once with `--all` flag
@@ -336,6 +337,7 @@ The guided setup writes these settings; you can also edit `.backlog-jira/config.
 | `projectKey` | Default Jira project key | `PROJ`, `DEV`, `SUPPORT` |
 | `issueType` | Default issue type for new issues | `Task`, `Story`, `Bug` |
 | `jqlFilter` | JQL of the issues `pull --import` imports (defaults to `project = <projectKey>`) | `project = PROJ AND labels = backend` |
+| `epicLinkField` | Optional. How epics are linked: the Epic Link field id, or `parent`. Defaults to `parent` on Jira Cloud and the discovered Epic Link field on Server/Data Center | `customfield_10100`, `parent` |
 
 #### Backlog Section
 
@@ -352,6 +354,7 @@ The guided setup writes these settings; you can also edit `.backlog-jira/config.
 | `conflictStrategy` | Default conflict resolution | `prompt`, `prefer-backlog`, `prefer-jira`, `manual` |
 | `enableAnnotations` | Add sync metadata to tasks | `true`, `false` |
 | `watchInterval` | Watch mode check interval (seconds) | `60`, `300` |
+| `parentLinks` | Sync task parents with Jira parents and epics (default `true`) | `true`, `false` |
 
 #### Custom Field Mappings
 
@@ -453,6 +456,31 @@ then run `backlog-jira doctor`. Sprint sync needs Jira Software and the MCP
 Atlassian `jira_agile` toolset. See the [Sprint Sync Guide](docs/sprint-sync.md)
 for behaviour and limitations.
 
+#### Parent and Epic Links
+
+Task parents (`parent_task_id`, shown by Backlog.md as subtasks) are synced
+with Jira parents and epics, compared by linked Jira key. This is on by default
+(`"sync": { "parentLinks": false }` turns it off).
+
+- **Pull** sets a task's parent to the task linked to its issue's parent or
+  epic, and clears it when Jira's parent is cleared. `pull --import` imports
+  parents before children and creates children as Backlog subtasks. An issue
+  whose Jira parent is linked to no task is reported, and a later pull sets the
+  parent once it is linked.
+- **Push** sets, changes or clears the issue's parent (on Jira Server/Data
+  Center, epics through the Epic Link field). Jira only allows epic > standard
+  issue > subtask and the plugin never changes issue types, so hierarchies Jira
+  cannot represent (a subtask of a subtask, a standard issue under a standard
+  issue, a parent task not linked to Jira) are reported and left pending.
+- **Sync** propagates one-sided changes; changes on both sides follow the
+  conflict strategy (`parent` in the prompt).
+- **create-issue** creates a subtask under the issue linked to the task's
+  parent, or a standard issue when that parent is an epic.
+
+`backlog-jira view` shows a task's parent and subtasks as `TASK ⇄ KEY` pairs,
+and `backlog-jira doctor` lists parent links that cannot be synced. See the
+[Parent and Epic Links Guide](docs/parent-sync.md).
+
 ### 4. Verify Configuration
 
 ```bash
@@ -515,6 +543,14 @@ backlog-jira create-issue task-123 --dry-run
 
 # Create with custom issue type
 backlog-jira create-issue task-123 --issue-type Bug
+
+# A task whose parent is linked becomes a subtask of the parent's issue
+# (or a standard issue in it, when the parent is an epic)
+backlog-jira create-issue task-123.1
+
+# Choose the parent: a Jira key, or a task whose linked issue is meant
+backlog-jira create-issue task-123 --parent PROJ-40
+backlog-jira create-issue task-124 --parent task-123
 ```
 
 **Option B: Using map + push**
@@ -769,32 +805,43 @@ backlog-jira create-issue task-123 --dry-run
 backlog-jira create-issue task-123 --issue-type Bug
 backlog-jira create-issue task-123 --issue-type Story
 backlog-jira create-issue task-123 --issue-type Epic
+
+# Subtasks and issues in an epic
+backlog-jira create-issue task-123.1                   # under the issue linked to its parent task-123
+backlog-jira create-issue task-124 --parent PROJ-40    # subtask of PROJ-40, or a standard issue if PROJ-40 is an epic
+backlog-jira create-issue task-124 --parent task-123   # under the issue linked to task-123
+backlog-jira create-issue task-124 --parent PROJ-40 --dry-run
 ```
 
 **What this command does:**
 1. Validates that the task exists in Backlog
 2. Validates that the task is not already mapped to a Jira issue
-3. Reads all task metadata (title, description, status, assignee, labels, priority, AC)
-4. Maps Backlog priority to Jira priority (high/medium/low → High/Medium/Low, or your [priority mapping](#custom-field-mappings))
-5. Merges acceptance criteria into Jira description format
-6. Creates the Jira issue via MCP `jira_create_issue` tool
-7. Creates the mapping between task and Jira issue
-8. Stores initial snapshots for 3-way merge conflict detection
-9. Updates task frontmatter with Jira metadata (jiraKey, jiraUrl, jiraSyncState)
+3. Finds the parent (`--parent`, else the issue linked to the task's parent task) and checks it in Jira: under an epic the issue is a standard issue, under a standard issue it is a `Subtask`, and a subtask parent is refused
+4. Reads all task metadata (title, description, status, assignee, labels, priority, AC)
+5. Maps Backlog priority to Jira priority (high/medium/low → High/Medium/Low, or your [priority mapping](#custom-field-mappings))
+6. Merges acceptance criteria into Jira description format
+7. Creates the Jira issue via MCP `jira_create_issue` tool (with its parent or Epic Link)
+8. Creates the mapping between task and Jira issue
+9. Stores initial snapshots for 3-way merge conflict detection
+10. Updates task frontmatter with Jira metadata (jiraKey, jiraUrl, jiraSyncState)
 
 **Flags:**
 - `--dry-run`: Preview the issue that would be created without actually creating it
 - `--issue-type <type>`: Override the default issue type from config (e.g., Bug, Story, Epic)
+- `--parent <id>`: Create the issue under this Jira issue or epic: a Jira key, or a task ID whose linked issue is meant (that task also becomes the task's parent in Backlog). Defaults to the issue linked to the task's parent task
 
 **Success output:**
 ```
 ✅ Successfully created Jira issue TEST-123 for task task-324
+✅ Successfully created Jira issue TEST-124 (Subtask under TEST-123) for task task-324.1
 ```
 
 **Error cases:**
 - Task not found: `❌ Failed to create Jira issue: Task task-999 not found in Backlog`
 - Already mapped: `❌ Failed to create Jira issue: Task task-123 is already mapped to Jira issue TEST-100`
 - No project configured: `❌ Failed to create Jira issue: Jira project key not configured in .backlog-jira/config.json`
+- Parent task not linked: `❌ Failed to create Jira issue: Cannot create a Jira issue for TASK-123.1: its parent task TASK-123 is not linked to a Jira issue; create its issue first (backlog-jira create-issue TASK-123), or pass --parent <JIRA-KEY>`
+- Parent is a subtask: `❌ Failed to create Jira issue: Cannot create the issue under TEST-9: TEST-9 is a Jira subtask, and Jira cannot nest issues under a subtask`
 
 ### `backlog-jira push [taskIds...]`
 
@@ -1118,6 +1165,7 @@ tail -f .backlog-jira/logs/backlog-jira.log
    - [Status Mapping Guide](docs/status-mapping.md)
    - [Acceptance Criteria Sync](docs/acceptance-criteria-sync.md)
    - [Custom Field Mapping](docs/custom-field-mapping.md)
+   - [Parent and Epic Links](docs/parent-sync.md)
 
 2. **Run diagnostics**:
    ```bash
@@ -1262,6 +1310,7 @@ Includes critical information about working with prompts, command structure, and
 - **Status Mapping Guide**: [docs/status-mapping.md](docs/status-mapping.md)
 - **AC Sync Guide**: [docs/acceptance-criteria-sync.md](docs/acceptance-criteria-sync.md)
 - **Custom Field Mapping Guide**: [docs/custom-field-mapping.md](docs/custom-field-mapping.md)
+- **Parent and Epic Links Guide**: [docs/parent-sync.md](docs/parent-sync.md)
 
 ## License
 

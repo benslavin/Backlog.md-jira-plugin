@@ -19,6 +19,7 @@ export interface BacklogTask {
 	implementationNotes?: string;
 	createdAt?: string;
 	updatedAt?: string;
+	/** Normalized ID of the parent task (task-1), when the task has one */
 	parent?: string;
 }
 
@@ -279,9 +280,14 @@ export class BacklogClient {
 		labels?: string[];
 		priority?: string;
 		ac?: string[];
+		/** Parent task ID; the task is created as its subtask */
+		parent?: string;
 	}): Promise<string> {
 		const args = ["task", "create", options.title];
 
+		if (options.parent) {
+			args.push("-p", options.parent);
+		}
 		if (options.description) {
 			args.push("-d", this.escapeMultiline(options.description));
 		}
@@ -438,7 +444,12 @@ export class BacklogClient {
 			} else if (line.startsWith("Updated:")) {
 				task.updatedAt = line.replace("Updated:", "").trim();
 			} else if (line.startsWith("Parent:")) {
-				task.parent = line.replace("Parent:", "").trim();
+				// "Parent: TASK-1 - Parent title"
+				const parent = line
+					.replace("Parent:", "")
+					.trim()
+					.match(new RegExp(`^(${TASK_ID})`));
+				if (parent) task.parent = normalizeTaskId(parent[1]);
 			} else if (line.match(/^[-=]{2,}$/)) {
 				// Section dividers - skip them, they're just visual separators
 			} else if (line.endsWith(":") && !line.startsWith(" ")) {

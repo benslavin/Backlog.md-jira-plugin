@@ -81,14 +81,17 @@ describe("JiraClient", () => {
 
 			const issue = await client.getIssue("PROJ-1");
 
+			// The parent is always requested so parent links can be synced
 			expect(callMcpToolMock).toHaveBeenCalledWith("jira_get_issue", {
 				issue_key: "PROJ-1",
+				fields: expect.stringMatching(/(^|,)parent(,|$)/),
 			});
 
 			expect(issue).toMatchObject({
 				key: "PROJ-1",
 				summary: "Test Issue",
 				status: "To Do",
+				parent: null,
 			});
 		});
 	});

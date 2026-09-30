@@ -4,6 +4,16 @@ This project is a fork of [eciuca/Backlog.md-jira-plugin](https://github.com/eci
 
 ## [Unreleased]
 
+### Added
+
+- Parent and epic links: task parents follow their issues' Jira parents and epics (Epic Link on Jira Server/Data Center) on pull, push and sync, compared by linked Jira key, with `parent` conflicts in the prompt. `pull --import` imports parents before children as Backlog subtasks, and issues whose Jira parent is linked to no task are reported and get their parent once it is linked. Hierarchies Jira cannot represent without changing issue types are reported and left pending. `view` shows a task's parent and subtasks, and `doctor` lists parent links that cannot be synced. See `docs/parent-sync.md`.
+- `create-issue` creates a subtask under the issue linked to the task's parent, or a standard issue when that parent is an epic, after checking the parent in Jira. `--parent` takes a Jira key or a task ID.
+- Config: `sync.parentLinks` (default `true`) and `jira.epicLinkField`. Link records gain an optional `parentProblem`.
+
+### Changed
+
+- Issues are fetched with their `parent` (and Epic Link field), and tasks with a parent now carry it in sync payloads. After upgrading, the first `sync` pushes existing Backlog parents to issues without a parent and pulls Jira parents to tasks without one. Set `"sync": { "parentLinks": false }` to keep the previous behaviour.
+
 ### Fixed
 
 - Mappings of `timeoriginalestimate`, `timeestimate`, `timespent` and `comment` pull values. MCP Atlassian only returns these inside `timetracking` and `comments`, so they were silently empty. Estimates are pulled as Jira's duration strings (`"1d"`) and need `"type": "string"`. Validation now rejects other types and push directions for these fields.

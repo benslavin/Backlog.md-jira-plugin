@@ -6,8 +6,16 @@ import {
 	getJiraFieldValue,
 	loadFieldMappings,
 } from "../utils/field-mapping.ts";
+import { loadHierarchyConfig } from "../utils/hierarchy-config.ts";
 import { logger } from "../utils/logger.ts";
 import { loadSprintPayloadSource } from "../utils/sprint-payload.ts";
+import {
+	type JiraParentRef,
+	type ParentLinkVia,
+	findEpicLinkFieldId,
+	isJiraCloudUrl,
+	parseIssueParent,
+} from "./jira-hierarchy.ts";
 import {
 	type JiraBoard,
 	type JiraSprint,
@@ -32,6 +40,11 @@ export interface JiraIssue {
 	created: string;
 	updated: string;
 	fields?: Record<string, unknown>;
+	/**
+	 * Parent issue or epic, as fetched (null when the issue has none).
+	 * Undefined when the parent was not requested.
+	 */
+	parent?: JiraParentRef | null;
 }
 
 export interface JiraSearchResult {
@@ -46,6 +59,9 @@ export interface JiraSearchResult {
 
 /** Most issues searchAllIssues returns unless told otherwise */
 export const DEFAULT_SEARCH_ALL_LIMIT = 1000;
+
+/** Epic Link field id per Jira site, discovered once per process */
+const epicLinkFieldIds = new Map<string, Promise<string | null>>();
 
 export interface JiraTransition {
 	id: string;
@@ -741,10 +757,11 @@ export class JiraClient {
 	}
 
 	/**
-	 * Fields to request so mapped custom fields are present on fetched issues.
-	 * Returns undefined when no field mappings are configured (server defaults).
+	 * Fields to request so mapped custom fields, the sprint and the parent
+	 * (with the Epic Link field on Server/Data Center) are present on fetched
+	 * issues. Undefined when the server defaults are enough.
 	 */
-	private getMappedIssueFields(): string | undefined {
+	private async getMappedIssueFields(): Promise<string | undefined> {
 		let fields: string | undefined;
 		try {
 			fields = getIssueFieldsParam(loadFieldMappings());
@@ -756,13 +773,75 @@ export class JiraClient {
 		const sprintFieldId = loadSprintPayloadSource()?.sprintFieldId;
 		const extra = sprintFieldId
 			? [...this.extraIssueFields, sprintFieldId]
-			: this.extraIssueFields;
+			: [...this.extraIssueFields];
+		extra.push(...(await this.getHierarchyFieldIds()));
 		if (extra.length === 0) return fields;
 		const list = (fields ?? DEFAULT_ISSUE_FIELDS.join(",")).split(",");
 		for (const id of extra) {
 			if (!list.includes(id)) list.push(id);
 		}
 		return list.join(",");
+	}
+
+	/**
+	 * Fields carrying an issue's parent: `parent`, plus the Epic Link field
+	 * where epics are linked through it. None when parent links are off.
+	 */
+	private async getHierarchyFieldIds(): Promise<string[]> {
+		if (!loadHierarchyConfig().parentLinks) return [];
+		const epicLinkFieldId = await this.getEpicLinkFieldId();
+		return epicLinkFieldId ? ["parent", epicLinkFieldId] : ["parent"];
+	}
+
+	/**
+	 * Id of the Epic Link custom field when epics are linked through it:
+	 * as configured (jira.epicLinkField), else discovered on Jira
+	 * Server/Data Center. Null on Jira Cloud, where epics are parents, and
+	 * when the site has no Epic Link field.
+	 */
+	async getEpicLinkFieldId(): Promise<string | null> {
+		const configured = loadHierarchyConfig().epicLinkField;
+		if (configured) return configured === "parent" ? null : configured;
+		const url = process.env.JIRA_URL ?? "";
+		if (isJiraCloudUrl(url)) return null;
+
+		let discovered = epicLinkFieldIds.get(url);
+		if (!discovered) {
+			discovered = this.searchFields("epic link", 50)
+				.then((fields) => findEpicLinkFieldId(fields))
+				.catch((error) => {
+					logger.debug({ error }, "Could not discover the Epic Link field");
+					epicLinkFieldIds.delete(url);
+					return null;
+				});
+			epicLinkFieldIds.set(url, discovered);
+		}
+		const id = await discovered;
+		logger.debug({ epicLinkFieldId: id }, "Epic Link field");
+		return id;
+	}
+
+	/**
+	 * Set or clear an issue's parent, through the parent field or the Epic
+	 * Link field. Clearing a parent through the parent field only works on
+	 * Jira Cloud (MCP Atlassian refuses it elsewhere).
+	 */
+	async setIssueParent(
+		issueKey: string,
+		parentKey: string | null,
+		via: ParentLinkVia,
+	): Promise<void> {
+		if (via === "parent") {
+			await this.updateIssue(issueKey, { fields: { parent: parentKey } });
+			return;
+		}
+		const fieldId = await this.getEpicLinkFieldId();
+		if (!fieldId) {
+			throw new Error(
+				"This Jira site has no Epic Link field; set jira.epicLinkField in .backlog-jira/config.json",
+			);
+		}
+		await this.updateIssue(issueKey, { fields: { [fieldId]: parentKey } });
 	}
 
 	/**
@@ -1079,6 +1158,8 @@ export class JiraClient {
 			fields?: string;
 			/** Jira Cloud pages by token; start_at is ignored there */
 			pageToken?: string;
+			/** Also fetch each issue's parent (and Epic Link) */
+			parents?: boolean;
 		},
 	): Promise<JiraSearchResult> {
 		try {
@@ -1091,9 +1172,21 @@ export class JiraClient {
 				input.page_token = options.pageToken;
 			}
 
-			if (options?.fields) {
-				input.fields = options.fields;
+			let fieldsParam = options?.fields;
+			const hierarchyFields = options?.parents
+				? await this.getHierarchyFieldIds()
+				: [];
+			if (hierarchyFields.length > 0) {
+				const list = (fieldsParam ?? DEFAULT_ISSUE_FIELDS.join(",")).split(",");
+				for (const id of hierarchyFields) {
+					if (!list.includes(id)) list.push(id);
+				}
+				fieldsParam = list.join(",");
 			}
+			if (fieldsParam) {
+				input.fields = fieldsParam;
+			}
+			const epicLinkFieldId = hierarchyFields.find((id) => id !== "parent");
 
 			const result = (await this.callMcpTool("jira_search", input)) as {
 				issues: Array<Record<string, unknown>>;
@@ -1167,6 +1260,9 @@ export class JiraClient {
 					created: fields.created as string,
 					updated: fields.updated as string,
 					fields: fields as Record<string, unknown>,
+					...(hierarchyFields.length > 0
+						? { parent: parseIssueParent(fields, epicLinkFieldId) }
+						: {}),
 				};
 			});
 
@@ -1197,7 +1293,12 @@ export class JiraClient {
 	 */
 	async searchAllIssues(
 		jql: string,
-		options: { fields?: string; limit?: number; pageSize?: number } = {},
+		options: {
+			fields?: string;
+			limit?: number;
+			pageSize?: number;
+			parents?: boolean;
+		} = {},
 	): Promise<{ issues: JiraIssue[]; truncated: boolean }> {
 		const limit = options.limit ?? DEFAULT_SEARCH_ALL_LIMIT;
 		const pageSize = options.pageSize ?? 50;
@@ -1213,6 +1314,7 @@ export class JiraClient {
 				maxResults: pageSize,
 				fields: options.fields,
 				pageToken,
+				parents: options.parents,
 			});
 			let added = 0;
 			for (const issue of page.issues) {
@@ -1260,7 +1362,7 @@ export class JiraClient {
 			};
 			logger.info({ input }, "Built input object");
 
-			const fields = options?.fields ?? this.getMappedIssueFields();
+			const fields = options?.fields ?? (await this.getMappedIssueFields());
 			if (fields) {
 				input.fields = fields;
 			}
@@ -1323,6 +1425,16 @@ export class JiraClient {
 				updated: typedResult.updated || "",
 				fields: typedResult as Record<string, unknown>,
 			};
+			// The parent is only known when it was requested
+			if (
+				loadHierarchyConfig().parentLinks &&
+				(!options?.fields || /\bparent\b/.test(options.fields))
+			) {
+				issue.parent = parseIssueParent(
+					typedResult,
+					await this.getEpicLinkFieldId(),
+				);
+			}
 
 			logger.info({ issueKey }, "Retrieved Jira issue");
 			return issue;

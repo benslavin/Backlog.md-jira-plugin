@@ -13,7 +13,12 @@ import {
 	withoutBuiltInMappings,
 } from "../utils/field-mapping.ts";
 import { getTaskFilePath, updateJiraMetadata } from "../utils/frontmatter.ts";
-import { resolveTaskArg } from "../utils/id-resolver.ts";
+import {
+	createIdIndex,
+	displayTaskId,
+	resolveId,
+	resolveTaskArg,
+} from "../utils/id-resolver.ts";
 import { getJiraClientOptions } from "../utils/jira-config.ts";
 import { logger } from "../utils/logger.ts";
 import {
@@ -28,11 +33,25 @@ import {
 	normalizeBacklogTask,
 	normalizeJiraIssue,
 } from "../utils/normalizer.ts";
+import {
+	type CreationPlan,
+	createParentSyncContext,
+	parentKeyOfTask,
+	planIssueCreation,
+	wouldCycle,
+} from "../utils/parent-sync.ts";
 import { mapBacklogPriorityToJira } from "../utils/priority-mapping.ts";
+import { normalizeTaskId } from "../utils/task-links.ts";
+import { setTaskParent } from "../utils/task-parents.ts";
 
 export interface CreateIssueOptions {
 	taskId: string;
 	issueType?: string;
+	/**
+	 * Parent of the new issue: a Jira key, or a task ID whose linked issue
+	 * is the parent. Defaults to the issue linked to the task's parent task.
+	 */
+	parent?: string;
 	dryRun?: boolean;
 	configDir?: string;
 }
@@ -41,6 +60,10 @@ export interface CreateIssueResult {
 	success: boolean;
 	taskId: string;
 	jiraKey?: string;
+	/** Issue type the issue was (or would be) created with */
+	issueType?: string;
+	/** Jira key of the parent or epic the issue was created under */
+	parentKey?: string;
 	error?: string;
 	/** Problems that did not prevent creation, e.g. mapped fields Jira rejected */
 	warnings?: string[];
@@ -104,13 +127,47 @@ export async function createIssue(
 		const config = loadConfig(options.configDir);
 		const projectKey = config.jira?.projectKey;
 		const defaultIssueType = config.jira?.issueType || "Task";
-		const finalIssueType = issueType || defaultIssueType;
 
 		if (!projectKey) {
 			throw new Error(
 				"Jira project key not configured in .backlog-jira/config.json",
 			);
 		}
+
+		// The parent decides between a standard issue under an epic and a
+		// subtask; it is checked in Jira before anything is created
+		const parents = createParentSyncContext(jira, store, {
+			dryRun,
+			// An explicit --parent is honoured even with parent links off
+			enabled: options.parent ? true : undefined,
+		});
+		const parent = parents
+			? resolveParent(options.parent, task, store)
+			: { key: null };
+		if ("error" in parent) {
+			return { success: false, taskId, error: parent.error };
+		}
+		let plan: CreationPlan = {
+			ok: true,
+			issueType: issueType || defaultIssueType,
+			parentKey: null,
+			fields: {},
+		};
+		if (parents && parent.key) {
+			plan = await planIssueCreation(parents, parent.key, {
+				requested: issueType,
+				default: defaultIssueType,
+			});
+			if (!plan.ok) {
+				return {
+					success: false,
+					taskId,
+					error: `Cannot create the issue under ${parent.key}: ${plan.reason}`,
+				};
+			}
+		}
+		const finalIssueType = plan.issueType;
+		const parentKey = plan.parentKey;
 
 		const { mappings: allFieldMappings, errors: mappingErrors } =
 			validateFieldMappings(config.fieldMappings);
@@ -150,6 +207,11 @@ export async function createIssue(
 			console.log("\n🔍 DRY RUN - Would create Jira issue:");
 			console.log(`  Project: ${projectKey}`);
 			console.log(`  Issue Type: ${finalIssueType}`);
+			if (parentKey) {
+				console.log(
+					`  Parent: ${parentKey}${plan.parentKind === "epic" ? " (epic)" : ""}`,
+				);
+			}
 			console.log(`  Summary: ${issueData.summary}`);
 			console.log(
 				`  Description: ${issueData.description?.substring(0, 100)}...`,
@@ -171,6 +233,8 @@ export async function createIssue(
 			return {
 				success: true,
 				taskId,
+				issueType: finalIssueType,
+				...(parentKey ? { parentKey } : {}),
 			};
 		}
 
@@ -189,6 +253,7 @@ export async function createIssue(
 				assignee: issueData.assignee,
 				priority: issueData.priority,
 				labels: issueData.labels,
+				...(Object.keys(plan.fields).length > 0 ? { fields: plan.fields } : {}),
 			},
 			mappedUpdates,
 		);
@@ -205,6 +270,20 @@ export async function createIssue(
 			"Created task-Jira mapping",
 		);
 
+		// An explicit parent linked to another task becomes the task's parent
+		// in Backlog as well
+		if (parent.taskId && parent.taskId !== task.parent) {
+			if (wouldCycle(taskId, parent.taskId)) {
+				logger.warn(
+					{ taskId, parent: parent.taskId },
+					"Parent is a subtask of the task in Backlog; Backlog parent left unchanged",
+				);
+			} else {
+				setTaskParent(taskId, parent.taskId);
+				task = { ...task, parent: parent.taskId };
+			}
+		}
+
 		// Create initial snapshots. Mapped fields Jira rejected stay pending
 		// so the next push retries them.
 		if (failures.length > 0) {
@@ -216,19 +295,23 @@ export async function createIssue(
 				failures,
 			);
 		} else {
-			const backlogHash = computeHash(normalizeBacklogTask(task));
-			store.setSnapshot(
-				taskId,
-				"backlog",
-				backlogHash,
-				normalizeBacklogTask(task),
-			);
-			store.setSnapshot(
-				taskId,
-				"jira",
-				backlogHash,
-				normalizeJiraIssue(createdIssue),
-			);
+			const backlogPayload = normalizeBacklogTask(task);
+			const backlogHash = computeHash(backlogPayload);
+			const jiraPayload = normalizeJiraIssue(createdIssue);
+			// The created issue is as the task describes it, with the parent
+			// it was created under
+			let jiraHash = backlogHash;
+			if (jiraPayload.parent !== undefined) {
+				jiraPayload.parent = parentKey ?? "";
+				if (backlogPayload.parent !== jiraPayload.parent) {
+					jiraHash = computeHash({
+						...backlogPayload,
+						parent: jiraPayload.parent,
+					});
+				}
+			}
+			store.setSnapshot(taskId, "backlog", backlogHash, backlogPayload);
+			store.setSnapshot(taskId, "jira", jiraHash, jiraPayload);
 
 			// Update sync state
 			store.updateSyncState(taskId, {
@@ -275,6 +358,8 @@ export async function createIssue(
 			success: true,
 			taskId,
 			jiraKey: createdIssue.key,
+			issueType: finalIssueType,
+			...(parentKey ? { parentKey } : {}),
 			...(failures.length > 0
 				? {
 						warnings: [formatMappedFieldFailures(createdIssue.key, failures)],
@@ -302,6 +387,54 @@ export async function createIssue(
 		store.close();
 		await jira.close();
 	}
+}
+
+/**
+ * The Jira key the new issue goes under: the --parent given (a Jira key, or
+ * a task ID whose linked issue is meant), else the issue linked to the
+ * task's parent task. taskId is set when the parent is a Backlog task.
+ */
+function resolveParent(
+	explicit: string | undefined,
+	task: BacklogTask,
+	store: FrontmatterStore,
+): { key: string | null; taskId?: string } | { error: string } {
+	if (!explicit) {
+		const own = parentKeyOfTask(task);
+		if ("reason" in own) {
+			return {
+				error: `Cannot create a Jira issue for ${displayTaskId(task.id)}: its ${own.reason}, or pass --parent <JIRA-KEY>`,
+			};
+		}
+		return own.key && task.parent
+			? { key: own.key, taskId: normalizeTaskId(task.parent) }
+			: { key: own.key };
+	}
+
+	const resolved = resolveId(explicit, createIdIndex(store));
+	if (resolved.kind === "task" && !resolved.missing && resolved.taskId) {
+		const parentTask = normalizeTaskId(resolved.taskId);
+		if (parentTask === normalizeTaskId(task.id)) {
+			return { error: "A task cannot be its own parent" };
+		}
+		if (!resolved.jiraKey) {
+			return {
+				error: `Parent task ${displayTaskId(parentTask)} is not linked to a Jira issue; create its issue first (backlog-jira create-issue ${displayTaskId(parentTask)})`,
+			};
+		}
+		return { key: resolved.jiraKey, taskId: parentTask };
+	}
+	if (resolved.kind === "jira" && resolved.jiraKey) {
+		return resolved.taskId
+			? {
+					key: resolved.jiraKey,
+					taskId: normalizeTaskId(resolved.taskId),
+				}
+			: { key: resolved.jiraKey };
+	}
+	return {
+		error: `--parent ${explicit} is neither a Jira key nor a Backlog task (${resolved.missing ? "task not found" : "unrecognised ID"})`,
+	};
 }
 
 /**

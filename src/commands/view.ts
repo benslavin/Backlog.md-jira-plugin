@@ -17,8 +17,10 @@ import { formatIdPair, resolveTaskArg } from "../utils/id-resolver.ts";
 import { getJiraClientOptions } from "../utils/jira-config.ts";
 import { logger } from "../utils/logger.ts";
 import { formatMappedFieldsSection } from "../utils/mapped-field-sync.ts";
+import { formatParentSection } from "../utils/parent-sync.ts";
 import { formatSprintHistory } from "../utils/sprint-report.ts";
 import { readTaskLink } from "../utils/task-links.ts";
+import { linkedJiraKey, readTaskParents } from "../utils/task-parents.ts";
 
 // Import core formatter from backlog.md
 // In the real implementation, this would need to be properly imported from core
@@ -93,6 +95,17 @@ async function viewTask(
 		const sprintLines = getSprintHistoryLines(taskId, !!mapping);
 		if (sprintLines.length > 0) {
 			console.log(sprintLines.join("\n"));
+		}
+
+		// Parent and subtasks as TASK ⇄ KEY pairs
+		const parentLines = formatParentSection(
+			taskId,
+			readTaskParents(),
+			linkedJiraKey,
+			readTaskLink(taskId)?.parentProblem,
+		);
+		if (parentLines.length > 0) {
+			console.log(parentLines.join("\n"));
 		}
 	} catch (error) {
 		logger.error({ error, taskId }, "Failed to view task");

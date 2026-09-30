@@ -31,6 +31,15 @@ import {
 	normalizeBacklogTask,
 	normalizeJiraIssue,
 } from "../utils/normalizer.ts";
+import { PARENT_PAYLOAD_KEY } from "../utils/parent-payload.ts";
+import {
+	type ParentSyncContext,
+	applyParentMerge,
+	createParentSyncContext,
+	detectParentConflict,
+	parentNeedsPull,
+	planParentMerge,
+} from "../utils/parent-sync.ts";
 import { SPRINT_CONFLICT_FIELD } from "../utils/sprint-payload.ts";
 import {
 	type SprintSyncContext,
@@ -182,6 +191,9 @@ export async function sync(options: SyncOptions = {}): Promise<SyncResult> {
 	};
 
 	let sprints: SprintSyncContext | null = null;
+	const parents = createParentSyncContext(jira, store, {
+		dryRun: options.dryRun,
+	});
 	try {
 		// Shared by every task so parallel syncs agree on sprints and milestones
 		sprints = await createSprintSyncContext(sprintMapping, { jira, backlog });
@@ -211,6 +223,7 @@ export async function sync(options: SyncOptions = {}): Promise<SyncResult> {
 						strategy,
 						fieldMappings,
 						sprints,
+						parents,
 						dryRun: options.dryRun || false,
 					});
 
@@ -275,6 +288,7 @@ export async function sync(options: SyncOptions = {}): Promise<SyncResult> {
 		);
 	} finally {
 		if (sprints?.pull) result.warnings?.push(...sprints.pull.warnings);
+		if (parents) result.warnings?.push(...parents.warnings);
 		store.close();
 		// Restore IO filters if applied
 		if (restoreIo) restoreIo();
@@ -314,6 +328,7 @@ async function syncTask(
 		strategy: ConflictStrategy;
 		fieldMappings: FieldMapping[];
 		sprints: SprintSyncContext | null;
+		parents?: ParentSyncContext | null;
 		dryRun: boolean;
 	},
 ): Promise<
@@ -321,8 +336,16 @@ async function syncTask(
 	| { type: "conflict"; resolution: string }
 	| { type: "skipped"; reason: string }
 > {
-	const { store, backlog, jira, strategy, fieldMappings, sprints, dryRun } =
-		context;
+	const {
+		store,
+		backlog,
+		jira,
+		strategy,
+		fieldMappings,
+		sprints,
+		parents = null,
+		dryRun,
+	} = context;
 
 	// Get mapping
 	const mapping = store.getMapping(taskId);
@@ -359,6 +382,19 @@ async function syncTask(
 	// Handle based on state
 	switch (state.state) {
 		case "InSync":
+			// A Jira parent linked to a task since the last sync is pulled
+			if (parents && parentNeedsPull(parents, task, issue, snapshots.backlog)) {
+				if (!dryRun) {
+					assertSucceeded(
+						await pull({
+							taskIds: [taskId],
+							sprintContext: sprints?.pull ?? null,
+							parentContext: parents,
+						}),
+					);
+				}
+				return { type: "synced", direction: "pull" };
+			}
 			logger.info({ taskId }, "Already in sync");
 			return { type: "skipped", reason: "Already in sync" };
 
@@ -369,6 +405,7 @@ async function syncTask(
 					await push({
 						taskIds: [taskId],
 						sprintContext: sprints?.push ?? null,
+						parentContext: parents,
 					}),
 				);
 			}
@@ -381,6 +418,7 @@ async function syncTask(
 					await pull({
 						taskIds: [taskId],
 						sprintContext: sprints?.pull ?? null,
+						parentContext: parents,
 					}),
 				);
 			}
@@ -404,9 +442,10 @@ async function syncTask(
 					fields: [
 						...detectBuiltinFieldConflicts(mappedState, task, fieldMappings),
 						...detectMappedFieldConflicts(mappedState, fieldMappings),
-						...[detectSprintConflict(mappedState, sprints)].filter(
-							(c): c is NonNullable<typeof c> => c !== null,
-						),
+						...[
+							detectSprintConflict(mappedState, sprints),
+							detectParentConflict(mappedState, parents),
+						].filter((c): c is NonNullable<typeof c> => c !== null),
 					],
 					backlogTask: task,
 					jiraIssue: issue,
@@ -417,7 +456,7 @@ async function syncTask(
 					mappedState,
 				},
 				strategy,
-				{ store, backlog, jira, fieldMappings, sprints, dryRun },
+				{ store, backlog, jira, fieldMappings, sprints, parents, dryRun },
 			);
 		}
 
@@ -497,10 +536,12 @@ async function resolveConflict(
 		jira: JiraClient;
 		fieldMappings: FieldMapping[];
 		sprints: SprintSyncContext | null;
+		parents: ParentSyncContext | null;
 		dryRun: boolean;
 	},
 ): Promise<{ type: "conflict"; resolution: string }> {
-	const { store, backlog, jira, fieldMappings, sprints, dryRun } = context;
+	const { store, backlog, jira, fieldMappings, sprints, parents, dryRun } =
+		context;
 
 	logger.info(
 		{ taskId: conflict.taskId, strategy, fieldCount: conflict.fields.length },
@@ -517,6 +558,7 @@ async function resolveConflict(
 						taskIds: [conflict.taskId],
 						force: true,
 						sprintContext: sprints?.push ?? null,
+						parentContext: parents,
 					}),
 				);
 			}
@@ -531,6 +573,7 @@ async function resolveConflict(
 						taskIds: [conflict.taskId],
 						force: true,
 						sprintContext: sprints?.pull ?? null,
+						parentContext: parents,
 					}),
 				);
 			}
@@ -546,6 +589,7 @@ async function resolveConflict(
 						store,
 						fieldMappings,
 						sprints,
+						parents,
 						backlogTask: conflict.backlogTask,
 						mappedState: conflict.mappedState,
 					});
@@ -569,6 +613,7 @@ async function resolveConflict(
 							store,
 							fieldMappings,
 							sprints,
+							parents,
 							backlogTask: conflict.backlogTask,
 							mappedState: conflict.mappedState,
 						},
@@ -656,6 +701,8 @@ export async function applyFieldResolutions(
 		fieldMappings?: FieldMapping[];
 		/** Sprint sync state, when a sprint mapping is configured */
 		sprints?: SprintSyncContext | null;
+		/** Parent sync state, when parent links are on */
+		parents?: ParentSyncContext | null;
 		backlogTask?: BacklogTask;
 		mappedState?: MappedFieldState;
 	},
@@ -666,6 +713,7 @@ export async function applyFieldResolutions(
 		store,
 		fieldMappings = [],
 		sprints = null,
+		parents = null,
 		mappedState,
 	} = context;
 
@@ -674,11 +722,14 @@ export async function applyFieldResolutions(
 	const mappedResolutions = new Map<string, MappedValue>();
 	const builtinResolutions: typeof resolutions = [];
 	let sprintResolution: "backlog" | "jira" | undefined;
+	let parentResolution: "backlog" | "jira" | undefined;
 
 	for (const resolution of resolutions) {
 		const fieldMapping = mappingsByTarget.get(resolution.field);
 		if (resolution.field === SPRINT_CONFLICT_FIELD) {
 			if (resolution.source !== "manual") sprintResolution = resolution.source;
+		} else if (resolution.field === PARENT_PAYLOAD_KEY) {
+			if (resolution.source !== "manual") parentResolution = resolution.source;
 		} else if (fieldMapping && fieldMapping.direction === "both") {
 			mappedResolutions.set(
 				resolution.field,
@@ -746,6 +797,24 @@ export async function applyFieldResolutions(
 				side,
 				sprints,
 				taskId,
+				await jira.getIssue(jiraKey),
+			);
+			if (failures.length > 0) {
+				throw new MappedFieldPushError(jiraKey, failures);
+			}
+		}
+	}
+
+	// Merge the parent: Jira's parent becomes the task's, or the task's
+	// parent is pushed
+	if (mappedState && parents) {
+		const side = planParentMerge(mappedState, parentResolution);
+		if (side) {
+			const failures = await applyParentMerge(
+				side,
+				parents,
+				taskId,
+				await backlog.getTask(taskId),
 				await jira.getIssue(jiraKey),
 			);
 			if (failures.length > 0) {

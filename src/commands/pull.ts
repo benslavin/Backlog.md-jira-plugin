@@ -38,6 +38,14 @@ import {
 	normalizeJiraIssue,
 	stripAcceptanceCriteriaFromDescription,
 } from "../utils/normalizer.ts";
+import { getIssueParent } from "../utils/parent-payload.ts";
+import {
+	type ParentSyncContext,
+	createParentSyncContext,
+	orderByParent,
+	parentNeedsPull,
+	pullTaskParent,
+} from "../utils/parent-sync.ts";
 import { mapJiraPriorityToBacklog } from "../utils/priority-mapping.ts";
 import {
 	type SprintPullContext,
@@ -49,6 +57,7 @@ import {
 } from "../utils/sprint-pull.ts";
 import { mapJiraStatusToBacklog } from "../utils/status-mapping.ts";
 import { classifySyncState } from "../utils/sync-state.ts";
+import { recordParentProblem, taskFileId } from "../utils/task-parents.ts";
 import { sanitizeTitle } from "../utils/title-sanitizer.ts";
 
 /** Placeholder task ID a dry-run import reports */
@@ -68,6 +77,11 @@ export interface PullOptions {
 	 * per call when omitted
 	 */
 	sprintContext?: SprintPullContext | null;
+	/**
+	 * Parent sync state shared across calls (sync collects its warnings);
+	 * created per call when omitted
+	 */
+	parentContext?: ParentSyncContext | null;
 }
 
 export interface PullResult {
@@ -122,6 +136,10 @@ export async function pull(options: PullOptions = {}): Promise<PullResult> {
 
 	let sprints: SprintPullContext | null = null;
 	let warningsFrom = 0;
+	const parents =
+		options.parentContext !== undefined
+			? options.parentContext
+			: createParentSyncContext(jira, store, { dryRun: options.dryRun });
 	try {
 		sprints =
 			options.sprintContext !== undefined
@@ -158,9 +176,9 @@ export async function pull(options: PullOptions = {}): Promise<PullResult> {
 			result.failed.push({ taskId: input, error });
 			result.success = false;
 		}
-		const { mapped, unmapped, warnings } = requested
+		const { mapped, unmapped, warnings, parentOf } = requested
 			? { mapped: requested.taskIds, unmapped: [], warnings: [] }
-			: await getTaskIds(options, backlog, jira, store, sprints);
+			: await getTaskIds(options, backlog, jira, store, sprints, parents);
 		result.warnings.push(...(warnings ?? []));
 
 		logger.info(
@@ -171,9 +189,20 @@ export async function pull(options: PullOptions = {}): Promise<PullResult> {
 		// First, import unmapped issues if in import mode
 		if (options.import && unmapped.length > 0) {
 			logger.info({ count: unmapped.length }, "Importing unmapped issues");
+			// Parents are imported before their children, so children can be
+			// created under the tasks their parents become
+			const groups = parents
+				? orderByParent(unmapped, parentOf ?? new Map())
+				: [unmapped];
 			const batchSize = 10;
-			for (let i = 0; i < unmapped.length; i += batchSize) {
-				const batch = unmapped.slice(i, i + batchSize);
+			const batches = groups.flatMap((group) => {
+				const slices: string[][] = [];
+				for (let i = 0; i < group.length; i += batchSize) {
+					slices.push(group.slice(i, i + batchSize));
+				}
+				return slices;
+			});
+			for (const batch of batches) {
 				const promises = batch.map(async (jiraKey) => {
 					try {
 						const taskId = await importJiraIssue(jiraKey, {
@@ -182,6 +211,7 @@ export async function pull(options: PullOptions = {}): Promise<PullResult> {
 							jira,
 							fieldMappings,
 							sprints,
+							parents,
 							dryRun: options.dryRun || false,
 						});
 
@@ -218,6 +248,7 @@ export async function pull(options: PullOptions = {}): Promise<PullResult> {
 							jira,
 							fieldMappings,
 							sprints,
+							parents,
 							force: options.force || false,
 							dryRun: options.dryRun || false,
 						});
@@ -246,6 +277,10 @@ export async function pull(options: PullOptions = {}): Promise<PullResult> {
 		);
 	} finally {
 		if (sprints) result.warnings.push(...sprints.warnings.slice(warningsFrom));
+		// A shared context's warnings are reported by its owner
+		if (parents && options.parentContext === undefined) {
+			result.warnings.push(...parents.warnings);
+		}
 		store.close();
 		await jira.close();
 		// Restore original log level
@@ -282,7 +317,14 @@ async function getTaskIds(
 	jira: JiraClient,
 	store: FrontmatterStore,
 	sprints: SprintPullContext | null,
-): Promise<{ mapped: string[]; unmapped: string[]; warnings?: string[] }> {
+	parents: ParentSyncContext | null,
+): Promise<{
+	mapped: string[];
+	unmapped: string[];
+	warnings?: string[];
+	/** Jira parent of each unmapped issue (import only) */
+	parentOf?: Map<string, string | null>;
+}> {
 	if (options.all) {
 		// Get all tasks that have mappings
 		const mappings = store.getAllMappings();
@@ -296,6 +338,7 @@ async function getTaskIds(
 			jira,
 			store,
 			sprints?.mapping ?? null,
+			parents !== null,
 		);
 	}
 
@@ -327,7 +370,11 @@ async function getTaskIds(
 				// Sprint changes are not part of the synced payload
 				(state.state === "InSync" &&
 					sprints &&
-					sprintNeedsPull(sprints, taskId, issue))
+					sprintNeedsPull(sprints, taskId, issue)) ||
+				// A Jira parent linked to a task since the last pull
+				(state.state === "InSync" &&
+					parents &&
+					parentNeedsPull(parents, task, issue, snapshots.backlog))
 			) {
 				needsPull.push(taskId);
 			}
@@ -347,7 +394,13 @@ async function getIssuesForImport(
 	jira: JiraClient,
 	store: FrontmatterStore,
 	sprintMapping: SprintMapping | null,
-): Promise<{ mapped: string[]; unmapped: string[]; warnings?: string[] }> {
+	withParents: boolean,
+): Promise<{
+	mapped: string[];
+	unmapped: string[];
+	warnings?: string[];
+	parentOf: Map<string, string | null>;
+}> {
 	// Get JQL from options or config
 	let jql = options.jql;
 	let configProjectKey: string | undefined;
@@ -386,6 +439,7 @@ async function getIssuesForImport(
 	// Search for issues, page by page
 	const result = await jira.searchAllIssues(jql, {
 		limit: DEFAULT_SEARCH_ALL_LIMIT,
+		parents: withParents,
 	});
 	logger.info(
 		{ count: result.issues.length, truncated: result.truncated },
@@ -400,6 +454,7 @@ async function getIssuesForImport(
 	// Separate mapped and unmapped issues
 	const mapped: string[] = [];
 	const unmapped: string[] = [];
+	const parentOf = new Map<string, string | null>();
 
 	for (const issue of result.issues) {
 		const mapping = store.getMappingByJiraKey(issue.key);
@@ -409,6 +464,7 @@ async function getIssuesForImport(
 		} else {
 			// Unmapped - will be imported
 			unmapped.push(issue.key);
+			parentOf.set(issue.key.toUpperCase(), getIssueParent(issue)?.key ?? null);
 		}
 	}
 
@@ -417,7 +473,7 @@ async function getIssuesForImport(
 		"Categorized issues for import",
 	);
 
-	return { mapped, unmapped, warnings };
+	return { mapped, unmapped, warnings, parentOf };
 }
 
 /**
@@ -463,12 +519,21 @@ async function pullTask(
 		jira: JiraClient;
 		fieldMappings: FieldMapping[];
 		sprints: SprintPullContext | null;
+		parents: ParentSyncContext | null;
 		force: boolean;
 		dryRun: boolean;
 	},
 ): Promise<void> {
-	const { store, backlog, jira, fieldMappings, sprints, force, dryRun } =
-		context;
+	const {
+		store,
+		backlog,
+		jira,
+		fieldMappings,
+		sprints,
+		parents,
+		force,
+		dryRun,
+	} = context;
 
 	// Get mapping
 	const mapping = store.getMapping(taskId);
@@ -510,6 +575,25 @@ async function pullTask(
 		if (state.state === "InSync") {
 			// Sprint changes are not part of the synced payload
 			if (sprints) await pullSprint(sprints, taskId, issue, force);
+			// Nor is a Jira parent that has been linked to a task since
+			if (
+				parents &&
+				parentNeedsPull(parents, task, issue, snapshots.backlog) &&
+				pullTaskParent(parents, taskId, task, issue).changed &&
+				!dryRun
+			) {
+				const updatedTask = await backlog.getTask(taskId);
+				const updatedPayload = normalizeBacklogTask(updatedTask);
+				store.setSnapshot(
+					taskId,
+					"backlog",
+					computeHash(updatedPayload),
+					updatedPayload,
+				);
+				store.setSnapshot(taskId, "jira", jiraHash, jiraPayload);
+				logger.info({ taskId }, "Pulled task parent");
+				return;
+			}
 			logger.info({ taskId }, "Task already in sync, skipping");
 			return;
 		}
@@ -561,6 +645,7 @@ async function pullTask(
 			"DRY RUN: Would update Backlog task",
 		);
 		if (sprints) await pullSprint(sprints, taskId, issue);
+		if (parents) pullTaskParent(parents, taskId, task, issue);
 	} else {
 		// Apply updates via Backlog CLI
 		if (Object.keys(updates).length > 0) {
@@ -573,18 +658,34 @@ async function pullTask(
 
 		if (sprints) await pullSprint(sprints, taskId, issue, force);
 
+		// The parent_task_id line is written last, directly
+		const parent = parents
+			? pullTaskParent(parents, taskId, task, issue)
+			: null;
+
 		// Update snapshots with freshly updated data
 		const updatedTask = await backlog.getTask(taskId);
+		const updatedPayload = normalizeBacklogTask(updatedTask);
 		recordSyncedSnapshots(
 			store,
 			taskId,
 			{
-				backlog: normalizeBacklogTask(updatedTask),
+				backlog: updatedPayload,
 				jira: normalizeJiraIssue(issue),
 			},
 			"jira",
 			fieldMappings,
 		);
+		if (parent && !parent.applied) {
+			// The task keeps its parent: its snapshot is itself, so the unpulled
+			// Jira parent is not seen as a Backlog change to push
+			store.setSnapshot(
+				taskId,
+				"backlog",
+				computeHash(updatedPayload),
+				updatedPayload,
+			);
+		}
 
 		store.updateSyncState(taskId, {
 			lastSyncAt: new Date().toISOString(),
@@ -881,10 +982,12 @@ async function importJiraIssue(
 		jira: JiraClient;
 		fieldMappings: FieldMapping[];
 		sprints: SprintPullContext | null;
+		parents: ParentSyncContext | null;
 		dryRun: boolean;
 	},
 ): Promise<string> {
-	const { store, backlog, jira, fieldMappings, sprints, dryRun } = context;
+	const { store, backlog, jira, fieldMappings, sprints, parents, dryRun } =
+		context;
 
 	// Get Jira issue
 	const issue = await jira.getIssue(jiraKey);
@@ -965,6 +1068,10 @@ async function importJiraIssue(
 		fieldMappings.map((m) => m.backlog).filter(isCoreOverrideTarget),
 	);
 
+	// The task is created under the task its Jira parent or epic is linked to
+	const jiraParent = parents ? getIssueParent(issue)?.key : undefined;
+	const parentTaskId = jiraParent ? parents?.taskForJiraKey(jiraParent) : null;
+
 	// Create Backlog task with sanitized title
 	const taskId = await backlog.createTask({
 		title: sanitizeTitle(issue.summary),
@@ -977,6 +1084,7 @@ async function importJiraIssue(
 			: mapJiraPriorityToBacklog(issue.priority),
 		// Add acceptance criteria during creation
 		ac: acceptanceCriteria.map((ac) => ac.text),
+		...(parentTaskId ? { parent: taskFileId(parentTaskId) } : {}),
 	});
 
 	logger.info({ taskId, jiraKey }, "Created Backlog task from Jira issue");
@@ -1016,10 +1124,27 @@ async function importJiraIssue(
 	store.addMapping(taskId, jiraKey);
 	logger.info({ taskId, jiraKey }, "Created mapping");
 
+	// A Jira parent linked to no task is reported; a later pull sets the
+	// parent once it is linked
+	const parentPending = Boolean(jiraParent && !parentTaskId);
+	if (parents && jiraParent && !parentTaskId) {
+		const problem = `Jira parent ${jiraParent} is not linked to a Backlog task; import it (backlog-jira pull --import) or link it (backlog-jira map link <task> ${jiraParent}), then pull again`;
+		parents.warnings.push(
+			`${formatIdPair(taskId, jiraKey)}: imported without its parent: ${problem}`,
+		);
+		recordParentProblem(taskId, problem);
+	}
+
 	// Set initial snapshots
 	const task = await backlog.getTask(taskId);
+	const backlogPayload = normalizeBacklogTask(task);
 	const syncedHash = computeHash(normalizeJiraIssue(issue));
-	store.setSnapshot(taskId, "backlog", syncedHash, normalizeBacklogTask(task));
+	store.setSnapshot(
+		taskId,
+		"backlog",
+		parentPending ? computeHash(backlogPayload) : syncedHash,
+		backlogPayload,
+	);
 	store.setSnapshot(taskId, "jira", syncedHash, normalizeJiraIssue(issue));
 
 	store.updateSyncState(taskId, {

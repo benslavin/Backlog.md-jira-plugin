@@ -2,6 +2,7 @@ import chalk from "chalk";
 import prompts from "prompts";
 import type { Conflict, FieldConflict } from "../commands/sync.ts";
 import { formatIdPair } from "../utils/id-resolver.ts";
+import { PARENT_PAYLOAD_KEY } from "../utils/parent-payload.ts";
 import { SPRINT_CONFLICT_FIELD } from "../utils/sprint-payload.ts";
 
 export interface ResolutionChoice {
@@ -55,9 +56,10 @@ export async function promptForConflictResolution(
 					description: formatValue(fieldConflict.jiraValue),
 				},
 				// Acceptance criteria are a checklist, not a single typed value;
-				// a sprint is chosen from one side
+				// a sprint or parent is chosen from one side
 				...(fieldConflict.field === "acceptanceCriteria" ||
-				fieldConflict.field === SPRINT_CONFLICT_FIELD
+				fieldConflict.field === SPRINT_CONFLICT_FIELD ||
+				fieldConflict.field === PARENT_PAYLOAD_KEY
 					? []
 					: [
 							{

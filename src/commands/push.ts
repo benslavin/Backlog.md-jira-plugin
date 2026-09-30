@@ -32,6 +32,16 @@ import {
 	normalizeJiraIssue,
 	stripAcceptanceCriteriaFromDescription,
 } from "../utils/normalizer.ts";
+import { PARENT_LINK_MAPPING } from "../utils/parent-payload.ts";
+import {
+	type CreationPlan,
+	type ParentSyncContext,
+	createParentSyncContext,
+	parentKeyOfTask,
+	planIssueCreation,
+	pushParentFailures,
+	pushTaskParent,
+} from "../utils/parent-sync.ts";
 import { mapBacklogPriorityToJira } from "../utils/priority-mapping.ts";
 import {
 	type SprintPushContext,
@@ -41,6 +51,7 @@ import {
 } from "../utils/sprint-push.ts";
 import { findTransitionForStatus } from "../utils/status-mapping.ts";
 import { classifySyncState } from "../utils/sync-state.ts";
+import { recordParentProblem } from "../utils/task-parents.ts";
 
 export interface PushOptions {
 	taskIds?: string[];
@@ -54,6 +65,11 @@ export interface PushOptions {
 	 * omitted
 	 */
 	sprintContext?: SprintPushContext | null;
+	/**
+	 * Parent sync state shared across calls (sync collects its warnings);
+	 * created per call when omitted
+	 */
+	parentContext?: ParentSyncContext | null;
 }
 
 export interface PushResult {
@@ -124,6 +140,10 @@ export async function push(options: PushOptions = {}): Promise<PushResult> {
 		if (sprints && options.sprintContext) {
 			jira.includeIssueFields([sprints.sprintFieldId]);
 		}
+		const parents =
+			options.parentContext !== undefined
+				? options.parentContext
+				: createParentSyncContext(jira, store, { dryRun: options.dryRun });
 
 		// Get list of tasks to push; given IDs may be Jira keys of linked tasks
 		const requested = options.taskIds?.length
@@ -153,6 +173,7 @@ export async function push(options: PushOptions = {}): Promise<PushResult> {
 						issueType,
 						fieldMappings,
 						sprints,
+						parents,
 						force: options.force || false,
 						dryRun: options.dryRun || false,
 					});
@@ -266,6 +287,7 @@ async function pushTask(
 		issueType: string;
 		fieldMappings: FieldMapping[];
 		sprints: SprintPushContext | null;
+		parents: ParentSyncContext | null;
 		force: boolean;
 		dryRun: boolean;
 	},
@@ -278,6 +300,7 @@ async function pushTask(
 		issueType,
 		fieldMappings,
 		sprints,
+		parents,
 		force,
 		dryRun,
 	} = context;
@@ -340,6 +363,15 @@ async function pushTask(
 				"DRY RUN: Would update Jira issue",
 			);
 			if (sprints) await pushSprint(sprints, taskId, issue);
+			if (parents) {
+				const parent = await pushTaskParent(parents, taskId, task, issue);
+				if (parent.status === "failed") {
+					logger.info(
+						{ taskId, reason: parent.reason },
+						"DRY RUN: Parent would not be pushed",
+					);
+				}
+			}
 		} else {
 			// Update issue fields; mapped fields that Jira rejects are reported
 			// individually after the rest of the push completes
@@ -356,6 +388,12 @@ async function pushTask(
 					comment: updates.transition.comment,
 				});
 			}
+
+			// The task's parent becomes the issue's parent or epic; parents
+			// Jira cannot represent stay pending like failed mapped fields
+			failures.push(
+				...(await pushParentFailures(parents, taskId, task, issue)),
+			);
 
 			// The milestone moves the issue between sprints; sprint problems are
 			// reported like mapped field failures after the rest is pushed
@@ -431,9 +469,36 @@ async function pushTask(
 			fieldMappings,
 		);
 
+		// Created under the issue linked to the task's parent; when that
+		// cannot be done the issue is created on its own and the parent is
+		// reported and left pending
+		let plan: CreationPlan = {
+			ok: true,
+			issueType,
+			parentKey: null,
+			fields: {},
+		};
+		let parentFailure: string | null = null;
+		if (parents) {
+			const own = parentKeyOfTask(task);
+			const planned =
+				"reason" in own
+					? { ok: false as const, reason: own.reason }
+					: await planIssueCreation(parents, own.key, { default: issueType });
+			if (planned.ok) plan = planned;
+			else parentFailure = planned.reason;
+		}
+
 		if (dryRun) {
 			logger.info(
-				{ taskId, projectKey, issueType, mappedFields: mappedUpdates.fields },
+				{
+					taskId,
+					projectKey,
+					issueType: plan.issueType,
+					parent: plan.parentKey,
+					parentFailure,
+					mappedFields: mappedUpdates.fields,
+				},
 				"DRY RUN: Would create new Jira issue",
 			);
 		} else {
@@ -462,7 +527,7 @@ async function pushTask(
 			const { issue, failures } = await createIssueWithMappedFields(
 				jira,
 				projectKey,
-				issueType,
+				plan.issueType,
 				task.title,
 				{
 					description: descriptionWithAc,
@@ -472,12 +537,19 @@ async function pushTask(
 							? mapBacklogPriorityToJira(task.priority)
 							: undefined,
 					labels: overridden.has("labels") ? undefined : task.labels,
+					...(Object.keys(plan.fields).length > 0
+						? { fields: plan.fields }
+						: {}),
 				},
 				mappedUpdates,
 			);
+			if (parentFailure) {
+				failures.push({ mapping: PARENT_LINK_MAPPING, error: parentFailure });
+			}
 
 			// Create mapping
 			store.addMapping(taskId, issue.key);
+			if (parentFailure) recordParentProblem(taskId, parentFailure);
 
 			const sprintFailures = sprints
 				? await pushSprint(sprints, taskId, issue)
@@ -495,18 +567,19 @@ async function pushTask(
 					fieldMappings,
 				);
 			} else {
+				const jiraPayload = normalizeJiraIssue(issue);
+				// Created under the task's parent, which the create response
+				// may not report
+				if (jiraPayload.parent !== undefined) {
+					jiraPayload.parent = plan.parentKey ?? "";
+				}
 				store.setSnapshot(
 					taskId,
 					"backlog",
 					backlogHash,
 					normalizeBacklogTask(task),
 				);
-				store.setSnapshot(
-					taskId,
-					"jira",
-					backlogHash,
-					normalizeJiraIssue(issue),
-				);
+				store.setSnapshot(taskId, "jira", backlogHash, jiraPayload);
 			}
 
 			store.updateSyncState(taskId, {

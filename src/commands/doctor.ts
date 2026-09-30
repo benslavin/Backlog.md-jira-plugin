@@ -2,6 +2,10 @@ import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
+import {
+	findEpicLinkFieldId,
+	isJiraCloudUrl,
+} from "../integrations/jira-hierarchy.ts";
 import type { JiraSprint } from "../integrations/jira-sprints.ts";
 import { JiraClient } from "../integrations/jira.ts";
 import {
@@ -15,12 +19,17 @@ import {
 	loadSprintMapping,
 	readTaskFrontmatter,
 } from "../utils/field-mapping.ts";
+import { loadHierarchyConfig } from "../utils/hierarchy-config.ts";
+import { formatIdPair } from "../utils/id-resolver.ts";
 import { getJiraClientOptions } from "../utils/jira-config.ts";
 import { logger } from "../utils/logger.ts";
 import {
 	type FieldMappingCheck,
 	verifyFieldMappings,
 } from "../utils/mapped-field-sync.ts";
+import { findParentLinkProblems } from "../utils/parent-sync.ts";
+import { readTaskLink } from "../utils/task-links.ts";
+import { linkedJiraKey, readTaskParents } from "../utils/task-parents.ts";
 
 async function exec(command: string, args: string[] = []): Promise<string> {
 	return new Promise((resolve, reject) => {
@@ -416,6 +425,80 @@ function findUnmatchedMilestones(
 	return unmatched;
 }
 
+/**
+ * Report parent links of linked tasks that cannot be synced: parents not
+ * linked to Jira, hierarchies deeper than Jira allows, and problems the last
+ * pull or push recorded. On Jira Server/Data Center, also report how epics
+ * are linked. Returns the number of warnings.
+ */
+export async function checkParentLinks(
+	jira: Pick<JiraClient, "searchFields"> | null,
+	cwd = process.cwd(),
+): Promise<number> {
+	const config = loadHierarchyConfig(cwd);
+	if (!config.parentLinks) {
+		logger.info("  ✓ Parent links are not synced (sync.parentLinks: false)");
+		return 0;
+	}
+
+	let warnings = 0;
+	if (config.epicLinkField) {
+		logger.info(
+			config.epicLinkField === "parent"
+				? "  ✓ Epics are linked through the parent field (jira.epicLinkField)"
+				: `  ✓ Epics are linked through ${config.epicLinkField} (jira.epicLinkField)`,
+		);
+	} else if (jira && !isJiraCloudUrl(process.env.JIRA_URL)) {
+		// Jira Server/Data Center links epics through the Epic Link field
+		try {
+			const fieldId = findEpicLinkFieldId(
+				await jira.searchFields("epic link", 50),
+			);
+			if (fieldId) {
+				logger.info(
+					`  ✓ Epics are linked through the Epic Link field ${fieldId}`,
+				);
+			} else {
+				logger.warn(
+					'  ⚠ No Epic Link field found; epics are linked through the parent field. Set jira.epicLinkField to the Epic Link field id (or "parent") in .backlog-jira/config.json',
+				);
+				warnings++;
+			}
+		} catch (error) {
+			logger.warn(
+				`  ⚠ Could not look up the Epic Link field: ${error instanceof Error ? error.message.split("\n")[0] : String(error)}`,
+			);
+			warnings++;
+		}
+	}
+
+	const problems = findParentLinkProblems(
+		readTaskParents(cwd),
+		linkedJiraKey,
+		(taskId) => readTaskLink(taskId)?.parentProblem,
+	);
+	if (problems.length === 0) {
+		logger.info("  ✓ Parent links of linked tasks can be synced");
+		return warnings;
+	}
+	logger.warn(
+		`  ⚠ ${problems.length} linked task${problems.length === 1 ? "" : "s"} ha${problems.length === 1 ? "s a parent link" : "ve parent links"} that cannot be synced:`,
+	);
+	for (const { taskId, jiraKey, problem } of problems) {
+		logger.warn(`    - ${formatIdPair(taskId, jiraKey)}: ${problem}`);
+	}
+	return warnings + problems.length;
+}
+
+async function checkParentLinksWithJira(): Promise<number> {
+	const jira = new JiraClient({ ...getJiraClientOptions(), silentMode: true });
+	try {
+		return await checkParentLinks(jira);
+	} finally {
+		await jira.close().catch(() => {});
+	}
+}
+
 async function checkSprintSyncWithJira(): Promise<number> {
 	const jira = new JiraClient({ ...getJiraClientOptions(), silentMode: true });
 	try {
@@ -459,6 +542,7 @@ export async function runDoctor(): Promise<DoctorResult> {
 		{ name: "MCP Connectivity", fn: checkMCPConnectivity, critical: true },
 		{ name: "Field mappings", fn: checkFieldMappingsWithJira, critical: true },
 		{ name: "Sprint sync", fn: checkSprintSyncWithJira, critical: true },
+		{ name: "Parent links", fn: checkParentLinksWithJira, critical: false },
 		{ name: "Backlog.md project", fn: checkMCPServer, critical: false },
 		{ name: "Git status", fn: checkGitStatus, critical: false },
 		{ name: "Disk space", fn: checkDiskSpace, critical: false },
