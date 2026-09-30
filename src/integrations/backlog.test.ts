@@ -236,6 +236,31 @@ Created: 2026-09-28 20:42 (UTC)
 			});
 		});
 
+		it("reads a task without a description as having none", () => {
+			const detail = (description: string) => `Task TASK-1 - Hello
+==================================================
+
+Status: ○ To Do
+
+Description:
+--------------------------------------------------
+${description}
+
+Acceptance Criteria:
+--------------------------------------------------
+No acceptance criteria defined
+`;
+			const p = parsers() as unknown as {
+				parseTaskDetail: (output: string) => { description?: string };
+			};
+			expect(
+				p.parseTaskDetail(detail("No description provided")).description,
+			).toBeUndefined();
+			expect(p.parseTaskDetail(detail("Real text")).description).toBe(
+				"Real text",
+			);
+		});
+
 		it("parses the created task ID from create output", () => {
 			const p = parsers();
 			expect(

@@ -31508,6 +31508,7 @@ init_logger();
 init_task_links();
 import { spawn as spawn4 } from "node:child_process";
 var TASK_ID = "[A-Za-z][A-Za-z0-9_]*-\\d+(?:\\.\\d+)*";
+var EMPTY_DESCRIPTION_PLACEHOLDER = "No description provided";
 
 class BacklogClient {
   cliPath;
@@ -31825,7 +31826,9 @@ class BacklogClient {
       return;
     switch (section) {
       case "Description":
-        task.description = trimmed;
+        if (trimmed !== EMPTY_DESCRIPTION_PLACEHOLDER) {
+          task.description = trimmed;
+        }
         break;
       case "Implementation Plan":
         task.implementationPlan = trimmed;

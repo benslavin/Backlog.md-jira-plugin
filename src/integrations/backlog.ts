@@ -6,6 +6,9 @@ import { normalizeTaskId } from "../utils/task-links.ts";
 // Task IDs as printed by the Backlog.md CLI: task-1, TASK-1, TASK-1.2
 const TASK_ID = "[A-Za-z][A-Za-z0-9_]*-\\d+(?:\\.\\d+)*";
 
+/** What `backlog task <id> --plain` prints as the description of a task without one */
+const EMPTY_DESCRIPTION_PLACEHOLDER = "No description provided";
+
 export interface BacklogTask {
 	id: string;
 	title: string;
@@ -507,7 +510,10 @@ export class BacklogClient {
 
 		switch (section) {
 			case "Description":
-				task.description = trimmed;
+				// Backlog.md prints a placeholder for a task without a description
+				if (trimmed !== EMPTY_DESCRIPTION_PLACEHOLDER) {
+					task.description = trimmed;
+				}
 				break;
 			case "Implementation Plan":
 				task.implementationPlan = trimmed;

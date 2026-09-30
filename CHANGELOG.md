@@ -16,6 +16,7 @@ This project is a fork of [eciuca/Backlog.md-jira-plugin](https://github.com/eci
 
 ### Fixed
 
+- Tasks without a description are read with an empty description instead of Backlog.md's "No description provided" placeholder. Issues imported with an empty description no longer look changed on every push, and the placeholder is no longer pushed to Jira. Issues that already received it are left as they are.
 - Mappings of `timeoriginalestimate`, `timeestimate`, `timespent` and `comment` pull values. MCP Atlassian only returns these inside `timetracking` and `comments`, so they were silently empty. Estimates are pulled as Jira's duration strings (`"1d"`) and need `"type": "string"`. Validation now rejects other types and push directions for these fields.
 - `configure` and `map-fields fields` no longer offer system fields MCP Atlassian does not return, and `doctor` reports pull mappings of them.
 

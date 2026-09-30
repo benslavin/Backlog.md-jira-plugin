@@ -116,7 +116,7 @@ const fakeMethods: Partial<Record<keyof JiraClient, unknown>> = {
 		const parent = options?.fields?.parent;
 		jiraIssues.set(key, {
 			summary,
-			description: options?.description,
+			description: options?.description ?? "",
 			issueType,
 			parent: typeof parent === "string" ? parent : null,
 		});
@@ -401,5 +401,21 @@ describe.skipIf(!hasBacklogCli)("parent and epic links", () => {
 		expect(result.synced).toContain(story);
 		expect(parentOf(story)).toBe(epicTask);
 		expect(jiraIssues.get("PROJ-2")?.parent).toBe("PROJ-1");
+	});
+
+	it("keeps an issue imported with an empty description in sync", async () => {
+		jiraIssues.set("PROJ-70", {
+			summary: "Blank",
+			description: "",
+			issueType: "Story",
+			parent: null,
+		});
+		await pull({ import: true });
+		const blank = taskOf("PROJ-70");
+
+		expect((await backlog.getTask(blank)).description).toBeUndefined();
+		expect((await push()).pushed).not.toContain(blank);
+		expect((await sync()).skipped).toContain(blank);
+		expect(jiraIssues.get("PROJ-70")?.description).toBe("");
 	});
 });

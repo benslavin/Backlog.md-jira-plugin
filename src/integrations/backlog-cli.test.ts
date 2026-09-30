@@ -71,6 +71,14 @@ describe.skipIf(!hasBacklogCli)("Backlog.md CLI compatibility", () => {
 		);
 	});
 
+	it("reads a task created without a description as having none", async () => {
+		const taskId = await client.createTask({ title: "No description" });
+		expect(backlog("task", taskId, "--plain")).toContain(
+			"No description provided",
+		);
+		expect((await client.getTask(taskId)).description).toBeUndefined();
+	});
+
 	it("keeps Jira metadata and mapped fields across a user's backlog task edit", () => {
 		const filePath = getTaskFilePath("task-1");
 		updateJiraMetadata(filePath, {

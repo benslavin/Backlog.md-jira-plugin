@@ -3,11 +3,11 @@ id: TASK-360
 title: >-
   Pull Jira time estimates and comments through MCP Atlassian's simplified issue
   fields
-status: In Progress
+status: Done
 assignee:
   - '@claude'
 created_date: '2026-09-29 18:03'
-updated_date: '2026-09-29 18:08'
+updated_date: '2026-09-30 19:58'
 labels:
   - jira
   - field-mapping
