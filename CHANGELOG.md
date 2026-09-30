@@ -4,6 +4,8 @@ This project is a fork of [eciuca/Backlog.md-jira-plugin](https://github.com/eci
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-09-30
+
 ### Added
 
 - Parent and epic links: task parents follow their issues' Jira parents and epics (Epic Link on Jira Server/Data Center) on pull, push and sync, compared by linked Jira key, with `parent` conflicts in the prompt. `pull --import` imports parents before children as Backlog subtasks, and issues whose Jira parent is linked to no task are reported and get their parent once it is linked. Hierarchies Jira cannot represent without changing issue types are reported and left pending. `view` shows a task's parent and subtasks, and `doctor` lists parent links that cannot be synced. See `docs/parent-sync.md`.
@@ -56,5 +58,7 @@ First fork release. Forked from upstream `main` at `6c77390` (2025-10-28), which
 
 Last upstream release, published to npm as `backlog-jira`. See the upstream repository for earlier history.
 
+[Unreleased]: https://github.com/benslavin/Backlog.md-jira-plugin/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/benslavin/Backlog.md-jira-plugin/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/benslavin/Backlog.md-jira-plugin/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/eciuca/Backlog.md-jira-plugin/releases/tag/v0.2.0
