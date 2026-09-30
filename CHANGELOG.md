@@ -4,6 +4,8 @@ This project is a fork of [eciuca/Backlog.md-jira-plugin](https://github.com/eci
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-09-30
+
 ### Fixed
 
 - `create-issue` and pushes work with current MCP Atlassian, which takes `jira_create_issue`'s `additional_fields` and `jira_update_issue`'s and `jira_transition_issue`'s `fields` as JSON strings. The plugin sent objects, so every issue created with a priority, labels, parent or mapped field, and every push that changed a field, failed with `Input should be a valid string`.
@@ -64,7 +66,8 @@ First fork release. Forked from upstream `main` at `6c77390` (2025-10-28), which
 
 Last upstream release, published to npm as `backlog-jira`. See the upstream repository for earlier history.
 
-[Unreleased]: https://github.com/benslavin/Backlog.md-jira-plugin/compare/v0.3.1...HEAD
+[Unreleased]: https://github.com/benslavin/Backlog.md-jira-plugin/compare/v0.3.2...HEAD
+[0.3.2]: https://github.com/benslavin/Backlog.md-jira-plugin/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/benslavin/Backlog.md-jira-plugin/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/benslavin/Backlog.md-jira-plugin/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/eciuca/Backlog.md-jira-plugin/releases/tag/v0.2.0

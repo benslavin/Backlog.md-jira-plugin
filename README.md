@@ -177,7 +177,7 @@ pnpm add -g git+https://github.com/benslavin/Backlog.md-jira-plugin.git
 bun add -g git+https://github.com/benslavin/Backlog.md-jira-plugin.git
 ```
 
-To pin a specific branch, tag, or commit, append `#<ref>` (e.g. `...Backlog.md-jira-plugin.git#v0.3.1`).
+To pin a specific branch, tag, or commit, append `#<ref>` (e.g. `...Backlog.md-jira-plugin.git#v0.3.2`).
 
 The prebuilt CLI (`dist/cli.js`) is committed to the repository, so installing runs no build scripts and works with pnpm's and bun's default script-blocking policies. It runs on Node.js 20+ (or Bun); Bun is only needed to develop the plugin.
 
