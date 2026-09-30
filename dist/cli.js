@@ -26417,6 +26417,7 @@ var init_jira_hierarchy = __esm(() => {
 // src/integrations/jira.ts
 class JiraClient {
   client = null;
+  connecting = null;
   dockerImage;
   useExternalServer;
   serverCommand;
@@ -26452,9 +26453,15 @@ class JiraClient {
     }
   }
   async ensureConnected() {
-    if (this.client) {
+    if (this.client && !this.connecting) {
       return this.client;
     }
+    this.connecting ??= this.connect().finally(() => {
+      this.connecting = null;
+    });
+    return this.connecting;
+  }
+  async connect() {
     if (!this.silentMode) {
       logger.debug("Initializing MCP client connection to Atlassian server");
     }
@@ -26623,6 +26630,9 @@ ${tail}`);
     throw new Error("MCP server failed to complete initialization after multiple retries");
   }
   async close() {
+    if (this.connecting) {
+      await this.connecting.catch(() => {});
+    }
     if (this.client) {
       await this.client.close();
       this.client = null;
@@ -27262,7 +27272,7 @@ Original error: ${message}`);
       }
       const result = await this.callMcpTool("jira_update_issue", {
         issue_key: issueKey,
-        fields
+        fields: JSON.stringify(fields)
       });
       const failed = result?.operations_failed;
       if (Array.isArray(failed) && failed.length > 0) {
@@ -27329,7 +27339,7 @@ Original error: ${message}`);
         input.comment = options.comment;
       }
       if (options?.fields) {
-        input.fields = options.fields;
+        input.fields = JSON.stringify(options.fields);
       }
       await this.callMcpTool("jira_transition_issue", input);
       logger.info({ issueKey, transitionId }, "Transitioned Jira issue");
@@ -27413,26 +27423,16 @@ Original error: ${message}`);
       if (options?.assignee) {
         input.assignee = options.assignee;
       }
-      if (options?.priority) {
-        input.additional_fields = {
-          ...input.additional_fields || {},
-          priority: { name: options.priority }
-        };
-      }
-      if (options?.labels) {
-        input.additional_fields = {
-          ...input.additional_fields || {},
-          labels: options.labels
-        };
-      }
       if (options?.components) {
         input.components = options.components;
       }
-      if (options?.fields) {
-        input.additional_fields = {
-          ...input.additional_fields || {},
-          ...options.fields
-        };
+      const additionalFields = {
+        ...options?.priority ? { priority: { name: options.priority } } : {},
+        ...options?.labels ? { labels: options.labels } : {},
+        ...options?.fields
+      };
+      if (Object.keys(additionalFields).length > 0) {
+        input.additional_fields = JSON.stringify(additionalFields);
       }
       const result = await this.callMcpTool("jira_create_issue", input);
       if (!result || typeof result !== "object") {
@@ -33759,7 +33759,10 @@ async function pull(options = {}) {
   }
   const store = new FrontmatterStore;
   const backlog = new BacklogClient;
-  const jira = new JiraClient(getJiraClientOptions());
+  const jira = options.jira ?? new JiraClient({
+    ...getJiraClientOptions(),
+    silentMode: !options.verbose
+  });
   const result = {
     success: true,
     pulled: [],
@@ -33866,7 +33869,8 @@ async function pull(options = {}) {
       result.warnings.push(...parents.warnings);
     }
     store.close();
-    await jira.close();
+    if (!options.jira)
+      await jira.close();
     logger.level = originalLevel;
   }
   logger.info({ result }, "Pull operation completed");
@@ -34519,7 +34523,10 @@ async function push(options = {}) {
   }
   const store = new FrontmatterStore;
   const backlog = new BacklogClient;
-  const jira = new JiraClient(getJiraClientOptions());
+  const jira = options.jira ?? new JiraClient({
+    ...getJiraClientOptions(),
+    silentMode: !options.verbose
+  });
   const config = loadConfig2();
   const projectKey = config.jira?.projectKey;
   const issueType = config.jira?.issueType || "Task";
@@ -34582,7 +34589,8 @@ async function push(options = {}) {
     store.logOperation("push", null, null, result.success ? "success" : "partial", JSON.stringify(result));
   } finally {
     try {
-      await jira.close();
+      if (!options.jira)
+        await jira.close();
     } catch (e) {}
     store.close();
     logger.level = originalLevel;
@@ -35705,6 +35713,9 @@ ${error.message}` : minimal
     if (parents)
       result.warnings?.push(...parents.warnings);
     store.close();
+    try {
+      await jira.close();
+    } catch {}
     if (restoreIo)
       restoreIo();
     logger.level = originalLevel;
@@ -35757,7 +35768,8 @@ async function syncTask(taskId, context) {
           assertSucceeded(await pull({
             taskIds: [taskId],
             sprintContext: sprints?.pull ?? null,
-            parentContext: parents
+            parentContext: parents,
+            jira
           }));
         }
         return { type: "synced", direction: "pull" };
@@ -35769,7 +35781,8 @@ async function syncTask(taskId, context) {
         assertSucceeded(await push({
           taskIds: [taskId],
           sprintContext: sprints?.push ?? null,
-          parentContext: parents
+          parentContext: parents,
+          jira
         }));
       }
       return { type: "synced", direction: "push" };
@@ -35778,7 +35791,8 @@ async function syncTask(taskId, context) {
         assertSucceeded(await pull({
           taskIds: [taskId],
           sprintContext: sprints?.pull ?? null,
-          parentContext: parents
+          parentContext: parents,
+          jira
         }));
       }
       return { type: "synced", direction: "pull" };
@@ -35860,7 +35874,8 @@ async function resolveConflict(conflict, strategy, context) {
           taskIds: [conflict.taskId],
           force: true,
           sprintContext: sprints?.push ?? null,
-          parentContext: parents
+          parentContext: parents,
+          jira
         }));
       }
       return { type: "conflict", resolution: "preferred-backlog" };
@@ -35870,7 +35885,8 @@ async function resolveConflict(conflict, strategy, context) {
           taskIds: [conflict.taskId],
           force: true,
           sprintContext: sprints?.pull ?? null,
-          parentContext: parents
+          parentContext: parents,
+          jira
         }));
       }
       return { type: "conflict", resolution: "preferred-jira" };

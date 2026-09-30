@@ -88,6 +88,8 @@ export interface JiraClientOptions {
 
 export class JiraClient {
 	private client: Client | null = null;
+	/** Connection in progress, shared by calls made while it starts */
+	private connecting: Promise<Client> | null = null;
 	private dockerImage: string;
 	private useExternalServer: boolean;
 	private serverCommand: string;
@@ -127,13 +129,19 @@ export class JiraClient {
 	}
 
 	/**
-	 * Initialize the MCP client connection
+	 * Initialize the MCP client connection, once for concurrent callers
 	 */
 	private async ensureConnected(): Promise<Client> {
-		if (this.client) {
+		if (this.client && !this.connecting) {
 			return this.client;
 		}
+		this.connecting ??= this.connect().finally(() => {
+			this.connecting = null;
+		});
+		return this.connecting;
+	}
 
+	private async connect(): Promise<Client> {
 		if (!this.silentMode) {
 			logger.debug("Initializing MCP client connection to Atlassian server");
 		}
@@ -399,6 +407,9 @@ export class JiraClient {
 	 * Close the MCP client connection
 	 */
 	async close(): Promise<void> {
+		if (this.connecting) {
+			await this.connecting.catch(() => {});
+		}
 		if (this.client) {
 			await this.client.close();
 			this.client = null;
@@ -1490,9 +1501,10 @@ export class JiraClient {
 				Object.assign(fields, updates.fields);
 			}
 
+			// MCP Atlassian takes fields as a JSON string
 			const result = await this.callMcpTool("jira_update_issue", {
 				issue_key: issueKey,
-				fields,
+				fields: JSON.stringify(fields),
 			});
 
 			// Newer MCP Atlassian versions report field update errors in the
@@ -1622,7 +1634,8 @@ export class JiraClient {
 				input.comment = options.comment;
 			}
 			if (options?.fields) {
-				input.fields = options.fields;
+				// MCP Atlassian takes fields as a JSON string
+				input.fields = JSON.stringify(options.fields);
 			}
 
 			await this.callMcpTool("jira_transition_issue", input);
@@ -1792,26 +1805,17 @@ export class JiraClient {
 			if (options?.assignee) {
 				input.assignee = options.assignee;
 			}
-			if (options?.priority) {
-				input.additional_fields = {
-					...((input.additional_fields as Record<string, unknown>) || {}),
-					priority: { name: options.priority },
-				};
-			}
-			if (options?.labels) {
-				input.additional_fields = {
-					...((input.additional_fields as Record<string, unknown>) || {}),
-					labels: options.labels,
-				};
-			}
 			if (options?.components) {
 				input.components = options.components;
 			}
-			if (options?.fields) {
-				input.additional_fields = {
-					...((input.additional_fields as Record<string, unknown>) || {}),
-					...options.fields,
-				};
+			const additionalFields: Record<string, unknown> = {
+				...(options?.priority ? { priority: { name: options.priority } } : {}),
+				...(options?.labels ? { labels: options.labels } : {}),
+				...options?.fields,
+			};
+			// MCP Atlassian takes additional_fields as a JSON string
+			if (Object.keys(additionalFields).length > 0) {
+				input.additional_fields = JSON.stringify(additionalFields);
 			}
 
 			const result = await this.callMcpTool("jira_create_issue", input);

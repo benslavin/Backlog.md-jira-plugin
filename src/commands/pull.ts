@@ -82,6 +82,12 @@ export interface PullOptions {
 	 * created per call when omitted
 	 */
 	parentContext?: ParentSyncContext | null;
+	/**
+	 * Jira client shared across calls (sync pulls tasks one at a time in
+	 * parallel and must not start an MCP server for each); left open for its
+	 * owner. Created and closed per call when omitted
+	 */
+	jira?: JiraClient;
 }
 
 export interface PullResult {
@@ -122,7 +128,13 @@ export async function pull(options: PullOptions = {}): Promise<PullResult> {
 
 	const store = new FrontmatterStore();
 	const backlog = new BacklogClient();
-	const jira = new JiraClient(getJiraClientOptions());
+	const jira =
+		options.jira ??
+		new JiraClient({
+			...getJiraClientOptions(),
+			// The MCP server's startup banner and logs only with --verbose
+			silentMode: !options.verbose,
+		});
 
 	const result: PullResult = {
 		success: true,
@@ -282,7 +294,7 @@ export async function pull(options: PullOptions = {}): Promise<PullResult> {
 			result.warnings.push(...parents.warnings);
 		}
 		store.close();
-		await jira.close();
+		if (!options.jira) await jira.close();
 		// Restore original log level
 		logger.level = originalLevel;
 	}

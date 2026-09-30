@@ -114,13 +114,13 @@ describe("JiraClient", () => {
 
 			expect(callMcpToolMock).toHaveBeenCalledWith("jira_update_issue", {
 				issue_key: "PROJ-1",
-				fields: {
+				fields: JSON.stringify({
 					summary: "New Summary",
 					description: "New description",
 					assignee: "alice",
 					priority: { name: "High" },
 					labels: ["backend", "api"],
-				},
+				}),
 			});
 		});
 	});
@@ -429,16 +429,134 @@ describe("JiraClient", () => {
 				summary: "New Issue",
 				description: "New description",
 				assignee: "alice",
-				additional_fields: {
+				additional_fields: JSON.stringify({
 					priority: { name: "High" },
 					labels: ["backend"],
-				},
+				}),
 			});
 
 			expect(issue).toMatchObject({
 				key: "PROJ-2",
 				summary: "New Issue",
 				status: "To Do",
+			});
+		});
+	});
+
+	describe("shared connection", () => {
+		it("starts one MCP server for concurrent calls", async () => {
+			const client = new JiraClient();
+			const fakeClient = {
+				callTool: mock(() =>
+					Promise.resolve({ content: [{ type: "text", text: "{}" }] }),
+				),
+				close: mock(() => Promise.resolve()),
+			};
+			const connect = mock(async () => {
+				await new Promise((resolve) => setTimeout(resolve, 10));
+				(client as unknown as { client: unknown }).client = fakeClient;
+				return fakeClient;
+			});
+			(client as unknown as { connect: unknown }).connect = connect;
+			const ensureConnected = () =>
+				(
+					client as unknown as { ensureConnected: () => Promise<unknown> }
+				).ensureConnected();
+
+			const clients = await Promise.all([
+				ensureConnected(),
+				ensureConnected(),
+				ensureConnected(),
+			]);
+
+			expect(connect).toHaveBeenCalledTimes(1);
+			expect(new Set(clients).size).toBe(1);
+			await ensureConnected();
+			expect(connect).toHaveBeenCalledTimes(1);
+
+			await client.close();
+			expect(fakeClient.close).toHaveBeenCalledTimes(1);
+		});
+
+		it("retries the connection after a failed start", async () => {
+			const client = new JiraClient();
+			const connect = mock(() => Promise.reject(new Error("timed out")));
+			(client as unknown as { connect: unknown }).connect = connect;
+			const ensureConnected = () =>
+				(
+					client as unknown as { ensureConnected: () => Promise<unknown> }
+				).ensureConnected();
+
+			await expect(ensureConnected()).rejects.toThrow("timed out");
+			await expect(ensureConnected()).rejects.toThrow("timed out");
+			expect(connect).toHaveBeenCalledTimes(2);
+		});
+	});
+
+	describe("JSON string arguments", () => {
+		it("sends create-issue priority, labels and parent as one JSON string", async () => {
+			const client = new JiraClient();
+			const callMcpToolMock = mock(() =>
+				Promise.resolve({
+					key: "PROJ-3",
+					id: "10003",
+					fields: { summary: "Child", status: { name: "To Do" } },
+				}),
+			);
+			(client as unknown as { callMcpTool: unknown }).callMcpTool =
+				callMcpToolMock;
+
+			await client.createIssue("PROJ", "Subtask", "Child", {
+				priority: "High",
+				labels: ["api"],
+				fields: { parent: "PROJ-1" },
+			});
+
+			const input = (
+				callMcpToolMock.mock.calls[0] as unknown as [
+					string,
+					Record<string, unknown>,
+				]
+			)[1];
+			expect(typeof input.additional_fields).toBe("string");
+			expect(JSON.parse(input.additional_fields as string)).toEqual({
+				priority: { name: "High" },
+				labels: ["api"],
+				parent: "PROJ-1",
+			});
+		});
+
+		it("omits additional_fields when there are none", async () => {
+			const client = new JiraClient();
+			const callMcpToolMock = mock(() =>
+				Promise.resolve({ key: "PROJ-4", id: "10004", fields: {} }),
+			);
+			(client as unknown as { callMcpTool: unknown }).callMcpTool =
+				callMcpToolMock;
+
+			await client.createIssue("PROJ", "Task", "Plain");
+
+			expect(callMcpToolMock).toHaveBeenCalledWith("jira_create_issue", {
+				project_key: "PROJ",
+				issue_type: "Task",
+				summary: "Plain",
+			});
+		});
+
+		it("sends transition fields as a JSON string", async () => {
+			const client = new JiraClient();
+			const callMcpToolMock = mock(() => Promise.resolve({}));
+			(client as unknown as { callMcpTool: unknown }).callMcpTool =
+				callMcpToolMock;
+
+			await client.transitionIssue("PROJ-1", "31", {
+				fields: { resolution: { name: "Done" } },
+			});
+
+			expect(callMcpToolMock).toHaveBeenCalledWith("jira_transition_issue", {
+				issue_key: "PROJ-1",
+				transition_id: "31",
+				fields: JSON.stringify({ resolution: { name: "Done" } }),
 			});
 		});
 	});

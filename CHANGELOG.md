@@ -4,6 +4,12 @@ This project is a fork of [eciuca/Backlog.md-jira-plugin](https://github.com/eci
 
 ## [Unreleased]
 
+### Fixed
+
+- `create-issue` and pushes work with current MCP Atlassian, which takes `jira_create_issue`'s `additional_fields` and `jira_update_issue`'s and `jira_transition_issue`'s `fields` as JSON strings. The plugin sent objects, so every issue created with a priority, labels, parent or mapped field, and every push that changed a field, failed with `Input should be a valid string`.
+- `sync` starts one MCP server per run instead of one per task. Its per-task pulls and pushes each started their own server (a Docker container, 10 at a time), which could time out with `MCP error -32001` and printed a startup banner for every task. Concurrent calls on a client that is still connecting now share the connection, and `sync` closes its client when it finishes.
+- `pull` and `push` start the MCP server silently unless `--verbose`, as `sync` already did.
+
 ## [0.3.1] - 2026-09-30
 
 ### Added

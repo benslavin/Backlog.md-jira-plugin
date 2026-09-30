@@ -70,6 +70,12 @@ export interface PushOptions {
 	 * created per call when omitted
 	 */
 	parentContext?: ParentSyncContext | null;
+	/**
+	 * Jira client shared across calls (sync pushs tasks one at a time in
+	 * parallel and must not start an MCP server for each); left open for its
+	 * owner. Created and closed per call when omitted
+	 */
+	jira?: JiraClient;
 }
 
 export interface PushResult {
@@ -110,7 +116,13 @@ export async function push(options: PushOptions = {}): Promise<PushResult> {
 
 	const store = new FrontmatterStore();
 	const backlog = new BacklogClient();
-	const jira = new JiraClient(getJiraClientOptions());
+	const jira =
+		options.jira ??
+		new JiraClient({
+			...getJiraClientOptions(),
+			// The MCP server's startup banner and logs only with --verbose
+			silentMode: !options.verbose,
+		});
 
 	// Load configuration
 	const config = loadConfig();
@@ -207,7 +219,7 @@ export async function push(options: PushOptions = {}): Promise<PushResult> {
 		);
 	} finally {
 		try {
-			await jira.close();
+			if (!options.jira) await jira.close();
 		} catch (e) {
 			// ignore close errors
 		}

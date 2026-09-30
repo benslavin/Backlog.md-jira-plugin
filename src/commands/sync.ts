@@ -290,6 +290,11 @@ export async function sync(options: SyncOptions = {}): Promise<SyncResult> {
 		if (sprints?.pull) result.warnings?.push(...sprints.pull.warnings);
 		if (parents) result.warnings?.push(...parents.warnings);
 		store.close();
+		try {
+			await jira.close();
+		} catch {
+			// ignore close errors
+		}
 		// Restore IO filters if applied
 		if (restoreIo) restoreIo();
 		// Restore original log level
@@ -390,6 +395,7 @@ async function syncTask(
 							taskIds: [taskId],
 							sprintContext: sprints?.pull ?? null,
 							parentContext: parents,
+							jira,
 						}),
 					);
 				}
@@ -406,6 +412,7 @@ async function syncTask(
 						taskIds: [taskId],
 						sprintContext: sprints?.push ?? null,
 						parentContext: parents,
+						jira,
 					}),
 				);
 			}
@@ -419,6 +426,7 @@ async function syncTask(
 						taskIds: [taskId],
 						sprintContext: sprints?.pull ?? null,
 						parentContext: parents,
+						jira,
 					}),
 				);
 			}
@@ -559,6 +567,7 @@ async function resolveConflict(
 						force: true,
 						sprintContext: sprints?.push ?? null,
 						parentContext: parents,
+						jira,
 					}),
 				);
 			}
@@ -574,6 +583,7 @@ async function resolveConflict(
 						force: true,
 						sprintContext: sprints?.pull ?? null,
 						parentContext: parents,
+						jira,
 					}),
 				);
 			}
