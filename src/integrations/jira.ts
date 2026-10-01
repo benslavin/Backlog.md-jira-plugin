@@ -1831,9 +1831,22 @@ export class JiraClient {
 				);
 			}
 
-			const typedResult = result as {
+			// MCP Atlassian wraps the created issue as { message, issue } in the
+			// flat shape jira_get_issue returns; the REST shape has key, id and fields
+			const wrapped = result as { issue?: unknown };
+			const typedResult = (
+				wrapped.issue && typeof wrapped.issue === "object"
+					? wrapped.issue
+					: result
+			) as {
 				key?: string;
 				id?: string;
+				summary?: string;
+				description?: string;
+				status?: { name?: string } | null;
+				issue_type?: { name?: string } | null;
+				created?: string;
+				updated?: string;
 				fields?: {
 					summary?: string;
 					description?: string;
@@ -1843,12 +1856,13 @@ export class JiraClient {
 					updated?: string;
 					[key: string]: unknown;
 				};
+				[key: string]: unknown;
 			};
 
 			// Validate required fields
 			if (!typedResult.key || !typedResult.id) {
 				logger.error(
-					{ result: typedResult, projectKey },
+					{ result, projectKey },
 					"Invalid response: missing key or id",
 				);
 				throw new Error(
@@ -1856,26 +1870,20 @@ export class JiraClient {
 				);
 			}
 
-			if (!typedResult.fields) {
-				logger.error(
-					{ result: typedResult, projectKey },
-					"Invalid response: missing fields object",
-				);
-				throw new Error(
-					"Invalid response from jira_create_issue: missing fields object",
-				);
-			}
-
+			const fields = typedResult.fields;
 			const issue: JiraIssue = {
 				key: typedResult.key,
 				id: typedResult.id,
-				summary: typedResult.fields.summary || summary, // Fallback to input summary
-				description: typedResult.fields.description as string | undefined,
-				status: typedResult.fields.status?.name || "Unknown",
-				issueType: typedResult.fields.issuetype?.name || issueType, // Fallback to input issueType
-				created: typedResult.fields.created || new Date().toISOString(),
-				updated: typedResult.fields.updated || new Date().toISOString(),
-				fields: typedResult.fields,
+				summary: fields?.summary || typedResult.summary || summary, // Fallback to input summary
+				description: fields?.description ?? typedResult.description,
+				status: fields?.status?.name || typedResult.status?.name || "Unknown",
+				issueType:
+					fields?.issuetype?.name || typedResult.issue_type?.name || issueType, // Fallback to input issueType
+				created:
+					fields?.created || typedResult.created || new Date().toISOString(),
+				updated:
+					fields?.updated || typedResult.updated || new Date().toISOString(),
+				fields: fields ?? typedResult,
 			};
 
 			logger.info(

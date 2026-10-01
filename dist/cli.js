@@ -27439,25 +27439,23 @@ Original error: ${message}`);
         logger.error({ result, projectKey, issueType }, "Invalid response from jira_create_issue: not an object");
         throw new Error(`Invalid response from jira_create_issue: expected object, got ${typeof result}`);
       }
-      const typedResult = result;
+      const wrapped = result;
+      const typedResult = wrapped.issue && typeof wrapped.issue === "object" ? wrapped.issue : result;
       if (!typedResult.key || !typedResult.id) {
-        logger.error({ result: typedResult, projectKey }, "Invalid response: missing key or id");
+        logger.error({ result, projectKey }, "Invalid response: missing key or id");
         throw new Error("Invalid response from jira_create_issue: missing required fields (key, id)");
       }
-      if (!typedResult.fields) {
-        logger.error({ result: typedResult, projectKey }, "Invalid response: missing fields object");
-        throw new Error("Invalid response from jira_create_issue: missing fields object");
-      }
+      const fields = typedResult.fields;
       const issue = {
         key: typedResult.key,
         id: typedResult.id,
-        summary: typedResult.fields.summary || summary,
-        description: typedResult.fields.description,
-        status: typedResult.fields.status?.name || "Unknown",
-        issueType: typedResult.fields.issuetype?.name || issueType,
-        created: typedResult.fields.created || new Date().toISOString(),
-        updated: typedResult.fields.updated || new Date().toISOString(),
-        fields: typedResult.fields
+        summary: fields?.summary || typedResult.summary || summary,
+        description: fields?.description ?? typedResult.description,
+        status: fields?.status?.name || typedResult.status?.name || "Unknown",
+        issueType: fields?.issuetype?.name || typedResult.issue_type?.name || issueType,
+        created: fields?.created || typedResult.created || new Date().toISOString(),
+        updated: fields?.updated || typedResult.updated || new Date().toISOString(),
+        fields: fields ?? typedResult
       };
       logger.info({ issueKey: issue.key, projectKey, issueType }, "Created Jira issue");
       return issue;
@@ -31436,7 +31434,7 @@ var {
 // package.json
 var package_default = {
   name: "@benslavin/backlog-jira",
-  version: "0.3.2",
+  version: "0.3.3",
   description: "Bidirectional sync plugin between Backlog.md and Jira via MCP",
   type: "module",
   author: "Emanuel Ciuca <emanuel.ciuca@gmail.com>",

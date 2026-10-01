@@ -4,6 +4,12 @@ This project is a fork of [eciuca/Backlog.md-jira-plugin](https://github.com/eci
 
 ## [Unreleased]
 
+## [0.3.3] - 2026-10-01
+
+### Fixed
+
+- `create-issue` reads MCP Atlassian's `jira_create_issue` response, which wraps the created issue as `{ message, issue }` in the flat shape `jira_get_issue` returns. The plugin expected the REST shape (`key`, `id`, `fields`), so every `create-issue` failed with `missing required fields (key, id)` after the issue was created in Jira, leaving the task unlinked: the next `pull --import` imported the issue as a duplicate task and the next `create-issue` created a duplicate issue.
+
 ## [0.3.2] - 2026-09-30
 
 ### Fixed
@@ -66,7 +72,8 @@ First fork release. Forked from upstream `main` at `6c77390` (2025-10-28), which
 
 Last upstream release, published to npm as `backlog-jira`. See the upstream repository for earlier history.
 
-[Unreleased]: https://github.com/benslavin/Backlog.md-jira-plugin/compare/v0.3.2...HEAD
+[Unreleased]: https://github.com/benslavin/Backlog.md-jira-plugin/compare/v0.3.3...HEAD
+[0.3.3]: https://github.com/benslavin/Backlog.md-jira-plugin/compare/v0.3.2...v0.3.3
 [0.3.2]: https://github.com/benslavin/Backlog.md-jira-plugin/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/benslavin/Backlog.md-jira-plugin/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/benslavin/Backlog.md-jira-plugin/compare/v0.2.0...v0.3.0

@@ -441,6 +441,53 @@ describe("JiraClient", () => {
 				status: "To Do",
 			});
 		});
+
+		it("unwraps MCP Atlassian's { message, issue } response", async () => {
+			const client = new JiraClient();
+			const mockResult = {
+				message: "Issue created successfully",
+				issue: {
+					id: "13330",
+					key: "CR2-83",
+					summary: "Created summary",
+					description: "Created description",
+					status: { name: "To Do", category: "To Do", color: "blue-gray" },
+					issue_type: { name: "Task" },
+					priority: { name: "High" },
+					parent: { id: "13257", key: "CR2-10", fields: {} },
+					created: "2026-10-01 11:58:40 UTC",
+					updated: "2026-10-01 11:58:40 UTC",
+				},
+			};
+			(client as unknown as { callMcpTool: unknown }).callMcpTool = mock(() =>
+				Promise.resolve(mockResult),
+			);
+
+			const issue = await client.createIssue("CR2", "Task", "Input summary");
+
+			expect(issue).toMatchObject({
+				key: "CR2-83",
+				id: "13330",
+				summary: "Created summary",
+				description: "Created description",
+				status: "To Do",
+				issueType: "Task",
+				created: "2026-10-01 11:58:40 UTC",
+				updated: "2026-10-01 11:58:40 UTC",
+			});
+			expect(issue.fields).toEqual(mockResult.issue);
+		});
+
+		it("rejects a wrapped response without key and id", async () => {
+			const client = new JiraClient();
+			(client as unknown as { callMcpTool: unknown }).callMcpTool = mock(() =>
+				Promise.resolve({ message: "Issue created successfully", issue: {} }),
+			);
+
+			await expect(
+				client.createIssue("CR2", "Task", "Input summary"),
+			).rejects.toThrow("missing required fields (key, id)");
+		});
 	});
 
 	describe("shared connection", () => {
