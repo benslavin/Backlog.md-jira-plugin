@@ -31459,7 +31459,7 @@ var {
 // package.json
 var package_default = {
   name: "@benslavin/backlog-jira",
-  version: "0.3.4",
+  version: "0.3.5",
   description: "Bidirectional sync plugin between Backlog.md and Jira via MCP",
   type: "module",
   author: "Emanuel Ciuca <emanuel.ciuca@gmail.com>",
