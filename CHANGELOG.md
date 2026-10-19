@@ -4,6 +4,10 @@ This project is a fork of [eciuca/Backlog.md-jira-plugin](https://github.com/eci
 
 ## [Unreleased]
 
+### Fixed
+
+- Task descriptions are read whole. The plugin parses `backlog task <id> --plain`, and treated any line ending in a colon as a new section, so a description line such as `Steps:` or `## Root cause:` ended the description: `create-issue` and push sent Jira the truncated text, and a pull could write it back over the task. Section text now keeps its blank lines, header fields are read only from the task header, and acceptance criteria only from their section, so description lines starting with `- [ ]`, `Status:` or `Task ` are no longer read as criteria, status or title. After upgrading, tasks whose descriptions have blank lines read as changed once: `sync` with `prefer-backlog` pushes them, restoring truncated Jira descriptions, and the `prompt` strategy asks about their description.
+
 ## [0.3.3] - 2026-10-01
 
 ### Fixed

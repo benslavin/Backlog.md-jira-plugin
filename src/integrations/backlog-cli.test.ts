@@ -79,6 +79,13 @@ describe.skipIf(!hasBacklogCli)("Backlog.md CLI compatibility", () => {
 		expect((await client.getTask(taskId)).description).toBeUndefined();
 	});
 
+	it("reads a multi-section description whole", async () => {
+		const description =
+			"Found when X: dev was down.\n\n## What happens\n\nFirst.\n\nSteps:\n- [ ] not a criterion\n\n## Fix\n\nLast.";
+		const taskId = await client.createTask({ title: "Sections", description });
+		expect((await client.getTask(taskId)).description).toBe(description);
+	});
+
 	it("keeps Jira metadata and mapped fields across a user's backlog task edit", () => {
 		const filePath = getTaskFilePath("task-1");
 		updateJiraMetadata(filePath, {

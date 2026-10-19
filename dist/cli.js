@@ -31760,7 +31760,28 @@ class BacklogClient {
     let sectionContent = [];
     for (let i = 0;i < lines.length; i++) {
       const line = lines[i];
-      if (line.startsWith("Task ")) {
+      const header = line.match(/^(\S[^:]*):$/);
+      if (header && /^-{20,}$/.test(lines[i + 1] ?? "")) {
+        if (currentSection) {
+          this.assignSection(task, currentSection, sectionContent.join(`
+`));
+        }
+        currentSection = header[1].trim();
+        sectionContent = [];
+        i++;
+      } else if (currentSection === "Acceptance Criteria") {
+        const acMatch = line.match(/^-\s+\[([ x])\]\s+#(\d+)\s+(.+)$/);
+        if (acMatch) {
+          task.acceptanceCriteria = task.acceptanceCriteria ?? [];
+          task.acceptanceCriteria.push({
+            index: Number.parseInt(acMatch[2]),
+            text: acMatch[3],
+            checked: acMatch[1] === "x"
+          });
+        }
+      } else if (currentSection) {
+        sectionContent.push(line);
+      } else if (line.startsWith("Task ")) {
         const match = line.match(new RegExp(`^Task\\s+(${TASK_ID})\\s+-\\s+(.+)$`));
         if (match) {
           task.id = normalizeTaskId(match[1]);
@@ -31783,32 +31804,9 @@ class BacklogClient {
         const parent = line.replace("Parent:", "").trim().match(new RegExp(`^(${TASK_ID})`));
         if (parent)
           task.parent = normalizeTaskId(parent[1]);
-      } else if (line.match(/^[-=]{2,}$/)) {} else if (line.endsWith(":") && !line.startsWith(" ")) {
-        if (currentSection && sectionContent.length > 0) {
-          this.assignSection(task, currentSection, sectionContent.join(`
-`));
-        }
-        currentSection = line.replace(":", "").trim();
-        sectionContent = [];
-      } else if (currentSection || line.startsWith("- [")) {
-        if (line.startsWith("- [")) {
-          if (!task.acceptanceCriteria) {
-            task.acceptanceCriteria = [];
-          }
-          const acMatch = line.match(/^-\s+\[([ x])\]\s+#(\d+)\s+(.+)$/);
-          if (acMatch) {
-            task.acceptanceCriteria.push({
-              index: Number.parseInt(acMatch[2]),
-              text: acMatch[3],
-              checked: acMatch[1] === "x"
-            });
-          }
-        } else if (line.trim()) {
-          sectionContent.push(line);
-        }
       }
     }
-    if (currentSection && sectionContent.length > 0) {
+    if (currentSection) {
       this.assignSection(task, currentSection, sectionContent.join(`
 `));
     }

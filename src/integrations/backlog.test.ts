@@ -112,6 +112,61 @@ Acceptance Criteria:
 				checked: true,
 			});
 		});
+
+		it("keeps a description whole when its lines look like headers or fields", () => {
+			const description = `Found when X: dev was down.
+
+## What happens
+
+First paragraph.
+
+Steps:
+- [ ] not a criterion
+Status: not the status
+Task TASK-9 - not the title
+
+## Fix
+
+Last paragraph.`;
+			const mockOutput = `Task TASK-1 - Test
+==================================================
+
+Status: ○ To Do
+
+Description:
+--------------------------------------------------
+${description}
+
+Acceptance Criteria:
+--------------------------------------------------
+- [ ] #1 Real criterion
+
+Implementation Notes:
+--------------------------------------------------
+Done:
+
+- one`;
+
+			const task = (
+				new BacklogClient() as unknown as {
+					parseTaskDetail: (output: string) => {
+						title: string;
+						status: string;
+						description?: string;
+						acceptanceCriteria?: unknown[];
+						implementationNotes?: string;
+					};
+				}
+			).parseTaskDetail(mockOutput);
+
+			expect(task.title).toBe("Test");
+			expect(task.status).toBe("To Do");
+			expect(task.description).toBe(description);
+			expect(task.acceptanceCriteria).toEqual([
+				{ index: 1, text: "Real criterion", checked: false },
+			]);
+			expect(task.implementationNotes).toBe("Done:\n\n- one");
+		});
 	});
 
 	describe("updateTask", () => {

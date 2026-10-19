@@ -406,7 +406,12 @@ export class BacklogClient {
 	}
 
 	/**
-	 * Parse task detail output from --plain format
+	 * Parse task detail output from --plain format.
+	 *
+	 * Header fields are read only before the first section, and a section
+	 * starts only at a `Name:` line followed by Backlog.md's dashed divider, so
+	 * section text (a description with `Steps:`, `- [ ]` or `Status:` lines)
+	 * is kept whole, blank lines included.
 	 */
 	private parseTaskDetail(output: string): BacklogTask {
 		const lines = output.split("\n");
@@ -417,8 +422,29 @@ export class BacklogClient {
 		for (let i = 0; i < lines.length; i++) {
 			const line = lines[i];
 
-			// Parse header info
-			if (line.startsWith("Task ")) {
+			const header = line.match(/^(\S[^:]*):$/);
+			if (header && /^-{20,}$/.test(lines[i + 1] ?? "")) {
+				// Section header - save previous section first
+				if (currentSection) {
+					this.assignSection(task, currentSection, sectionContent.join("\n"));
+				}
+				currentSection = header[1].trim();
+				sectionContent = [];
+				i++; // Skip the divider
+			} else if (currentSection === "Acceptance Criteria") {
+				const acMatch = line.match(/^-\s+\[([ x])\]\s+#(\d+)\s+(.+)$/);
+				if (acMatch) {
+					task.acceptanceCriteria = task.acceptanceCriteria ?? [];
+					task.acceptanceCriteria.push({
+						index: Number.parseInt(acMatch[2]),
+						text: acMatch[3],
+						checked: acMatch[1] === "x",
+					});
+				}
+			} else if (currentSection) {
+				sectionContent.push(line);
+			} else if (line.startsWith("Task ")) {
+				// Parse header info
 				const match = line.match(
 					new RegExp(`^Task\\s+(${TASK_ID})\\s+-\\s+(.+)$`),
 				);
@@ -453,39 +479,11 @@ export class BacklogClient {
 					.trim()
 					.match(new RegExp(`^(${TASK_ID})`));
 				if (parent) task.parent = normalizeTaskId(parent[1]);
-			} else if (line.match(/^[-=]{2,}$/)) {
-				// Section dividers - skip them, they're just visual separators
-			} else if (line.endsWith(":") && !line.startsWith(" ")) {
-				// Section header - save previous section first
-				if (currentSection && sectionContent.length > 0) {
-					this.assignSection(task, currentSection, sectionContent.join("\n"));
-				}
-				// Set new section (remove the colon)
-				currentSection = line.replace(":", "").trim();
-				sectionContent = [];
-			} else if (currentSection || line.startsWith("- [")) {
-				// Section content or AC line
-				if (line.startsWith("- [")) {
-					// Acceptance criteria
-					if (!task.acceptanceCriteria) {
-						task.acceptanceCriteria = [];
-					}
-					const acMatch = line.match(/^-\s+\[([ x])\]\s+#(\d+)\s+(.+)$/);
-					if (acMatch) {
-						task.acceptanceCriteria.push({
-							index: Number.parseInt(acMatch[2]),
-							text: acMatch[3],
-							checked: acMatch[1] === "x",
-						});
-					}
-				} else if (line.trim()) {
-					sectionContent.push(line);
-				}
 			}
 		}
 
 		// Save last section
-		if (currentSection && sectionContent.length > 0) {
+		if (currentSection) {
 			this.assignSection(task, currentSection, sectionContent.join("\n"));
 		}
 
