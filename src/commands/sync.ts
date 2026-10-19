@@ -24,9 +24,11 @@ import {
 	getOverriddenCoreFields,
 	parseManualMappedValue,
 	planMappedFieldMerge,
+	recordMatchingSnapshots,
 } from "../utils/mapped-field-sync.ts";
 import {
 	type NormalizedPayload,
+	backlogDescriptionForJira,
 	computeHash,
 	normalizeBacklogTask,
 	normalizeJiraIssue,
@@ -81,6 +83,11 @@ export interface SyncResult {
 	}>;
 	failed: Array<{ taskId: string; error: string }>;
 	skipped: string[];
+	/**
+	 * Tasks whose sides already held the same content but whose snapshots
+	 * were stale: snapshots refreshed (not under --dry-run), nothing synced
+	 */
+	rebaselined: string[];
 	// Optional user-facing hints to display (e.g., proxy login guidance)
 	hints?: string[];
 	/** Problems that did not fail a task (e.g. sprint milestone updates) */
@@ -186,6 +193,7 @@ export async function sync(options: SyncOptions = {}): Promise<SyncResult> {
 		conflicts: [],
 		failed: [],
 		skipped: [],
+		rebaselined: [],
 		hints: [],
 		warnings: [],
 	};
@@ -234,7 +242,9 @@ export async function sync(options: SyncOptions = {}): Promise<SyncResult> {
 							taskId,
 							resolution: outcome.resolution,
 						});
-					} else if (outcome.type === "skipped") {
+					} else if (outcome.reason === REBASELINED) {
+						result.rebaselined.push(taskId);
+					} else {
 						result.skipped.push(taskId);
 					}
 
@@ -306,6 +316,9 @@ export async function sync(options: SyncOptions = {}): Promise<SyncResult> {
 	}
 	return result;
 }
+
+/** Skip reason of a task whose matching content was rebaselined */
+export const REBASELINED = "Matching content; snapshots refreshed";
 
 /**
  * Get list of task IDs to sync
@@ -379,7 +392,11 @@ async function syncTask(
 		snapshots.backlog,
 		snapshots.jira,
 		{ backlog: backlogPayload, jira: jiraPayload },
-		{ fieldMappings, sprintMapping: sprints?.mapping ?? null },
+		{
+			fieldMappings,
+			sprintMapping: sprints?.mapping ?? null,
+			backlogJiraDescription: backlogDescriptionForJira(task),
+		},
 	);
 
 	logger.debug({ taskId, state: state.state }, "Sync state classified");
@@ -400,6 +417,17 @@ async function syncTask(
 					);
 				}
 				return { type: "synced", direction: "pull" };
+			}
+			if (state.rebaseline) {
+				// Same content on both sides: only the snapshots were stale
+				if (!dryRun) {
+					recordMatchingSnapshots(store, taskId, {
+						backlog: backlogPayload,
+						jira: jiraPayload,
+					});
+				}
+				logger.info({ taskId }, REBASELINED);
+				return { type: "skipped", reason: REBASELINED };
 			}
 			logger.info({ taskId }, "Already in sync");
 			return { type: "skipped", reason: "Already in sync" };

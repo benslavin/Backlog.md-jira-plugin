@@ -967,6 +967,12 @@ backlog-jira sync task-123 --dry-run
 Mapped fields with direction `both` are compared per field; `pull` and `push`
 mappings never conflict because their owning side always wins.
 
+A task whose current Backlog and Jira content already match is in sync, even
+when its snapshots are stale (after a plugin upgrade changes how content is
+read, or when both sides were changed to the same value): its snapshots are
+refreshed without writing to Jira or the task file, and it is counted as
+`Rebaselined`. `pull` and `push` do the same; `--force` always writes.
+
 ### `backlog-jira view`
 
 View task/issue details and sync status.

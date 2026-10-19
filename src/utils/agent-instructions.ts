@@ -225,6 +225,8 @@ When conflicts occur (both sides modified), the plugin will:
 - **prefer-backlog**: Always use Backlog.md version
 - **prefer-jira**: Always use Jira version
 
+A task whose Backlog and Jira content already match is not a conflict, even if both sides changed: its snapshots are refreshed without writing anything, and the summary counts it as \`Rebaselined\`.
+
 Configure via:
 \`\`\`bash
 backlog-jira configure --step conflict                                  # interactive

@@ -6,6 +6,7 @@ import { formatIdPair } from "../utils/id-resolver.ts";
 import { getJiraClientOptions } from "../utils/jira-config.ts";
 import { logger } from "../utils/logger.ts";
 import {
+	backlogDescriptionForJira,
 	comparePayloads,
 	computeHash,
 	normalizeBacklogTask,
@@ -81,6 +82,7 @@ async function getStatus(options: {
 					snapshots.backlog,
 					snapshots.jira,
 					{ backlog: backlogPayload, jira: jiraPayload },
+					{ backlogJiraDescription: backlogDescriptionForJira(task) },
 				);
 
 				// Calculate changed fields if there are changes

@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import type { BacklogTask } from "../integrations/backlog.ts";
 import type { JiraIssue } from "../integrations/jira.ts";
+import { mapJiraUserToBacklog } from "./assignee-mapping.ts";
 import {
 	type FieldMapping,
 	canonicalMappedValue,
@@ -385,4 +386,65 @@ export function comparePayloads(
 	}
 
 	return changes;
+}
+
+/**
+ * A description with its whitespace normalized for comparison: line endings
+ * as LF, no trailing spaces, runs of blank lines as one, trimmed. Text is
+ * otherwise compared as is: Markdown/Jira conversion differences remain.
+ */
+export function normalizeDescriptionWhitespace(text: string): string {
+	return text
+		.replace(/\r\n?/g, "\n")
+		.replace(/[ \t]+$/gm, "")
+		.replace(/\n{3,}/g, "\n\n")
+		.trim();
+}
+
+/**
+ * The Jira description push writes for a task: its description with the
+ * acceptance criteria, implementation plan and notes appended
+ */
+export function backlogDescriptionForJira(task: BacklogTask): string {
+	return task.acceptanceCriteria
+		? mergeDescriptionWithAc(
+				task.description || "",
+				task.acceptanceCriteria,
+				task.implementationPlan,
+				task.implementationNotes,
+			)
+		: task.description || "";
+}
+
+/**
+ * Fields whose current Backlog and Jira values differ, comparing across the
+ * sides rather than with a snapshot. Fields are compared as in
+ * comparePayloads, except that:
+ * - descriptions are compared with whitespace normalized, the Backlog side
+ *   as push writes it to Jira (backlogJiraDescription) when given;
+ * - a Jira assignee matches the Backlog assignee it maps to, as pull reads it.
+ */
+export function compareSides(
+	backlog: NormalizedPayload,
+	jira: NormalizedPayload,
+	backlogJiraDescription?: string,
+): string[] {
+	const sameAssignee =
+		backlog.assignee === jira.assignee ||
+		(!!backlog.assignee &&
+			!!jira.assignee &&
+			mapJiraUserToBacklog(jira.assignee)?.toLowerCase() === backlog.assignee);
+	return comparePayloads(
+		{
+			...backlog,
+			description: normalizeDescriptionWhitespace(
+				backlogJiraDescription ?? backlog.description,
+			),
+		},
+		{
+			...jira,
+			description: normalizeDescriptionWhitespace(jira.description),
+			assignee: sameAssignee ? backlog.assignee : jira.assignee,
+		},
+	);
 }

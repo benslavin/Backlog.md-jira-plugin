@@ -317,6 +317,25 @@ export function recordSyncedSnapshots(
 }
 
 /**
+ * Record snapshots for a task whose sides already hold the same content
+ * (a rebaseline): each side is stored with its own hash, so the next run
+ * sees both sides unchanged
+ */
+export function recordMatchingSnapshots(
+	store: Pick<FrontmatterStore, "setSnapshot">,
+	taskId: string,
+	payloads: { backlog: NormalizedPayload; jira: NormalizedPayload },
+): void {
+	store.setSnapshot(
+		taskId,
+		"backlog",
+		computeHash(payloads.backlog),
+		payloads.backlog,
+	);
+	store.setSnapshot(taskId, "jira", computeHash(payloads.jira), payloads.jira);
+}
+
+/**
  * Record snapshots after a push or create in which some mapped fields failed.
  * The Jira snapshot reflects Jira as it now is; the Backlog snapshot carries
  * Jira's values for the failed fields so they stay pending (NeedsPush) and

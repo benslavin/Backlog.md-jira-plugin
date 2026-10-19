@@ -31,8 +31,12 @@ import {
 import { formatIdPair, resolveTaskArgs } from "../utils/id-resolver.ts";
 import { getJiraClientOptions } from "../utils/jira-config.ts";
 import { logger } from "../utils/logger.ts";
-import { recordSyncedSnapshots } from "../utils/mapped-field-sync.ts";
 import {
+	recordMatchingSnapshots,
+	recordSyncedSnapshots,
+} from "../utils/mapped-field-sync.ts";
+import {
+	backlogDescriptionForJira,
 	computeHash,
 	normalizeBacklogTask,
 	normalizeJiraIssue,
@@ -98,6 +102,11 @@ export interface PullResult {
 	importedLinks: Array<{ taskId: string; jiraKey: string }>;
 	failed: Array<{ taskId: string; error: string }>;
 	skipped: string[];
+	/**
+	 * Tasks whose sides already held the same content but whose snapshots
+	 * were stale: snapshots refreshed (not under --dry-run), nothing pulled
+	 */
+	rebaselined: string[];
 	/** Problems that did not fail a task (e.g. sprint milestone updates) */
 	warnings: string[];
 }
@@ -143,6 +152,7 @@ export async function pull(options: PullOptions = {}): Promise<PullResult> {
 		importedLinks: [],
 		failed: [],
 		skipped: [],
+		rebaselined: [],
 		warnings: [],
 	};
 
@@ -254,7 +264,7 @@ export async function pull(options: PullOptions = {}): Promise<PullResult> {
 				const batch = mapped.slice(i, i + batchSize);
 				const promises = batch.map(async (taskId) => {
 					try {
-						await pullTask(taskId, {
+						const outcome = await pullTask(taskId, {
 							store,
 							backlog,
 							jira,
@@ -265,8 +275,12 @@ export async function pull(options: PullOptions = {}): Promise<PullResult> {
 							dryRun: options.dryRun || false,
 						});
 
-						result.pulled.push(taskId);
-						logger.info({ taskId }, "Successfully pulled task");
+						if (outcome === "rebaselined") {
+							result.rebaselined.push(taskId);
+						} else {
+							result.pulled.push(taskId);
+							logger.info({ taskId }, "Successfully pulled task");
+						}
 					} catch (error) {
 						const errorMsg =
 							error instanceof Error ? error.message : String(error);
@@ -375,10 +389,13 @@ async function getTaskIds(
 				snapshots.backlog,
 				snapshots.jira,
 				{ backlog: backlogPayload, jira: jiraPayload },
+				{ backlogJiraDescription: backlogDescriptionForJira(task) },
 			);
 
 			if (
 				state.state === "NeedsPull" ||
+				// Matching content with stale snapshots is rebaselined
+				state.rebaseline ||
 				// Sprint changes are not part of the synced payload
 				(state.state === "InSync" &&
 					sprints &&
@@ -535,7 +552,7 @@ async function pullTask(
 		force: boolean;
 		dryRun: boolean;
 	},
-): Promise<void> {
+): Promise<"pulled" | "rebaselined"> {
 	const {
 		store,
 		backlog,
@@ -576,6 +593,7 @@ async function pullTask(
 			snapshots.backlog,
 			snapshots.jira,
 			{ backlog: backlogPayload, jira: jiraPayload },
+			{ backlogJiraDescription: backlogDescriptionForJira(task) },
 		);
 
 		if (state.state === "Conflict") {
@@ -604,10 +622,21 @@ async function pullTask(
 				);
 				store.setSnapshot(taskId, "jira", jiraHash, jiraPayload);
 				logger.info({ taskId }, "Pulled task parent");
-				return;
+				return "pulled";
+			}
+			if (state.rebaseline) {
+				// Same content on both sides: only the snapshots were stale
+				if (!dryRun) {
+					recordMatchingSnapshots(store, taskId, {
+						backlog: backlogPayload,
+						jira: jiraPayload,
+					});
+				}
+				logger.info({ taskId }, "Matching content; snapshots refreshed");
+				return "rebaselined";
 			}
 			logger.info({ taskId }, "Task already in sync, skipping");
-			return;
+			return "pulled";
 		}
 	}
 
@@ -733,6 +762,7 @@ async function pullTask(
 			"Updated Backlog task from Jira",
 		);
 	}
+	return "pulled";
 }
 
 /**

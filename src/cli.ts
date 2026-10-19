@@ -199,6 +199,11 @@ program
 			console.log(`  Pushed: ${result.pushed.length}`);
 			console.log(`  Failed: ${result.failed.length}`);
 			console.log(`  Skipped: ${result.skipped.length}`);
+			if (result.rebaselined.length > 0) {
+				console.log(
+					`  Rebaselined: ${result.rebaselined.length} (matching content${options.dryRun ? "" : "; snapshots refreshed"})`,
+				);
+			}
 			if (result.failed.length > 0) {
 				console.log("\nFailures:");
 				for (const fail of result.failed) {
@@ -246,6 +251,11 @@ program
 			}
 			console.log(`  Failed: ${result.failed.length}`);
 			console.log(`  Skipped: ${result.skipped.length}`);
+			if (result.rebaselined.length > 0) {
+				console.log(
+					`  Rebaselined: ${result.rebaselined.length} (matching content${options.dryRun ? "" : "; snapshots refreshed"})`,
+				);
+			}
 			if (result.warnings.length > 0) {
 				console.log("\nWarnings:");
 				for (const warning of result.warnings) {
@@ -295,6 +305,11 @@ program
 			console.log(`  Conflicts: ${result.conflicts.length}`);
 			console.log(`  Failed: ${result.failed.length}`);
 			console.log(`  Skipped: ${result.skipped.length}`);
+			if (result.rebaselined.length > 0) {
+				console.log(
+					`  Rebaselined: ${result.rebaselined.length} (matching content${options.dryRun ? "" : "; snapshots refreshed"})`,
+				);
+			}
 			if (result.conflicts.length > 0) {
 				console.log("\nConflicts:");
 				for (const conflict of result.conflicts) {

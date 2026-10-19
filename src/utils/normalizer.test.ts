@@ -1,7 +1,10 @@
 import { describe, expect, it } from "bun:test";
 import {
+	backlogDescriptionForJira,
+	compareSides,
 	formatAcceptanceCriteriaForJira,
 	mergeDescriptionWithAc,
+	normalizeDescriptionWhitespace,
 	stripAcceptanceCriteriaFromDescription,
 } from "./normalizer.ts";
 
@@ -160,5 +163,76 @@ describe("stripAcceptanceCriteriaFromDescription", () => {
 		const result = stripAcceptanceCriteriaFromDescription(description);
 
 		expect(result).toBe("Task description without AC");
+	});
+});
+
+describe("normalizeDescriptionWhitespace", () => {
+	it("normalizes line endings, trailing spaces and runs of blank lines", () => {
+		expect(
+			normalizeDescriptionWhitespace(
+				"\r\nSteps:  \r\n\r\n\r\n \t\n1. Open\t\r2. Log in \n\n",
+			),
+		).toBe("Steps:\n\n1. Open\n2. Log in");
+	});
+
+	it("keeps the text itself", () => {
+		expect(normalizeDescriptionWhitespace("  - AZURE_CLIENT_ID  ")).toBe(
+			"- AZURE_CLIENT_ID",
+		);
+		expect(normalizeDescriptionWhitespace("a\nb")).not.toBe(
+			normalizeDescriptionWhitespace("a b"),
+		);
+	});
+});
+
+describe("backlogDescriptionForJira", () => {
+	it("appends acceptance criteria, plan and notes as push writes them", () => {
+		expect(
+			backlogDescriptionForJira({
+				id: "task-1",
+				title: "Fix login",
+				status: "To Do",
+				description: "Steps:",
+				acceptanceCriteria: [
+					{ index: 1, text: "Users can log in", checked: true },
+				],
+				implementationPlan: "1. Fix",
+				implementationNotes: "Fixed",
+			}),
+		).toBe(
+			"Steps:\n\nAcceptance Criteria:\n- [x] Users can log in\n\nImplementation Plan:\n1. Fix\n\nImplementation Notes:\nFixed",
+		);
+	});
+});
+
+describe("compareSides", () => {
+	const payload = {
+		title: "Fix login",
+		description: "Steps:",
+		status: "todo",
+		labels: [],
+		acceptanceCriteria: [],
+	};
+
+	it("compares the Backlog description in its Jira form when given", () => {
+		const jira = {
+			...payload,
+			description: "Steps:\n\nImplementation Notes:\nFixed",
+		};
+
+		expect(compareSides(payload, jira)).toEqual(["description"]);
+		expect(
+			compareSides(payload, jira, "Steps:\n\nImplementation Notes:\nFixed  \n"),
+		).toEqual([]);
+	});
+
+	it("names each field that differs", () => {
+		expect(
+			compareSides(payload, {
+				...payload,
+				title: "Fix logins",
+				status: "done",
+			}),
+		).toEqual(["title", "status"]);
 	});
 });

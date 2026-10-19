@@ -10,6 +10,7 @@ import { logger } from "./logger.ts";
 import {
 	type NormalizedPayload,
 	comparePayloads,
+	compareSides,
 	computeHash,
 } from "./normalizer.ts";
 import { SPRINT_PAYLOAD_KEY } from "./sprint-payload.ts";
@@ -31,13 +32,33 @@ export interface SyncStateResult {
 	baseBacklogHash?: string;
 	baseJiraHash?: string;
 	changedFields?: string[];
+	/**
+	 * Set when the snapshots alone would not classify the task InSync but
+	 * both sides currently hold the same content (e.g. after a parser or
+	 * normalizer change, or the same edit made on both sides): the snapshots
+	 * should be refreshed from the current payloads, with nothing written to
+	 * Jira or to the task file
+	 */
+	rebaseline?: boolean;
+}
+
+export interface ClassifyOptions {
+	fieldMappings?: FieldMapping[];
+	sprintMapping?: SprintMapping | null;
+	/**
+	 * The task's description as push writes it to Jira (see
+	 * backlogDescriptionForJira), compared with the Jira description when
+	 * checking whether both sides hold the same content
+	 */
+	backlogJiraDescription?: string;
 }
 
 /**
  * Classify the sync state using 3-way merge logic
  *
  * Given current hashes and base snapshots, determines what action is needed:
- * - InSync: No changes on either side
+ * - InSync: No changes on either side, or both sides hold the same content
+ *   (then rebaseline is set when the snapshots are stale)
  * - NeedsPush: Backlog changed, Jira didn't
  * - NeedsPull: Jira changed, Backlog didn't
  * - Conflict: Both changed
@@ -49,10 +70,49 @@ export function classifySyncState(
 	backlogSnapshot: Snapshot | null,
 	jiraSnapshot: Snapshot | null,
 	currentPayloads?: { backlog: NormalizedPayload; jira: NormalizedPayload },
-	options?: {
-		fieldMappings?: FieldMapping[];
-		sprintMapping?: SprintMapping | null;
-	},
+	options?: ClassifyOptions,
+): SyncStateResult {
+	const result = classifyAgainstSnapshots(
+		currentBacklogHash,
+		currentJiraHash,
+		backlogSnapshot,
+		jiraSnapshot,
+		currentPayloads,
+		options,
+	);
+	if (
+		!currentPayloads ||
+		result.state === "InSync" ||
+		result.state === "Unknown"
+	) {
+		return result;
+	}
+
+	// Each side is compared with its own snapshot, so a change in how
+	// payloads are computed, or the same edit on both sides, looks like a
+	// change. Content that already matches across the sides needs no sync.
+	const differing = compareSides(
+		currentPayloads.backlog,
+		currentPayloads.jira,
+		options?.backlogJiraDescription,
+	);
+	if (differing.length > 0) return result;
+
+	logger.debug(
+		{ classified: result.state },
+		"Both sides hold the same content; snapshots are stale",
+	);
+	return { ...result, state: "InSync", rebaseline: true };
+}
+
+/** Classification by comparing each side with its own last snapshot */
+function classifyAgainstSnapshots(
+	currentBacklogHash: string,
+	currentJiraHash: string,
+	backlogSnapshot: Snapshot | null,
+	jiraSnapshot: Snapshot | null,
+	currentPayloads?: { backlog: NormalizedPayload; jira: NormalizedPayload },
+	options?: ClassifyOptions,
 ): SyncStateResult {
 	logger.debug(
 		{
@@ -187,14 +247,11 @@ function classifyWithoutParent(
 	current: { backlog: NormalizedPayload; jira: NormalizedPayload },
 	backlogSnapshot: Snapshot,
 	jiraSnapshot: Snapshot,
-	options?: {
-		fieldMappings?: FieldMapping[];
-		sprintMapping?: SprintMapping | null;
-	},
+	options?: ClassifyOptions,
 ): SyncStateResult {
 	const { parent: backlogParent = "", ...backlog } = current.backlog;
 	const { parent: jiraParent = "", ...jira } = current.jira;
-	const inner = classifySyncState(
+	const inner = classifyAgainstSnapshots(
 		computeHash(backlog),
 		computeHash(jira),
 		backlogSnapshot,

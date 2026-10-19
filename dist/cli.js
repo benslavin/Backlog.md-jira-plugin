@@ -28861,8 +28861,29 @@ function comparePayloads(a, b) {
   }
   return changes;
 }
+function normalizeDescriptionWhitespace(text) {
+  return text.replace(/\r\n?/g, `
+`).replace(/[ \t]+$/gm, "").replace(/\n{3,}/g, `
+
+`).trim();
+}
+function backlogDescriptionForJira(task) {
+  return task.acceptanceCriteria ? mergeDescriptionWithAc(task.description || "", task.acceptanceCriteria, task.implementationPlan, task.implementationNotes) : task.description || "";
+}
+function compareSides(backlog, jira, backlogJiraDescription) {
+  const sameAssignee = backlog.assignee === jira.assignee || !!backlog.assignee && !!jira.assignee && mapJiraUserToBacklog(jira.assignee)?.toLowerCase() === backlog.assignee;
+  return comparePayloads({
+    ...backlog,
+    description: normalizeDescriptionWhitespace(backlogJiraDescription ?? backlog.description)
+  }, {
+    ...jira,
+    description: normalizeDescriptionWhitespace(jira.description),
+    assignee: sameAssignee ? backlog.assignee : jira.assignee
+  });
+}
 var CANONICAL_STATUS_TOKENS;
 var init_normalizer = __esm(() => {
+  init_assignee_mapping();
   init_field_mapping();
   init_parent_payload();
   init_sprint_payload();
@@ -28987,6 +29008,10 @@ function recordSyncedSnapshots(store, taskId, payloads, source, mappings) {
   const marked = markOwnerValues(payloads[source], payloads[target], mappings, source === "backlog" ? "pull" : "push");
   store.setSnapshot(taskId, source, marked ? computeHash(marked) : syncedHash, marked ?? payloads[source]);
   store.setSnapshot(taskId, target, syncedHash, payloads[target]);
+}
+function recordMatchingSnapshots(store, taskId, payloads) {
+  store.setSnapshot(taskId, "backlog", computeHash(payloads.backlog), payloads.backlog);
+  store.setSnapshot(taskId, "jira", computeHash(payloads.jira), payloads.jira);
 }
 function recordPartialPush(store, taskId, task, issue, failures, mappings = []) {
   const jiraPayload = normalizeJiraIssue(issue);
@@ -32389,6 +32414,8 @@ When conflicts occur (both sides modified), the plugin will:
 - **prefer-backlog**: Always use Backlog.md version
 - **prefer-jira**: Always use Jira version
 
+A task whose Backlog and Jira content already match is not a conflict, even if both sides changed: its snapshots are refreshed without writing anything, and the summary counts it as \`Rebaselined\`.
+
 Configure via:
 \`\`\`bash
 backlog-jira configure --step conflict                                  # interactive
@@ -33520,6 +33547,17 @@ init_logger();
 init_normalizer();
 init_sprint_payload();
 function classifySyncState(currentBacklogHash, currentJiraHash, backlogSnapshot, jiraSnapshot, currentPayloads, options) {
+  const result = classifyAgainstSnapshots(currentBacklogHash, currentJiraHash, backlogSnapshot, jiraSnapshot, currentPayloads, options);
+  if (!currentPayloads || result.state === "InSync" || result.state === "Unknown") {
+    return result;
+  }
+  const differing = compareSides(currentPayloads.backlog, currentPayloads.jira, options?.backlogJiraDescription);
+  if (differing.length > 0)
+    return result;
+  logger.debug({ classified: result.state }, "Both sides hold the same content; snapshots are stale");
+  return { ...result, state: "InSync", rebaseline: true };
+}
+function classifyAgainstSnapshots(currentBacklogHash, currentJiraHash, backlogSnapshot, jiraSnapshot, currentPayloads, options) {
   logger.debug({
     currentBacklogHash,
     currentJiraHash,
@@ -33592,7 +33630,7 @@ function lacksParent(snapshot) {
 function classifyWithoutParent(current, backlogSnapshot, jiraSnapshot, options) {
   const { parent: backlogParent = "", ...backlog } = current.backlog;
   const { parent: jiraParent = "", ...jira } = current.jira;
-  const inner = classifySyncState(computeHash(backlog), computeHash(jira), backlogSnapshot, jiraSnapshot, { backlog, jira }, options);
+  const inner = classifyAgainstSnapshots(computeHash(backlog), computeHash(jira), backlogSnapshot, jiraSnapshot, { backlog, jira }, options);
   let backlogChanged = inner.state === "NeedsPush" || inner.state === "Conflict";
   let jiraChanged = inner.state === "NeedsPull" || inner.state === "Conflict";
   if (backlogParent !== jiraParent) {
@@ -33766,6 +33804,7 @@ async function pull(options = {}) {
     importedLinks: [],
     failed: [],
     skipped: [],
+    rebaselined: [],
     warnings: []
   };
   let sprints = null;
@@ -33835,7 +33874,7 @@ async function pull(options = {}) {
         const batch = mapped.slice(i, i + batchSize);
         const promises = batch.map(async (taskId) => {
           try {
-            await pullTask(taskId, {
+            const outcome = await pullTask(taskId, {
               store,
               backlog,
               jira,
@@ -33845,8 +33884,12 @@ async function pull(options = {}) {
               force: options.force || false,
               dryRun: options.dryRun || false
             });
-            result.pulled.push(taskId);
-            logger.info({ taskId }, "Successfully pulled task");
+            if (outcome === "rebaselined") {
+              result.rebaselined.push(taskId);
+            } else {
+              result.pulled.push(taskId);
+              logger.info({ taskId }, "Successfully pulled task");
+            }
           } catch (error) {
             const errorMsg = error instanceof Error ? error.message : String(error);
             result.failed.push({ taskId, error: errorMsg });
@@ -33894,8 +33937,8 @@ async function getTaskIds(options, backlog, jira, store, sprints, parents) {
       const backlogHash = computeHash(backlogPayload);
       const jiraHash = computeHash(jiraPayload);
       const snapshots = store.getSnapshots(taskId);
-      const state = classifySyncState(backlogHash, jiraHash, snapshots.backlog, snapshots.jira, { backlog: backlogPayload, jira: jiraPayload });
-      if (state.state === "NeedsPull" || state.state === "InSync" && sprints && sprintNeedsPull(sprints, taskId, issue) || state.state === "InSync" && parents && parentNeedsPull(parents, task, issue, snapshots.backlog)) {
+      const state = classifySyncState(backlogHash, jiraHash, snapshots.backlog, snapshots.jira, { backlog: backlogPayload, jira: jiraPayload }, { backlogJiraDescription: backlogDescriptionForJira(task) });
+      if (state.state === "NeedsPull" || state.rebaseline || state.state === "InSync" && sprints && sprintNeedsPull(sprints, taskId, issue) || state.state === "InSync" && parents && parentNeedsPull(parents, task, issue, snapshots.backlog)) {
         needsPull.push(taskId);
       }
     } catch (error) {
@@ -33993,7 +34036,7 @@ async function pullTask(taskId, context) {
   const jiraHash = computeHash(jiraPayload);
   if (!force) {
     const snapshots = store.getSnapshots(taskId);
-    const state = classifySyncState(backlogHash, jiraHash, snapshots.backlog, snapshots.jira, { backlog: backlogPayload, jira: jiraPayload });
+    const state = classifySyncState(backlogHash, jiraHash, snapshots.backlog, snapshots.jira, { backlog: backlogPayload, jira: jiraPayload }, { backlogJiraDescription: backlogDescriptionForJira(task) });
     if (state.state === "Conflict") {
       throw new Error(`Conflict detected. Use --force to override or run 'backlog-jira sync' to resolve`);
     }
@@ -34006,10 +34049,20 @@ async function pullTask(taskId, context) {
         store.setSnapshot(taskId, "backlog", computeHash(updatedPayload), updatedPayload);
         store.setSnapshot(taskId, "jira", jiraHash, jiraPayload);
         logger.info({ taskId }, "Pulled task parent");
-        return;
+        return "pulled";
+      }
+      if (state.rebaseline) {
+        if (!dryRun) {
+          recordMatchingSnapshots(store, taskId, {
+            backlog: backlogPayload,
+            jira: jiraPayload
+          });
+        }
+        logger.info({ taskId }, "Matching content; snapshots refreshed");
+        return "rebaselined";
       }
       logger.info({ taskId }, "Task already in sync, skipping");
-      return;
+      return "pulled";
     }
   }
   const projectKey = issue.key.split("-")[0];
@@ -34069,6 +34122,7 @@ async function pullTask(taskId, context) {
     }
     logger.info({ taskId, jiraKey: mapping.jiraKey }, "Updated Backlog task from Jira");
   }
+  return "pulled";
 }
 async function pullSprint(sprints, taskId, issue, force = false) {
   try {
@@ -34533,7 +34587,8 @@ async function push(options = {}) {
     success: true,
     pushed: [],
     failed: [],
-    skipped: []
+    skipped: [],
+    rebaselined: []
   };
   try {
     const sprints = options.sprintContext !== undefined ? options.sprintContext : await createSprintPushContext(sprintMapping, jira, {
@@ -34555,7 +34610,7 @@ async function push(options = {}) {
       const batch = taskIds.slice(i, i + batchSize);
       const promises = batch.map(async (taskId) => {
         try {
-          await pushTask(taskId, {
+          const outcome = await pushTask(taskId, {
             store,
             backlog,
             jira,
@@ -34567,8 +34622,12 @@ async function push(options = {}) {
             force: options.force || false,
             dryRun: options.dryRun || false
           });
-          result.pushed.push(taskId);
-          logger.info({ taskId }, "Successfully pushed task");
+          if (outcome === "rebaselined") {
+            result.rebaselined.push(taskId);
+          } else {
+            result.pushed.push(taskId);
+            logger.info({ taskId }, "Successfully pushed task");
+          }
         } catch (error) {
           const errorMsg = error instanceof Error ? error.message : String(error);
           result.failed.push({
@@ -34610,8 +34669,8 @@ async function getTaskIds2(options, backlog, jira, store, sprints) {
       const backlogHash = computeHash(backlogPayload);
       const jiraHash = computeHash(jiraPayload);
       const snapshots = store.getSnapshots(taskId);
-      const state = classifySyncState(backlogHash, jiraHash, snapshots.backlog, snapshots.jira, { backlog: backlogPayload, jira: jiraPayload });
-      if (state.state === "NeedsPush" || state.state === "InSync" && sprints && sprintNeedsPush(taskId)) {
+      const state = classifySyncState(backlogHash, jiraHash, snapshots.backlog, snapshots.jira, { backlog: backlogPayload, jira: jiraPayload }, { backlogJiraDescription: backlogDescriptionForJira(task) });
+      if (state.state === "NeedsPush" || state.rebaseline || state.state === "InSync" && sprints && sprintNeedsPush(taskId)) {
         needsPush.push(taskId);
       }
     } catch (error) {
@@ -34644,9 +34703,19 @@ async function pushTask(taskId, context) {
     const jiraHash = computeHash(jiraPayload);
     if (!force) {
       const snapshots = store.getSnapshots(taskId);
-      const state = classifySyncState(backlogHash, jiraHash, snapshots.backlog, snapshots.jira, { backlog: backlogPayload, jira: jiraPayload });
+      const state = classifySyncState(backlogHash, jiraHash, snapshots.backlog, snapshots.jira, { backlog: backlogPayload, jira: jiraPayload }, { backlogJiraDescription: backlogDescriptionForJira(task) });
       if (state.state === "Conflict") {
         throw new Error(`Conflict detected. Use --force to override or run 'backlog-jira sync' to resolve`);
+      }
+      if (state.rebaseline && !(sprints && sprintNeedsPush(taskId))) {
+        if (!dryRun) {
+          recordMatchingSnapshots(store, taskId, {
+            backlog: backlogPayload,
+            jira: jiraPayload
+          });
+        }
+        logger.info({ taskId }, "Matching content; snapshots refreshed");
+        return "rebaselined";
       }
     }
     const updates = await buildJiraUpdates(task, issue, jira, projectKey, overridden);
@@ -34789,6 +34858,7 @@ async function pushTask(taskId, context) {
       logger.info({ taskId, jiraKey: issue.key }, "Created new Jira issue");
     }
   }
+  return "pushed";
 }
 async function pushSprint(sprints, taskId, issue, force = false) {
   try {
@@ -34811,7 +34881,7 @@ async function buildJiraUpdates(task, currentIssue, jiraClient, projectKey, over
   if (task.title !== currentIssue.summary) {
     fields.summary = task.title;
   }
-  const taskDescriptionWithAc = task.acceptanceCriteria ? mergeDescriptionWithAc(task.description || "", task.acceptanceCriteria, task.implementationPlan, task.implementationNotes) : task.description || "";
+  const taskDescriptionWithAc = backlogDescriptionForJira(task);
   const currentJiraDescClean = stripAcceptanceCriteriaFromDescription(currentIssue.description || "");
   const taskDescClean = stripAcceptanceCriteriaFromDescription(task.description || "");
   if (taskDescClean !== currentJiraDescClean || JSON.stringify(task.acceptanceCriteria) !== JSON.stringify(normalizeBacklogTask(task).acceptanceCriteria)) {
@@ -34997,7 +35067,7 @@ async function getStatus(options) {
         const currentBacklogHash = computeHash(backlogPayload);
         const currentJiraHash = computeHash(jiraPayload);
         const snapshots = store.getSnapshots(taskId);
-        const stateResult = classifySyncState(currentBacklogHash, currentJiraHash, snapshots.backlog, snapshots.jira, { backlog: backlogPayload, jira: jiraPayload });
+        const stateResult = classifySyncState(currentBacklogHash, currentJiraHash, snapshots.backlog, snapshots.jira, { backlog: backlogPayload, jira: jiraPayload }, { backlogJiraDescription: backlogDescriptionForJira(task) });
         let changedFields;
         if (stateResult.state !== "InSync" && snapshots.backlog && snapshots.jira) {
           const baseBacklogPayload = JSON.parse(snapshots.backlog.payload);
@@ -35634,6 +35704,7 @@ async function sync(options = {}) {
     conflicts: [],
     failed: [],
     skipped: [],
+    rebaselined: [],
     hints: [],
     warnings: []
   };
@@ -35672,7 +35743,9 @@ async function sync(options = {}) {
               taskId,
               resolution: outcome.resolution
             });
-          } else if (outcome.type === "skipped") {
+          } else if (outcome.reason === REBASELINED) {
+            result.rebaselined.push(taskId);
+          } else {
             result.skipped.push(taskId);
           }
           logger.info({ taskId, outcome }, "Sync task completed");
@@ -35721,6 +35794,7 @@ ${error.message}` : minimal
   }
   return result;
 }
+var REBASELINED = "Matching content; snapshots refreshed";
 function getTaskIds3(options, store) {
   if (options.all) {
     const mappings = store.getAllMappings();
@@ -35755,7 +35829,11 @@ async function syncTask(taskId, context) {
   const backlogHash = computeHash(backlogPayload);
   const jiraHash = computeHash(jiraPayload);
   const snapshots = store.getSnapshots(taskId);
-  const state = classifySyncState(backlogHash, jiraHash, snapshots.backlog, snapshots.jira, { backlog: backlogPayload, jira: jiraPayload }, { fieldMappings, sprintMapping: sprints?.mapping ?? null });
+  const state = classifySyncState(backlogHash, jiraHash, snapshots.backlog, snapshots.jira, { backlog: backlogPayload, jira: jiraPayload }, {
+    fieldMappings,
+    sprintMapping: sprints?.mapping ?? null,
+    backlogJiraDescription: backlogDescriptionForJira(task)
+  });
   logger.debug({ taskId, state: state.state }, "Sync state classified");
   switch (state.state) {
     case "InSync":
@@ -35769,6 +35847,16 @@ async function syncTask(taskId, context) {
           }));
         }
         return { type: "synced", direction: "pull" };
+      }
+      if (state.rebaseline) {
+        if (!dryRun) {
+          recordMatchingSnapshots(store, taskId, {
+            backlog: backlogPayload,
+            jira: jiraPayload
+          });
+        }
+        logger.info({ taskId }, REBASELINED);
+        return { type: "skipped", reason: REBASELINED };
       }
       logger.info({ taskId }, "Already in sync");
       return { type: "skipped", reason: "Already in sync" };
@@ -36485,6 +36573,9 @@ Push Results:`);
     console.log(`  Pushed: ${result.pushed.length}`);
     console.log(`  Failed: ${result.failed.length}`);
     console.log(`  Skipped: ${result.skipped.length}`);
+    if (result.rebaselined.length > 0) {
+      console.log(`  Rebaselined: ${result.rebaselined.length} (matching content${options.dryRun ? "" : "; snapshots refreshed"})`);
+    }
     if (result.failed.length > 0) {
       console.log(`
 Failures:`);
@@ -36521,6 +36612,9 @@ Pull Results:`);
     }
     console.log(`  Failed: ${result.failed.length}`);
     console.log(`  Skipped: ${result.skipped.length}`);
+    if (result.rebaselined.length > 0) {
+      console.log(`  Rebaselined: ${result.rebaselined.length} (matching content${options.dryRun ? "" : "; snapshots refreshed"})`);
+    }
     if (result.warnings.length > 0) {
       console.log(`
 Warnings:`);
@@ -36557,6 +36651,9 @@ Sync Results:`);
     console.log(`  Conflicts: ${result.conflicts.length}`);
     console.log(`  Failed: ${result.failed.length}`);
     console.log(`  Skipped: ${result.skipped.length}`);
+    if (result.rebaselined.length > 0) {
+      console.log(`  Rebaselined: ${result.rebaselined.length} (matching content${options.dryRun ? "" : "; snapshots refreshed"})`);
+    }
     if (result.conflicts.length > 0) {
       console.log(`
 Conflicts:`);

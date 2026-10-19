@@ -21,11 +21,13 @@ import {
 	MappedFieldPushError,
 	createIssueWithMappedFields,
 	getOverriddenCoreFields,
+	recordMatchingSnapshots,
 	recordPartialPush,
 	recordSyncedSnapshots,
 	updateIssueWithMappedFields,
 } from "../utils/mapped-field-sync.ts";
 import {
+	backlogDescriptionForJira,
 	computeHash,
 	mergeDescriptionWithAc,
 	normalizeBacklogTask,
@@ -88,6 +90,11 @@ export interface PushResult {
 		mappedFieldError?: MappedFieldPushError;
 	}>;
 	skipped: string[];
+	/**
+	 * Tasks whose sides already held the same content but whose snapshots
+	 * were stale: snapshots refreshed (not under --dry-run), nothing pushed
+	 */
+	rebaselined: string[];
 }
 
 /**
@@ -140,6 +147,7 @@ export async function push(options: PushOptions = {}): Promise<PushResult> {
 		pushed: [],
 		failed: [],
 		skipped: [],
+		rebaselined: [],
 	};
 
 	try {
@@ -177,7 +185,7 @@ export async function push(options: PushOptions = {}): Promise<PushResult> {
 			const batch = taskIds.slice(i, i + batchSize);
 			const promises = batch.map(async (taskId) => {
 				try {
-					await pushTask(taskId, {
+					const outcome = await pushTask(taskId, {
 						store,
 						backlog,
 						jira,
@@ -190,8 +198,12 @@ export async function push(options: PushOptions = {}): Promise<PushResult> {
 						dryRun: options.dryRun || false,
 					});
 
-					result.pushed.push(taskId);
-					logger.info({ taskId }, "Successfully pushed task");
+					if (outcome === "rebaselined") {
+						result.rebaselined.push(taskId);
+					} else {
+						result.pushed.push(taskId);
+						logger.info({ taskId }, "Successfully pushed task");
+					}
 				} catch (error) {
 					const errorMsg =
 						error instanceof Error ? error.message : String(error);
@@ -269,10 +281,13 @@ async function getTaskIds(
 				snapshots.backlog,
 				snapshots.jira,
 				{ backlog: backlogPayload, jira: jiraPayload },
+				{ backlogJiraDescription: backlogDescriptionForJira(task) },
 			);
 
 			if (
 				state.state === "NeedsPush" ||
+				// Matching content with stale snapshots is rebaselined
+				state.rebaseline ||
 				// Milestones are not part of the synced payload
 				(state.state === "InSync" && sprints && sprintNeedsPush(taskId))
 			) {
@@ -303,7 +318,7 @@ async function pushTask(
 		force: boolean;
 		dryRun: boolean;
 	},
-): Promise<void> {
+): Promise<"pushed" | "rebaselined"> {
 	const {
 		store,
 		backlog,
@@ -341,12 +356,26 @@ async function pushTask(
 				snapshots.backlog,
 				snapshots.jira,
 				{ backlog: backlogPayload, jira: jiraPayload },
+				{ backlogJiraDescription: backlogDescriptionForJira(task) },
 			);
 
 			if (state.state === "Conflict") {
 				throw new Error(
 					`Conflict detected. Use --force to override or run 'backlog-jira sync' to resolve`,
 				);
+			}
+
+			// Same content on both sides: only the snapshots were stale. A
+			// milestone move the sprint registry still has pending is pushed.
+			if (state.rebaseline && !(sprints && sprintNeedsPush(taskId))) {
+				if (!dryRun) {
+					recordMatchingSnapshots(store, taskId, {
+						backlog: backlogPayload,
+						jira: jiraPayload,
+					});
+				}
+				logger.info({ taskId }, "Matching content; snapshots refreshed");
+				return "rebaselined";
 			}
 		}
 
@@ -633,6 +662,7 @@ async function pushTask(
 			logger.info({ taskId, jiraKey: issue.key }, "Created new Jira issue");
 		}
 	}
+	return "pushed";
 }
 
 /**
@@ -693,15 +723,7 @@ export async function buildJiraUpdates(
 	}
 
 	// Description with AC, plan, and notes
-	// Always merge description with AC when task has AC
-	const taskDescriptionWithAc = task.acceptanceCriteria
-		? mergeDescriptionWithAc(
-				task.description || "",
-				task.acceptanceCriteria,
-				task.implementationPlan,
-				task.implementationNotes,
-			)
-		: task.description || "";
+	const taskDescriptionWithAc = backlogDescriptionForJira(task);
 
 	// Compare with current Jira description (also strip AC for fair comparison)
 	const currentJiraDescClean = stripAcceptanceCriteriaFromDescription(

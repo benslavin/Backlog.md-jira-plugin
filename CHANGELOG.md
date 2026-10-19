@@ -4,6 +4,10 @@ This project is a fork of [eciuca/Backlog.md-jira-plugin](https://github.com/eci
 
 ## [Unreleased]
 
+### Fixed
+
+- `sync`, `pull` and `push` treat a task as in sync when its current Backlog and Jira content already match, even if its snapshots say otherwise. Each side used to be compared only with its own last snapshot, so a change in how payloads are computed (a parser fix such as 0.3.4's, a normalizer change, a new mapped field) made every affected task look changed and rewrote Jira with identical content, notifying its watchers, and the same edit made on both sides (such as the same status) was reported as a conflict. Such tasks now only have their snapshots refreshed, with nothing written to Jira or to the task file, and are counted as `Rebaselined` in the summary (reported without saving under `--dry-run`). A future parser or normalizer change therefore no longer causes a one-time burst of pushes for tasks whose content already matches. Descriptions are compared as push writes them to Jira (with acceptance criteria, plan and notes) with whitespace normalized: line endings, trailing spaces and runs of blank lines. Other differences, including Markdown/Jira conversion differences, still sync as before. `pull --force` and `push --force` still always write. This also stops the needless push of an imported or pulled task with acceptance criteria on the next `sync` when no field mappings are configured.
+
 ## [0.3.4] - 2026-10-19
 
 ### Fixed
